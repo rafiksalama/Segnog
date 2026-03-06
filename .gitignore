@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.secrets.toml
+.pytest_cache/
+dist/
+build/
+.service.pid
+.service.log
+.venv/
+data/
+benchmarks/
+scripts/

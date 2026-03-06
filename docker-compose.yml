@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  memory-service:
+    build: .
+    ports:
+      - "50051:50051"   # gRPC
+      - "9000:9000"     # REST
+    environment:
+      - MEMORY_SERVICE_DRAGONFLY__URL=redis://dragonfly:6379
+      - MEMORY_SERVICE_FALKORDB__URL=redis://falkordb:6379
+      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${OPENROUTER_API_KEY}
+      - MEMORY_SERVICE_LLM__API_KEY=${OPENROUTER_API_KEY}
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

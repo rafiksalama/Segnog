@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package memory.v1;
+
+option python_package = "memory_service.generated.memory.v1";
+
+// Scope identifies the tenant/workflow context for all operations.
+message Scope {
+  string group_id = 1;
+  string workflow_id = 2;
+}
+
+// Pagination for list operations.
+message Pagination {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+// Generic key-value metadata.
+message Metadata {
+  map<string, string> fields = 1;
+}

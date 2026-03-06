@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package memory.v1;
+
+import "memory/v1/common.proto";
+
+option python_package = "memory_service.generated.memory.v1";
+
+service EventsService {
+  // Log an event to the DragonflyDB stream.
+  rpc LogEvent(LogEventRequest) returns (LogEventResponse);
+
+  // Get recent events from the stream (newest first).
+  rpc GetRecentEvents(GetRecentEventsRequest) returns (GetRecentEventsResponse);
+
+  // Search events by query string (filters within stream).
+  rpc SearchEvents(SearchEventsRequest) returns (SearchEventsResponse);
+}
+
+// ---------- LogEvent ----------
+
+message LogEventRequest {
+  Scope scope = 1;
+  string event_type = 2;
+  string event_data_json = 3;     // JSON-encoded event data
+  string context = 4;             // Optional context string
+}
+
+message LogEventResponse {
+  string event_id = 1;
+}
+
+// ---------- GetRecentEvents ----------
+
+message GetRecentEventsRequest {
+  Scope scope = 1;
+  int32 count = 2;                // Default: 10
+  string event_type_filter = 3;   // Optional type filter
+}
+
+message GetRecentEventsResponse {
+  repeated EventRecord events = 1;
+}
+
+// ---------- SearchEvents ----------
+
+message SearchEventsRequest {
+  Scope scope = 1;
+  string query = 2;
+  repeated string event_types = 3;
+  int32 limit = 4;
+}
+
+message SearchEventsResponse {
+  repeated EventRecord events = 1;
+}
+
+// ---------- Shared ----------
+
+message EventRecord {
+  string event_id = 1;
+  string stream_id = 2;
+  string event_type = 3;
+  double timestamp = 4;
+  string group_id = 5;
+  string workflow_id = 6;
+  string data_json = 7;          // JSON-encoded event data
+}

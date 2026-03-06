@@ -1,0 +1,48 @@
+[default]
+service_name = "agent-memory-service"
+version = "0.1.0"
+
+# gRPC server
+[default.grpc]
+port = 50051
+max_workers = 10
+
+# REST server (FastAPI)
+[default.rest]
+host = "0.0.0.0"
+port = 9000
+
+# DragonflyDB (short-term memory)
+[default.dragonfly]
+url = "redis://localhost:6381"
+default_group_id = "framework"
+default_workflow_id = "default"
+
+# FalkorDB (long-term memory: episodes, knowledge, artifacts)
+[default.falkordb]
+url = "redis://localhost:6380"
+graph_name = "episode_store"
+
+# Embeddings
+[default.embeddings]
+model = "qwen/qwen3-embedding-8b"
+base_url = "https://openrouter.ai/api/v1"
+
+# LLM (for smart operations)
+[default.llm]
+flash_model = "x-ai/grok-4.1-fast"
+base_url = "https://openrouter.ai/api/v1"
+
+# DSPy (for knowledge/artifact extraction)
+[default.dspy]
+models = [
+    "deepseek/deepseek-v3.2",
+    "x-ai/grok-4.1-fast",
+]
+
+# Background worker (REM sleep cycles)
+[default.background]
+enabled = true
+interval_seconds = 60
+batch_size = 5
+min_episodes_for_processing = 3

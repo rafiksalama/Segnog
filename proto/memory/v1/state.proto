@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package memory.v1;
+
+import "memory/v1/common.proto";
+
+option python_package = "memory_service.generated.memory.v1";
+
+service StateService {
+  // Persist agent execution state to DragonflyDB.
+  rpc PersistExecutionState(PersistExecutionStateRequest) returns (PersistExecutionStateResponse);
+
+  // Get current execution state.
+  rpc GetExecutionState(GetExecutionStateRequest) returns (GetExecutionStateResponse);
+
+  // Update tool usage statistics.
+  rpc UpdateToolStats(UpdateToolStatsRequest) returns (UpdateToolStatsResponse);
+
+  // Get formatted tool statistics.
+  rpc GetToolStats(GetToolStatsRequest) returns (GetToolStatsResponse);
+
+  // Get composite memory context (events + state formatted for prompt).
+  rpc GetMemoryContext(GetMemoryContextRequest) returns (GetMemoryContextResponse);
+}
+
+// ---------- PersistExecutionState ----------
+
+message PersistExecutionStateRequest {
+  Scope scope = 1;
+  string state_description = 2;
+  int32 iteration = 3;
+  string plan_json = 4;          // Optional: JSON-encoded plan
+  string judge_json = 5;         // Optional: JSON-encoded judge data
+}
+
+message PersistExecutionStateResponse {
+  bool success = 1;
+}
+
+// ---------- GetExecutionState ----------
+
+message GetExecutionStateRequest {
+  Scope scope = 1;
+}
+
+message GetExecutionStateResponse {
+  string state_description = 1;
+  int32 iteration = 2;
+  string plan_json = 3;
+  string judge_json = 4;
+  bool found = 5;
+}
+
+// ---------- UpdateToolStats ----------
+
+message UpdateToolStatsRequest {
+  Scope scope = 1;
+  string tool_name = 2;
+  bool success = 3;
+  int32 duration_ms = 4;
+  string state_description = 5;  // Current state for keying
+}
+
+message UpdateToolStatsResponse {
+  bool success = 1;
+}
+
+// ---------- GetToolStats ----------
+
+message GetToolStatsRequest {
+  Scope scope = 1;
+  repeated string tool_names = 2; // Empty = all tools
+}
+
+message GetToolStatsResponse {
+  string formatted_stats = 1;    // Human-readable formatted stats
+  string raw_stats_json = 2;    // JSON-encoded raw stats
+}
+
+// ---------- GetMemoryContext ----------
+
+message GetMemoryContextRequest {
+  Scope scope = 1;
+  int32 event_limit = 2;        // Default: 5
+}
+
+message GetMemoryContextResponse {
+  string formatted_context = 1;  // Ready for prompt injection
+}

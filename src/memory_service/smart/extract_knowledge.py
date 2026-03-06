@@ -1,0 +1,130 @@
+"""
+Knowledge Extraction — DSPy-powered post-mission knowledge mining.
+
+Extracts structured knowledge entries (facts, patterns, insights)
+from completed mission data.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+import dspy
+
+from ..llm.dspy_adapter import configure_dspy_lm, adapter
+from ..dspy_signatures.knowledge_signature import KnowledgeExtractionSignature
+
+logger = logging.getLogger(__name__)
+
+
+async def extract_knowledge(
+    mission_data: Dict[str, Any],
+    reflection: str,
+    model: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Extract structured knowledge entries from a completed mission using DSPy.
+
+    Args:
+        mission_data: Dict with task, status, output, state, iterations, plan, context.
+        reflection: Generated reflection text.
+        model: Flash model identifier.
+
+    Returns:
+        List of knowledge entry dicts with content, knowledge_type, labels, confidence.
+    """
+    task = mission_data.get("task", "")
+    status = mission_data.get("status", "")
+    full_output = mission_data.get("output", "")
+    state = mission_data.get("state", {})
+    iterations = mission_data.get("iterations", 0)
+
+    mission_outcome = f"Status: {status} | Iterations: {iterations}"
+
+    # Build execution trace
+    execution_context = mission_data.get("context", "")
+    state_outputs = state.get("outputs", []) if isinstance(state, dict) else []
+    state_progression_parts = []
+    for entry in state_outputs:
+        it = entry.get("iteration", "?")
+        output_text = str(entry.get("output", ""))
+        if output_text:
+            state_progression_parts.append(f"--- Iteration {it} ---\n{output_text}")
+
+    state_progression = "\n\n".join(state_progression_parts)
+
+    trace_parts = []
+    if execution_context:
+        trace_parts.append("## Execution Context (Tool Calls & Results)\n" + execution_context)
+    if state_progression:
+        trace_parts.append("## Agent Reasoning Per Iteration\n" + state_progression)
+
+    state_desc = state.get("state_description", "") if isinstance(state, dict) else ""
+    if state_desc:
+        trace_parts.append(f"## Final State\n{state_desc}")
+
+    execution_trace = "\n\n".join(trace_parts) or "No execution trace available."
+
+    # Cap to avoid token overflow
+    MAX_TRACE = 20000
+    if len(execution_trace) > MAX_TRACE:
+        keep_start = 5000
+        keep_end = MAX_TRACE - keep_start - 50
+        execution_trace = (
+            execution_trace[:keep_start]
+            + "\n\n... [middle truncated] ...\n\n"
+            + execution_trace[-keep_end:]
+        )
+
+    # Build plan execution
+    plan_data = mission_data.get("plan")
+    plan_execution = "No plan created."
+    if plan_data and isinstance(plan_data, dict):
+        items = plan_data.get("items", [])
+        plan_lines = [f"Goal: {plan_data.get('goal', 'N/A')}"]
+        for item in items:
+            s = item.get("status", "pending")
+            icon = {
+                "completed": "+", "in_progress": ">",
+                "blocked": "!", "skipped": "-",
+            }.get(s, " ")
+            desc = item.get("description", "")
+            plan_lines.append(f"  [{icon}] {desc}")
+        plan_execution = "\n".join(plan_lines)
+
+    full_report = full_output or "No output produced."
+    MAX_REPORT = 10000
+    if len(full_report) > MAX_REPORT:
+        full_report = full_report[:MAX_REPORT] + "\n\n... [truncated]"
+
+    reflection_text = reflection or "No reflection available."
+
+    try:
+        lm = configure_dspy_lm(model=model, temperature=0.3, max_tokens=4096)
+        predictor = dspy.Predict(KnowledgeExtractionSignature)
+
+        with dspy.context(lm=lm, adapter=adapter):
+            result = predictor(
+                mission_task=task,
+                mission_outcome=mission_outcome,
+                full_report=full_report,
+                execution_trace=execution_trace,
+                plan_execution=plan_execution,
+                reflection=reflection_text,
+            )
+
+        extraction = result.extraction
+        valid = []
+        for entry in extraction.entries:
+            valid.append({
+                "content": str(entry.content)[:500],
+                "knowledge_type": entry.knowledge_type,
+                "labels": list(entry.labels)[:7],
+                "confidence": min(1.0, max(0.0, float(entry.confidence))),
+            })
+
+        logger.info(f"Extracted {len(valid)} knowledge entries via DSPy")
+        return valid
+
+    except Exception as e:
+        logger.error(f"Knowledge extraction failed: {e}")
+        return []

@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package memory.v1;
+
+import "memory/v1/common.proto";
+
+option python_package = "memory_service.generated.memory.v1";
+
+service EpisodesService {
+  // Store an episode with embedding in FalkorDB.
+  rpc StoreEpisode(StoreEpisodeRequest) returns (StoreEpisodeResponse);
+
+  // Vector similarity search on episodes.
+  rpc SearchEpisodes(SearchEpisodesRequest) returns (SearchEpisodesResponse);
+}
+
+// ---------- StoreEpisode ----------
+
+message StoreEpisodeRequest {
+  Scope scope = 1;
+  string content = 2;
+  string metadata_json = 3;      // JSON-encoded metadata dict
+  string episode_type = 4;       // "raw", "reflection", "compressed"
+}
+
+message StoreEpisodeResponse {
+  string uuid = 1;
+}
+
+// ---------- SearchEpisodes ----------
+
+message SearchEpisodesRequest {
+  Scope scope = 1;
+  string query = 2;
+  int32 top_k = 3;               // Default: 20
+  float min_score = 4;           // Default: 0.55
+  string episode_type_filter = 5; // Optional type filter
+}
+
+message SearchEpisodesResponse {
+  repeated EpisodeRecord episodes = 1;
+}
+
+// ---------- Shared ----------
+
+message EpisodeRecord {
+  string uuid = 1;
+  string content = 2;
+  string episode_type = 3;
+  string metadata_json = 4;
+  double created_at = 5;
+  float score = 6;
+}
