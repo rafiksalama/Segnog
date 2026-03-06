@@ -444,6 +444,143 @@ class MemoryServiceHandler:
         return result
 
     # =========================================================================
+    # Observe (single-endpoint memory interface)
+    # =========================================================================
+
+    async def observe(self, req: dict) -> dict:
+        """
+        Observe endpoint — accept an observation, judge it, store it,
+        and return relevant context automatically.
+
+        Input keys:
+            session_id: str — identifies the session (maps to group_id)
+            content: str — the observation text
+            timestamp: str (optional) — ISO or epoch timestamp
+            source: str (optional) — who generated this
+            metadata: dict (optional) — extra context
+
+        Returns:
+            episode_uuid, observation_type, context (episodes + knowledge)
+        """
+        import asyncio
+        from ..smart.judge_observation import judge_observation
+
+        session_id = req.get("session_id", "default")
+        content = req.get("content", "")
+        timestamp = req.get("timestamp")
+        source = req.get("source", "")
+        metadata = dict(req.get("metadata") or {})
+        model = req.get("model")
+
+        if timestamp:
+            metadata["date_time"] = timestamp
+        if source:
+            metadata["source"] = source
+
+        # Set scope
+        self._dragonfly.set_scope(group_id=session_id, workflow_id=session_id)
+        self._episode_store._group_id = session_id
+        self._knowledge_store._group_id = session_id
+
+        # Step 1: Judge the observation
+        try:
+            judge_result = await judge_observation(content, source, model)
+        except Exception as e:
+            logger.warning(f"Observation judge failed: {e}")
+            judge_result = {
+                "observation_type": "chat",
+                "storage_tier": "both",
+                "search_query": content,
+                "search_labels": [],
+                "importance": "medium",
+            }
+
+        obs_type = judge_result["observation_type"]
+        tier = judge_result["storage_tier"]
+        search_query = judge_result["search_query"]
+        search_labels = judge_result["search_labels"]
+        importance = judge_result["importance"]
+
+        importance_params = {
+            "low":    {"top_k": 5,  "min_score": 0.60},
+            "medium": {"top_k": 10, "min_score": 0.55},
+            "high":   {"top_k": 15, "min_score": 0.50},
+        }
+        params = importance_params.get(importance, importance_params["medium"])
+
+        # Step 2: Store
+        episode_uuid = ""
+        embedding = None
+
+        if tier in ("short_term", "both"):
+            try:
+                await self._dragonfly.log_event(obs_type, {
+                    "content": content,
+                    **(req.get("metadata") or {}),
+                })
+            except Exception as e:
+                logger.warning(f"Failed to log short-term event: {e}")
+
+        if tier in ("long_term", "both"):
+            try:
+                embedding = await self._episode_store._embed(content)
+                episode_uuid = await self._episode_store._store_with_embedding(
+                    content=content,
+                    embedding=embedding,
+                    metadata=metadata,
+                    episode_type="raw",
+                    auto_link=True,
+                )
+            except Exception as e:
+                logger.error(f"Failed to store episode: {e}")
+
+        # Step 3: Retrieve
+        episode_results = []
+        knowledge_results = []
+
+        try:
+            if embedding is not None:
+                ep_task = self._episode_store._search_with_embedding(
+                    embedding=embedding,
+                    top_k=params["top_k"],
+                    min_score=params["min_score"],
+                )
+            else:
+                ep_task = self._episode_store.search_episodes(
+                    query=search_query,
+                    top_k=params["top_k"],
+                    min_score=params["min_score"],
+                )
+
+            kn_task = self._knowledge_store.search_hybrid(
+                query=search_query,
+                labels=search_labels if search_labels else None,
+                top_k=5,
+                min_score=0.50,
+            )
+
+            episode_results, knowledge_results = await asyncio.gather(
+                ep_task, kn_task,
+            )
+        except Exception as e:
+            logger.error(f"Retrieval failed: {e}")
+
+        # Filter out the just-stored episode
+        if episode_uuid:
+            episode_results = [
+                e for e in episode_results if e.get("uuid") != episode_uuid
+            ]
+
+        return {
+            "episode_uuid": episode_uuid,
+            "observation_type": obs_type,
+            "context": {
+                "episodes": episode_results,
+                "knowledge": knowledge_results,
+            },
+        }
+
+    # =========================================================================
     # Pipelines (composite operations — reduce round trips)
     # =========================================================================
 

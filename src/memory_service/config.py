@@ -9,7 +9,12 @@ from dynaconf import Dynaconf
 @lru_cache(maxsize=1)
 def get_settings() -> Dynaconf:
     """Load settings from settings.toml + environment overrides."""
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Try source tree first (development), then CWD (Docker / installed package)
+    src_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if os.path.exists(os.path.join(src_root, "settings.toml")):
+        root = src_root
+    else:
+        root = os.getcwd()
     return Dynaconf(
         settings_files=[
             os.path.join(root, "settings.toml"),

@@ -62,3 +62,24 @@ class SearchByEntitiesRequest(BaseModel):
 
 class SearchByEntitiesResponse(BaseModel):
     episodes: List[EpisodeRecord]
+
+
+# ── Observe API ──────────────────────────────────────────────────────────
+
+class ObserveRequest(BaseModel):
+    session_id: str
+    content: str
+    timestamp: Optional[str] = None  # ISO string or epoch, defaults to now
+    source: Optional[str] = None     # who/what generated this observation
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ObserveContext(BaseModel):
+    episodes: List[EpisodeRecord] = []
+    knowledge: List[Dict[str, Any]] = []
+
+
+class ObserveResponse(BaseModel):
+    episode_uuid: str = ""           # empty if short_term only
+    observation_type: str = "chat"
+    context: ObserveContext = ObserveContext()

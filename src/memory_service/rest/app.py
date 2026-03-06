@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines
+from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe
 from .dependencies import setup_backends, teardown_backends
 
 
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(state.router, prefix=prefix, tags=["state"])
     app.include_router(smart.router, prefix=prefix, tags=["smart"])
     app.include_router(pipelines.router, prefix=prefix, tags=["pipelines"])
+    app.include_router(observe.router, prefix=prefix, tags=["observe"])
 
     @app.get("/health")
     async def health():

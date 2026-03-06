@@ -132,6 +132,19 @@ class EpisodeStore:
             UUID of the stored episode.
         """
         embedding = await self._embed(content)
+        return await self._store_with_embedding(
+            content, embedding, metadata, episode_type, auto_link
+        )
+
+    async def _store_with_embedding(
+        self,
+        content: str,
+        embedding: List[float],
+        metadata: Optional[Dict[str, Any]] = None,
+        episode_type: str = "raw",
+        auto_link: bool = True,
+    ) -> str:
+        """Store an episode using a pre-computed embedding vector."""
         episode_uuid = str(uuid4())
         metadata_json = json.dumps(metadata or {})
 
@@ -359,7 +372,23 @@ class EpisodeStore:
             created_at, created_at_iso, score.
         """
         query_embedding = await self._embed(query)
+        return await self._search_with_embedding(
+            query_embedding, top_k, episode_type, min_score,
+            expand_adjacent, expansion_hops, after_time, before_time,
+        )
 
+    async def _search_with_embedding(
+        self,
+        embedding: List[float],
+        top_k: int = 25,
+        episode_type: Optional[str] = None,
+        min_score: float = 0.55,
+        expand_adjacent: bool = False,
+        expansion_hops: int = 1,
+        after_time: Optional[float] = None,
+        before_time: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Vector similarity search using a pre-computed embedding vector."""
         type_filter = "AND e.episode_type = $episode_type" if episode_type else ""
         time_filter = ""
         if after_time is not None:
@@ -386,7 +415,7 @@ class EpisodeStore:
 
         params: Dict[str, Any] = {
             "group_id": self._group_id,
-            "query_vec": query_embedding,
+            "query_vec": embedding,
             "min_score": min_score,
             "top_k": top_k,
         }
@@ -417,7 +446,7 @@ class EpisodeStore:
             rows.append(record)
 
         if not expand_adjacent:
-            logger.debug(f"Search returned {len(rows)} episodes for query: {query[:50]}...")
+            logger.debug(f"Search returned {len(rows)} episodes")
             return rows
 
         # Graph expansion: for each hit, fetch adjacent episodes
@@ -438,7 +467,7 @@ class EpisodeStore:
         combined.sort(key=lambda x: x.get("score", 0), reverse=True)
         logger.debug(
             f"Search returned {len(rows)} + {len(expanded)} expanded "
-            f"= {len(combined)} episodes for query: {query[:50]}..."
+            f"= {len(combined)} episodes"
         )
         return combined
 
