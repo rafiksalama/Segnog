@@ -8,6 +8,8 @@ from ...dto.episodes import (
     EpisodeRecord,
     SearchEpisodesRequest,
     SearchEpisodesResponse,
+    SearchByEntitiesRequest,
+    SearchByEntitiesResponse,
     LinkEpisodesRequest,
     LinkEpisodesResponse,
 )
@@ -56,6 +58,30 @@ async def search_episodes(body: SearchEpisodesRequest, request: Request):
         for r in raw
     ]
     return SearchEpisodesResponse(episodes=episodes)
+
+
+@router.post("/episodes/search/entities", response_model=SearchByEntitiesResponse)
+async def search_by_entities(body: SearchByEntitiesRequest, request: Request):
+    store = get_episode_store(request)
+    store._group_id = body.group_id
+    raw = await store.search_by_entities(
+        entity_names=body.entity_names,
+        top_k=body.top_k,
+    )
+    episodes = [
+        EpisodeRecord(
+            uuid=r.get("uuid", ""),
+            content=r.get("content", ""),
+            episode_type=r.get("episode_type", ""),
+            metadata=r.get("metadata"),
+            created_at=r.get("created_at", 0.0),
+            created_at_iso=r.get("created_at_iso"),
+            score=r.get("score", 0.0),
+            source="entity_search",
+        )
+        for r in raw
+    ]
+    return SearchByEntitiesResponse(episodes=episodes)
 
 
 @router.post("/episodes/link", response_model=LinkEpisodesResponse)

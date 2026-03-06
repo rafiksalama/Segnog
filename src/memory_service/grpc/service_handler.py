@@ -708,6 +708,22 @@ class MemoryServiceHandler:
                 except Exception:
                     pass
 
+        # Step 2c: Extract and link entities
+        try:
+            from ..smart.extract_entities import extract_entities
+            mission_content = f"{task}\n\n{reflection}"
+            entities = await extract_entities(content=mission_content, model=model)
+            if entities:
+                # Link to reflection episode
+                if reflection_uuid:
+                    await self._episode_store.link_entities(reflection_uuid, entities)
+                # Link to source raw episodes
+                for src_uuid in source_uuids:
+                    await self._episode_store.link_entities(src_uuid, entities)
+                logger.info(f"Linked {len(entities)} entities to episodes")
+        except Exception as e:
+            logger.warning(f"Entity extraction failed (non-critical): {e}")
+
         # Step 3: Extract knowledge entries
         knowledge_entries = []
         try:

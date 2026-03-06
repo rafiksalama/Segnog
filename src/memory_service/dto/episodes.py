@@ -52,3 +52,13 @@ class LinkEpisodesRequest(BaseModel):
 
 class LinkEpisodesResponse(BaseModel):
     linked: bool
+
+
+class SearchByEntitiesRequest(BaseModel):
+    group_id: str = "default"
+    entity_names: List[str]
+    top_k: int = 25
+
+
+class SearchByEntitiesResponse(BaseModel):
+    episodes: List[EpisodeRecord]

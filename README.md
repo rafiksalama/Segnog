@@ -283,6 +283,7 @@ All long-term entities live in a single FalkorDB graph:
 ```
 (:Episode) ─[:FOLLOWS]→ (:Episode)                        # temporal chain
 (:Episode) ←[:DERIVED_FROM]─ (:Episode)                    # compressed/reflection → raw
+(:Episode) ─[:MENTIONS]→ (:Entity)                         # entity resolution
 (:Episode) ←[:DERIVED_FROM]─ (:Knowledge) ─[:HAS_LABEL]→ (:Label)
 (:Episode) ←[:DERIVED_FROM]─ (:Artifact)  ─[:HAS_LABEL]→ (:Label)
 ```
@@ -294,6 +295,7 @@ All long-term entities live in a single FalkorDB graph:
 | `Episode` | uuid, group_id, content, episode_type, consolidation_status, metadata, created_at, created_at_iso, embedding | uuid, group_id, episode_type, created_at, consolidation_status |
 | `Knowledge` | uuid, group_id, content, knowledge_type, labels, confidence, source_mission, created_at, embedding | uuid, group_id, knowledge_type, created_at |
 | `Artifact` | uuid, group_id, name, artifact_type, path, description, labels, source_mission, created_at, embedding | uuid, group_id, artifact_type, created_at |
+| `Entity` | name, display_name, entity_type, created_at | name, entity_type |
 | `Label` | name, created_at | name |
 
 **Edge types:**
@@ -303,6 +305,7 @@ All long-term entities live in a single FalkorDB graph:
 | `FOLLOWS` | Episode | Episode | Temporal ordering within a group |
 | `DERIVED_FROM` | Knowledge or Artifact | Episode | Provenance — which reflection this was extracted from |
 | `DERIVED_FROM` | Episode (reflection/compressed) | Episode (raw) | Source traceability — which raw episodes were consolidated |
+| `MENTIONS` | Episode | Entity | Entity resolution — people, places, orgs mentioned in the episode |
 | `HAS_LABEL` | Knowledge or Artifact | Label | Semantic tag association |
 
 Labels are normalized before storage: `"Web Search"` → `"web-search"`, `"web_search"` → `"web-search"`. This deduplication ensures consistent graph traversal.
@@ -311,73 +314,579 @@ Labels are normalized before storage: `"Web Search"` → `"web-search"`, `"web_s
 
 Base URL: `http://localhost:9000/api/v1/memory`
 
+Health check: `GET http://localhost:9000/health` → `{"status": "ok", "service": "agent-memory-service"}`
+
+---
+
 ### Events
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/events` | Log an event |
-| GET | `/events/recent` | Get recent events (newest first) |
-| POST | `/events/search` | Search events by type filter |
+#### `POST /events` — Log an event
+
+```json
+// Request
+{
+  "group_id": "default",         // optional, default "default"
+  "workflow_id": "default",      // optional, default "default"
+  "event_type": "tool_call",     // required
+  "event_data": { ... },         // required, arbitrary JSON
+  "context": ""                  // optional
+}
+
+// Response
+{ "event_id": "1709734800000-0" }
+```
+
+#### `GET /events/recent` — Get recent events
+
+Query params: `group_id`, `workflow_id`, `count` (default 10), `event_type` (optional filter)
+
+```json
+// Response
+{
+  "events": [
+    {
+      "event_id": "...",
+      "stream_id": "...",
+      "event_type": "tool_call",
+      "timestamp": 1709734800.0,
+      "group_id": "default",
+      "workflow_id": "default",
+      "data": { ... }
+    }
+  ]
+}
+```
+
+#### `POST /events/search` — Search events by type
+
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "event_types": ["tool_call", "observation"],
+  "limit": 50
+}
+
+// Response
+{ "events": [ ... ] }
+```
+
+---
 
 ### Episodes
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/episodes` | Store an episode with embedding |
-| POST | `/episodes/search` | Vector similarity search |
-| POST | `/episodes/link` | Create edge between episodes |
+#### `POST /episodes` — Store an episode
+
+```json
+// Request
+{
+  "group_id": "default",
+  "content": "Agent completed the analysis...",  // required
+  "metadata": { "date_time": "2024-06-15" },     // optional
+  "episode_type": "raw"                           // "raw" | "reflection" | "compressed" | "narrative"
+}
+
+// Response
+{ "uuid": "aae036b2-81cb-457a-9422-409c0fa7649e" }
+```
+
+#### `POST /episodes/search` — Vector similarity search
+
+```json
+// Request
+{
+  "group_id": "default",
+  "query": "quarterly sales report",       // required
+  "top_k": 25,
+  "min_score": 0.55,
+  "episode_type_filter": null,             // optional, e.g. "reflection"
+  "expand_adjacent": false,                // graph expansion via FOLLOWS + DERIVED_FROM edges
+  "expansion_hops": 1,
+  "after_time": null,                      // optional, epoch float
+  "before_time": null                      // optional, epoch float
+}
+
+// Response
+{
+  "episodes": [
+    {
+      "uuid": "...",
+      "content": "...",
+      "episode_type": "raw",
+      "metadata": { "date_time": "2024-06-15" },
+      "created_at": 1718409600.0,
+      "created_at_iso": "2024-06-15T00:00:00+00:00",
+      "score": 0.876,
+      "source": null                       // "graph_expansion" for expanded results
+    }
+  ]
+}
+```
+
+#### `POST /episodes/search/entities` — Search by entity names
+
+Finds episodes linked to the given entities via `MENTIONS` edges (created during curation).
+
+```json
+// Request
+{
+  "group_id": "default",
+  "entity_names": ["Julia", "Mark"],      // required
+  "top_k": 25
+}
+
+// Response
+{
+  "episodes": [
+    {
+      "uuid": "...",
+      "content": "...",
+      "score": 0.5,                        // mention_count / total_entities
+      "source": "entity_search"
+    }
+  ]
+}
+```
+
+#### `POST /episodes/link` — Create edge between episodes
+
+```json
+// Request
+{
+  "group_id": "default",
+  "from_uuid": "aae036b2-...",            // required
+  "to_uuid": "7f01c00c-...",              // required
+  "edge_type": "FOLLOWS",                 // "FOLLOWS" | "DERIVED_FROM"
+  "properties": { "time_delta_seconds": 86400 }  // optional
+}
+
+// Response
+{ "linked": true }
+```
+
+---
 
 ### Knowledge
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/knowledge` | Store knowledge entries with labels |
-| POST | `/knowledge/search` | Hybrid search (vector + label boost) |
-| POST | `/knowledge/search-labels` | Label-only search via graph edges |
+#### `POST /knowledge` — Store knowledge entries
+
+```json
+// Request
+{
+  "group_id": "default",
+  "entries": [
+    {
+      "content": "Revenue increased 15% in Q3",    // required
+      "knowledge_type": "fact",                     // "fact" | "pattern" | "tool_insight" | "experience" | "conclusion"
+      "labels": ["revenue", "q3-results"],          // normalized to lowercase-hyphenated
+      "confidence": 0.92                            // 0.0–1.0
+    }
+  ],
+  "source_mission": "Analyze Q3 financials",        // required
+  "mission_status": "success",
+  "source_episode_uuid": ""                          // optional, for DERIVED_FROM edge
+}
+
+// Response
+{ "uuids": ["b1c2d3e4-..."] }
+```
+
+#### `POST /knowledge/search` — Hybrid search (vector + label boost)
+
+```json
+// Request
+{
+  "group_id": "default",
+  "query": "revenue growth trends",                  // required
+  "labels": ["revenue", "sales"],                     // optional, boosts matching entries
+  "top_k": 10,
+  "min_score": 0.50
+}
+
+// Response
+{
+  "entries": [
+    {
+      "uuid": "...",
+      "content": "Revenue increased 15% in Q3",
+      "knowledge_type": "fact",
+      "labels": ["revenue", "q3-results"],
+      "confidence": 0.92,
+      "source_mission": "Analyze Q3 financials",
+      "created_at": 1709734800.0,
+      "score": 0.87
+    }
+  ]
+}
+```
+
+#### `POST /knowledge/search-labels` — Label-only search
+
+```json
+// Request
+{
+  "group_id": "default",
+  "labels": ["revenue", "sales"],                     // required
+  "top_k": 10
+}
+
+// Response
+{ "entries": [ ... ] }                                // same shape as /knowledge/search
+```
+
+---
 
 ### Artifacts
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/artifacts` | Store artifact entries |
-| POST | `/artifacts/search` | Hybrid search (vector + label boost) |
-| GET | `/artifacts/{uuid}` | Get artifact by UUID |
-| GET | `/artifacts/recent/list` | List recent artifacts |
-| DELETE | `/artifacts/{uuid}` | Delete artifact |
+#### `POST /artifacts` — Store artifacts
+
+```json
+// Request
+{
+  "group_id": "default",
+  "entries": [
+    {
+      "name": "Q3 Sales Report",                      // required
+      "artifact_type": "report",                       // "file" | "report" | "dataset"
+      "path": "/outputs/q3_sales.pdf",
+      "description": "Comprehensive Q3 analysis",
+      "labels": ["sales", "quarterly-report"]
+    }
+  ],
+  "source_mission": "Generate Q3 report",
+  "mission_status": "success",
+  "source_episode_uuid": ""
+}
+
+// Response
+{ "uuids": ["c2d3e4f5-..."] }
+```
+
+#### `POST /artifacts/search` — Hybrid search
+
+```json
+// Request
+{
+  "group_id": "default",
+  "query": "sales report",
+  "labels": ["sales"],
+  "top_k": 10,
+  "min_score": 0.45
+}
+
+// Response
+{
+  "entries": [
+    {
+      "uuid": "...",
+      "name": "Q3 Sales Report",
+      "artifact_type": "report",
+      "path": "/outputs/q3_sales.pdf",
+      "description": "Comprehensive Q3 analysis",
+      "labels": ["sales", "quarterly-report"],
+      "source_mission": "Generate Q3 report",
+      "mission_status": "success",
+      "created_at": 1709734800.0,
+      "score": 0.82
+    }
+  ]
+}
+```
+
+#### `GET /artifacts/{uuid}` — Get artifact by UUID
+
+Query params: `group_id` (default "default")
+
+```json
+// Response
+{ "artifact": { ... }, "found": true }
+```
+
+#### `GET /artifacts/recent/list` — List recent artifacts
+
+Query params: `group_id` (default "default"), `limit` (default 50)
+
+```json
+// Response
+{ "entries": [ ... ] }
+```
+
+#### `DELETE /artifacts/{uuid}` — Delete artifact
+
+Query params: `group_id` (default "default")
+
+```json
+// Response
+{ "existed": true }
+```
+
+---
 
 ### State
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| PUT | `/state/execution` | Persist execution state |
-| GET | `/state/execution` | Get execution state |
-| POST | `/state/tool-stats` | Update tool usage statistics |
-| GET | `/state/tool-stats` | Get formatted tool stats |
-| GET | `/state/context` | Get formatted memory context |
+#### `PUT /state/execution` — Persist execution state
 
-### Smart Operations
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "state_description": "Analyzing Q3 data...",    // required
+  "iteration": 3,
+  "plan_json": "{...}",                           // optional, serialized plan
+  "judge_json": "{...}"                            // optional, serialized judge eval
+}
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/smart/reinterpret-task` | DSPy task reinterpretation |
-| POST | `/smart/filter-results` | LLM relevance filter |
-| POST | `/smart/infer-state` | LLM state inference |
-| POST | `/smart/synthesize-background` | LLM background narrative |
-| POST | `/smart/generate-reflection` | LLM post-mission reflection |
-| POST | `/smart/extract-knowledge` | DSPy knowledge extraction |
-| POST | `/smart/extract-artifacts` | DSPy artifact extraction |
-| POST | `/smart/compress-events` | LLM event compression |
+// Response
+{ "success": true }
+```
 
-### Pipelines
+#### `GET /state/execution` — Get execution state
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/pipelines/startup` | Full 7-step startup sequence |
-| POST | `/pipelines/curation` | Full 7-step curation sequence |
+Query params: `group_id`, `workflow_id`
+
+```json
+// Response
+{
+  "state_description": "Analyzing Q3 data...",
+  "iteration": 3,
+  "plan_json": "{...}",
+  "judge_json": "{...}",
+  "found": true
+}
+```
+
+#### `POST /state/tool-stats` — Update tool statistics
+
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "tool_name": "web_search",                      // required
+  "success": true,                                 // required
+  "duration_ms": 450,
+  "state_description": ""
+}
+
+// Response
+{ "success": true }
+```
+
+#### `GET /state/tool-stats` — Get tool stats
+
+Query params: `group_id`, `workflow_id`
+
+```json
+// Response
+{
+  "formatted_stats": "web_search: 12 calls (92% success, avg 340ms)\n...",
+  "raw_stats_json": "{...}"
+}
+```
+
+#### `GET /state/context` — Get formatted memory context
+
+Query params: `group_id`, `workflow_id`, `event_limit` (default 5)
+
+```json
+// Response
+{ "formatted_context": "## Recent Events\n..." }
+```
+
+---
+
+### Smart Operations (LLM-Powered)
+
+#### `POST /smart/reinterpret-task` — DSPy task reinterpretation
+
+```json
+// Request
+{ "task": "Find Q3 revenue numbers", "model": null }
+
+// Response
+{
+  "search_labels": ["revenue", "q3", "financial-data", ...],
+  "search_query": "Q3 quarterly revenue figures financial results",
+  "complexity": "simple"
+}
+```
+
+#### `POST /smart/filter-results` — LLM relevance filter
+
+```json
+// Request
+{ "task": "...", "search_results": "...", "model": null, "max_results": 5 }
+
+// Response
+{ "filtered_results": "..." }
+```
+
+#### `POST /smart/infer-state` — LLM state inference
+
+```json
+// Request
+{ "task": "...", "retrieved_memories": "...", "model": null }
+
+// Response
+{ "state_description": "Previously analyzed Q2, now extending to Q3." }
+```
+
+#### `POST /smart/synthesize-background` — LLM background narrative
+
+```json
+// Request
+{
+  "group_id": "default",
+  "task": "...",
+  "long_term_context": "...",
+  "tool_stats_context": "...",
+  "state_description": "...",
+  "knowledge_context": "...",
+  "artifacts_context": "...",
+  "model": null
+}
+
+// Response (object with synthesized narrative)
+```
+
+#### `POST /smart/generate-reflection` — Post-mission reflection
+
+```json
+// Request
+{ "mission_data_json": "{...}" }
+
+// Response
+{ "reflection": "## What Worked\n..." }
+```
+
+#### `POST /smart/extract-knowledge` — DSPy knowledge extraction
+
+```json
+// Request
+{ "mission_data_json": "{...}", "reflection": "...", "model": null }
+
+// Response
+{ "entries_json": "[{\"content\": \"...\", \"knowledge_type\": \"fact\", ...}]" }
+```
+
+#### `POST /smart/extract-artifacts` — DSPy artifact extraction
+
+```json
+// Request
+{ "mission_data_json": "{...}", "model": null }
+
+// Response
+{ "entries_json": "[{\"name\": \"...\", \"artifact_type\": \"file\", ...}]" }
+```
+
+#### `POST /smart/compress-events` — Compress events into episode
+
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "run_id": "",
+  "state_description": "",
+  "model": null
+}
+
+// Response (object with compression result)
+```
+
+---
+
+### Pipelines (Composite Operations)
+
+#### `POST /pipelines/startup` — Full startup pipeline
+
+Runs: reinterpret task → search episodes → search knowledge + artifacts → filter → tool stats → infer state → synthesize background.
+
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "task": "Analyze Q1 2026 financials",
+  "model": null
+}
+
+// Response
+{
+  "background_narrative": "You previously analyzed Q3-Q4...",
+  "inferred_state": "Continuing financial analysis series.",
+  "long_term_context": "...",
+  "knowledge_context": "...",
+  "artifacts_context": "...",
+  "tool_stats_context": "...",
+  "search_labels": ["financials", "q1-2026", ...],
+  "search_query": "...",
+  "complexity": "moderate"
+}
+```
+
+#### `POST /pipelines/curation` — Full curation pipeline
+
+Runs: reflect → store reflection → extract entities → extract knowledge → store knowledge → extract artifacts → store artifacts → compress events.
+
+```json
+// Request
+{
+  "group_id": "default",
+  "workflow_id": "default",
+  "mission_data_json": "{\"task\": \"...\", \"status\": \"success\", ...}",
+  "model": null
+}
+
+// Response
+{
+  "reflection": "## What Worked\n...",
+  "reflection_uuid": "f05cfa2d-...",
+  "knowledge_count": 8,
+  "artifact_count": 2,
+  "events_compressed": true
+}
+```
+
+---
 
 ### gRPC
 
-All the same operations are available via gRPC on port 50051 using JSON-over-gRPC (generic handler). Method names map directly: `/memory.v1.MemoryService/LogEvent`, `/memory.v1.MemoryService/StartupPipeline`, etc.
+All operations are available via gRPC on port `50051` using JSON-over-gRPC (generic handler). Method names map directly:
+
+```
+/memory.v1.MemoryService/LogEvent
+/memory.v1.MemoryService/GetRecentEvents
+/memory.v1.MemoryService/SearchEvents
+/memory.v1.MemoryService/StoreEpisode
+/memory.v1.MemoryService/SearchEpisodes
+/memory.v1.MemoryService/LinkEpisodes
+/memory.v1.MemoryService/StoreKnowledge
+/memory.v1.MemoryService/SearchKnowledge
+/memory.v1.MemoryService/SearchByLabels
+/memory.v1.MemoryService/StoreArtifacts
+/memory.v1.MemoryService/SearchArtifacts
+/memory.v1.MemoryService/GetArtifact
+/memory.v1.MemoryService/ListRecent
+/memory.v1.MemoryService/DeleteArtifact
+/memory.v1.MemoryService/PersistExecutionState
+/memory.v1.MemoryService/GetExecutionState
+/memory.v1.MemoryService/UpdateToolStats
+/memory.v1.MemoryService/GetToolStats
+/memory.v1.MemoryService/GetMemoryContext
+/memory.v1.MemoryService/ReinterpretTask
+/memory.v1.MemoryService/FilterMemoryResults
+/memory.v1.MemoryService/InferState
+/memory.v1.MemoryService/SynthesizeBackground
+/memory.v1.MemoryService/GenerateReflection
+/memory.v1.MemoryService/ExtractKnowledge
+/memory.v1.MemoryService/ExtractArtifacts
+/memory.v1.MemoryService/CompressEvents
+/memory.v1.MemoryService/StartupPipeline
+/memory.v1.MemoryService/RunCuration
+```
 
 Proto definitions are in `proto/memory/v1/` for documentation and future compiled stub generation.
 
@@ -479,15 +988,47 @@ API keys go in `.secrets.toml` (gitignored) or environment variables.
 
 ### Prerequisites
 
-- Python 3.11+
-- Docker (for DragonflyDB and FalkorDB)
+- Docker
 - OpenRouter API key (or any OpenAI-compatible endpoint)
 
-### Quick Start
+### Docker (all-in-one container)
+
+The Dockerfile bundles DragonflyDB + FalkorDB + the memory service into a single container using supervisord.
 
 ```bash
-# Start storage backends
-docker-compose up -d dragonfly falkordb
+# Build
+docker build -t segnog:latest .
+
+# Run
+docker run -d --name segnog \
+  -p 50051:50051 -p 9000:9000 \
+  -e MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-... \
+  -e MEMORY_SERVICE_LLM__API_KEY=sk-or-... \
+  segnog:latest
+```
+
+Or with Docker Compose:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+docker-compose up
+```
+
+The container runs three processes:
+- **DragonflyDB** on port 6381 (internal)
+- **FalkorDB** on port 6380 (internal)
+- **Memory Service** — REST on `:9000`, gRPC on `:50051`, REM worker (background, every 60s)
+
+Data is persisted via Docker volumes at `/data/dragonfly` and `/data/falkordb`.
+
+Health check: `GET http://localhost:9000/health`
+
+### Local Development
+
+```bash
+# Start storage backends separately
+docker run -d --name dragonfly -p 6381:6379 docker.dragonflydb.io/dragonflydb/dragonfly:latest
+docker run -d --name falkordb -p 6380:6379 falkordb/falkordb:latest
 
 # Install the service
 pip install -e ".[dev]"
@@ -499,22 +1040,6 @@ export MEMORY_SERVICE_LLM__API_KEY=sk-or-...
 # Run
 python -m memory_service.main
 ```
-
-The service starts both servers and the REM worker concurrently:
-- gRPC on `localhost:50051`
-- REST on `localhost:9000`
-- REM worker (background consolidation, every 60s)
-
-Health check: `GET http://localhost:9000/health`
-
-### Docker Compose (full stack)
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...
-docker-compose up
-```
-
-This starts DragonflyDB (`:6381`), FalkorDB (`:6380`), and the memory service (`:50051` + `:9000`).
 
 ## Testing
 
@@ -584,6 +1109,7 @@ Segnog/
 │   │   ├── synthesize.py             # LLM background narrative
 │   │   ├── reflect.py                # LLM post-mission reflection
 │   │   ├── extract_knowledge.py      # DSPy knowledge extraction
+│   │   ├── extract_entities.py       # DSPy entity extraction
 │   │   ├── extract_artifacts.py      # DSPy artifact extraction
 │   │   └── compress.py               # LLM event compression
 │   ├── llm/
@@ -598,6 +1124,7 @@ Segnog/
 │   │   └── pipelines.py
 │   └── dspy_signatures/              # DSPy prompt templates
 │       ├── knowledge_signature.py    # Task reinterpretation + knowledge extraction
+│       ├── entity_signature.py       # Entity extraction
 │       └── artifact_signature.py     # Artifact extraction
 ├── client/memory_client/
 │   ├── client.py                     # MemoryClient (unified async client)

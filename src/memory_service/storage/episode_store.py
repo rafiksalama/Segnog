@@ -10,6 +10,7 @@ Search path: embed query (~200ms) → cosine similarity (~50ms) → optional exp
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -31,6 +32,20 @@ def _parse_datetime(dt_string: str) -> Optional[float]:
         return dt.timestamp()
     except (ValueError, OverflowError):
         return None
+
+
+def normalize_entity_name(raw: str) -> str:
+    """
+    Normalize an entity name for consistent storage and deduplication.
+
+    "Julia Horrocks" → "julia-horrocks"
+    "Dr. Smith" → "dr-smith"
+    """
+    name = raw.lower().strip()
+    name = name.replace("_", "-").replace(" ", "-")
+    name = re.sub(r"[^a-z0-9\-]", "", name)
+    name = re.sub(r"-+", "-", name).strip("-")
+    return name
 
 
 class EpisodeStore:
@@ -70,6 +85,15 @@ class EpisodeStore:
                 )
             except Exception:
                 pass  # Index may already exist
+
+        # Entity indexes
+        for field in ("name", "entity_type"):
+            try:
+                await self._graph.query(
+                    f"CREATE INDEX FOR (ent:Entity) ON (ent.{field})"
+                )
+            except Exception:
+                pass
 
         # Backfill consolidation_status on existing episodes
         try:
@@ -218,18 +242,23 @@ class EpisodeStore:
         hops: int = 1,
     ) -> List[Dict[str, Any]]:
         """
-        Get episodes connected via FOLLOWS edges within N hops.
+        Get episodes connected via FOLLOWS or DERIVED_FROM edges within N hops.
+
+        Traverses both temporal (FOLLOWS) and provenance (DERIVED_FROM) chains
+        to support multi-hop reasoning.
 
         Returns:
             List of adjacent episode dicts (without embedding),
             ordered by created_at.
         """
-        # Use two separate directional queries for FalkorDB compatibility
         cypher = f"""
             MATCH (center:Episode {{uuid: $uuid}})
-            OPTIONAL MATCH (center)-[:FOLLOWS*1..{hops}]->(fwd:Episode)
-            OPTIONAL MATCH (bwd:Episode)-[:FOLLOWS*1..{hops}]->(center)
-            WITH collect(DISTINCT fwd) + collect(DISTINCT bwd) AS neighbors
+            OPTIONAL MATCH (center)-[:FOLLOWS*1..{hops}]->(fwd_f:Episode)
+            OPTIONAL MATCH (bwd_f:Episode)-[:FOLLOWS*1..{hops}]->(center)
+            OPTIONAL MATCH (center)-[:DERIVED_FROM*1..{hops}]->(fwd_d:Episode)
+            OPTIONAL MATCH (bwd_d:Episode)-[:DERIVED_FROM*1..{hops}]->(center)
+            WITH collect(DISTINCT fwd_f) + collect(DISTINCT bwd_f)
+               + collect(DISTINCT fwd_d) + collect(DISTINCT bwd_d) AS neighbors
             UNWIND neighbors AS neighbor
             WHERE neighbor IS NOT NULL
             RETURN DISTINCT
@@ -488,6 +517,133 @@ class EpisodeStore:
             f"Compressed {len(source_uuids)} episodes into {compressed_uuid[:8]}"
         )
         return compressed_uuid
+
+    # ── Entity Resolution ───────────────────────────────────────────
+
+    async def link_entities(
+        self,
+        episode_uuid: str,
+        entities: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Link entities to an episode via MENTIONS edges.
+
+        Creates Entity nodes (MERGE for dedup) and MENTIONS edges.
+
+        Args:
+            episode_uuid: UUID of the episode to link entities to.
+            entities: List of dicts with name and entity_type.
+
+        Returns:
+            Number of entities linked.
+        """
+        if not entities:
+            return 0
+
+        now = time.time()
+        linked = 0
+        for entity in entities:
+            name = entity.get("name", "").strip()
+            entity_type = entity.get("entity_type", "unknown")
+            if not name:
+                continue
+
+            normalized = normalize_entity_name(name)
+            if not normalized:
+                continue
+
+            try:
+                await self._graph.query(
+                    """MERGE (ent:Entity {name: $normalized})
+                    ON CREATE SET ent.display_name = $display_name,
+                                  ent.entity_type = $entity_type,
+                                  ent.created_at = $now
+                    WITH ent
+                    MATCH (e:Episode {uuid: $episode_uuid})
+                    CREATE (e)-[:MENTIONS]->(ent)""",
+                    params={
+                        "normalized": normalized,
+                        "display_name": name,
+                        "entity_type": entity_type,
+                        "now": now,
+                        "episode_uuid": episode_uuid,
+                    },
+                )
+                linked += 1
+            except Exception as e:
+                logger.warning(f"Entity link failed for '{name}': {e}")
+
+        if linked:
+            logger.debug(f"Linked {linked} entities to episode {episode_uuid[:8]}")
+        return linked
+
+    async def search_by_entities(
+        self,
+        entity_names: List[str],
+        top_k: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """
+        Find episodes that mention given entities.
+
+        Args:
+            entity_names: List of entity names to search for.
+            top_k: Maximum results.
+
+        Returns:
+            List of episode dicts with mention_count as score.
+        """
+        normalized = [normalize_entity_name(n) for n in entity_names if n]
+        normalized = [n for n in normalized if n]
+        if not normalized:
+            return []
+
+        cypher = """
+            MATCH (e:Episode)-[:MENTIONS]->(ent:Entity)
+            WHERE e.group_id = $group_id AND ent.name IN $entity_names
+            WITH e, count(DISTINCT ent) AS mention_count
+            RETURN
+                e.uuid AS uuid,
+                e.content AS content,
+                e.episode_type AS episode_type,
+                e.metadata AS metadata,
+                e.created_at AS created_at,
+                e.created_at_iso AS created_at_iso,
+                toFloat(mention_count) / $total_entities AS score
+            ORDER BY mention_count DESC, e.created_at DESC
+            LIMIT $top_k
+        """
+
+        try:
+            result = await self._graph.ro_query(
+                cypher,
+                params={
+                    "group_id": self._group_id,
+                    "entity_names": normalized,
+                    "total_entities": float(len(normalized)),
+                    "top_k": top_k,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Entity search failed: {e}")
+            return []
+
+        if not result.result_set:
+            return []
+
+        columns = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
+        rows = []
+        for row in result.result_set:
+            record = {}
+            for i, col in enumerate(columns):
+                val = row[i] if i < len(row) else None
+                if col == "metadata" and isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                record[col] = val
+            rows.append(record)
+        return rows
 
     async def _embed(self, text: str) -> List[float]:
         """Generate embedding via OpenAI-compatible API."""
