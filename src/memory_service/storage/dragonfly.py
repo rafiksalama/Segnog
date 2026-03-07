@@ -37,10 +37,12 @@ class DragonflyClient:
         redis_url: str = None,
         group_id: str = "default",
         workflow_id: str = "default",
+        session_ttl: int = 3600,
     ):
         self.redis_url = redis_url or os.getenv("DRAGONFLY_URL", "redis://localhost:6381")
         self.group_id = group_id
         self.workflow_id = workflow_id
+        self._session_ttl = session_ttl
         self._client = None
         self._connected = False
 
@@ -121,32 +123,6 @@ class DragonflyClient:
         except Exception as e:
             logger.error(f"Failed to log event: {e}")
             return None
-
-    async def get_events(
-        self,
-        count: int = 100,
-        event_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Get events from the stream (oldest first)."""
-        if not self.connected:
-            return []
-
-        try:
-            entries = await self._client.xrange(
-                self.stream_key, "-", "+", count=count,
-            )
-
-            events = []
-            for stream_id, data in entries:
-                event = self._parse_event(stream_id, data)
-                if event_type is None or event.get("type") == event_type:
-                    events.append(event)
-
-            return events
-
-        except Exception as e:
-            logger.error(f"Failed to get events: {e}")
-            return []
 
     async def get_recent_events(
         self,
@@ -239,6 +215,123 @@ class DragonflyClient:
             return {}
 
     # =========================================================================
+    # Session Operations (Redis Hashes with embeddings)
+    # =========================================================================
+
+    async def session_add(
+        self,
+        session_id: str,
+        entry_uuid: str,
+        content: str,
+        embedding: List[float],
+        metadata: dict,
+        source_type: str = "local",
+    ) -> None:
+        """Add an entry to a session hash with its embedding."""
+        if not self.connected:
+            return
+        try:
+            key = f"session:{session_id}"
+            value = json.dumps({
+                "content": content,
+                "embedding": embedding,
+                "metadata": metadata,
+                "source_type": source_type,
+                "created_at": time.time(),
+            })
+            await self._client.hset(key, entry_uuid, value)
+            await self._client.expire(key, self._session_ttl)
+        except Exception as e:
+            logger.error(f"session_add failed: {e}")
+
+    async def session_search(
+        self,
+        session_id: str,
+        query_embedding: List[float],
+        top_k: int = 25,
+        min_score: float = 0.40,
+    ) -> List[Dict[str, Any]]:
+        """Search session entries by cosine similarity (computed in Python)."""
+        import numpy as np
+
+        entries = await self.session_get_all(session_id)
+        if not entries:
+            return []
+
+        query_vec = np.array(query_embedding, dtype=np.float32)
+        query_norm = np.linalg.norm(query_vec)
+        if query_norm == 0:
+            return []
+
+        results = []
+        for entry_uuid, entry in entries.items():
+            emb_data = entry.get("embedding")
+            if not emb_data:
+                continue
+            emb = np.array(emb_data, dtype=np.float32)
+            emb_norm = np.linalg.norm(emb)
+            if emb_norm == 0:
+                continue
+            score = float(np.dot(query_vec, emb) / (query_norm * emb_norm))
+            if score >= min_score:
+                results.append({
+                    "uuid": entry_uuid,
+                    "content": entry["content"],
+                    "metadata": entry.get("metadata", {}),
+                    "source_type": entry.get("source_type", "local"),
+                    "created_at": entry.get("created_at", 0),
+                    "score": score,
+                })
+
+        from ..scoring import apply_temporal_score
+        from ..config import get_session_half_life, get_session_alpha
+
+        results = apply_temporal_score(
+            results,
+            alpha=get_session_alpha(),
+            half_life_hours=get_session_half_life(),
+        )
+        return results[:top_k]
+
+    async def session_get_all(self, session_id: str) -> Dict[str, Any]:
+        """Get all entries in a session, parsed from JSON."""
+        if not self.connected:
+            return {}
+        try:
+            key = f"session:{session_id}"
+            raw = await self._client.hgetall(key)
+            entries = {}
+            for entry_uuid, val in (raw or {}).items():
+                try:
+                    entries[entry_uuid] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return entries
+        except Exception as e:
+            logger.error(f"session_get_all failed: {e}")
+            return {}
+
+    async def session_has(self, session_id: str, entry_uuid: str) -> bool:
+        """Check if an entry already exists in the session (for dedup)."""
+        if not self.connected:
+            return False
+        try:
+            key = f"session:{session_id}"
+            return await self._client.hexists(key, entry_uuid)
+        except Exception:
+            return False
+
+    async def session_count(self, session_id: str) -> int:
+        """Get the number of entries in a session."""
+        if not self.connected:
+            return 0
+        try:
+            key = f"session:{session_id}"
+            return await self._client.hlen(key)
+        except Exception:
+            return 0
+
+    # =========================================================================
     # Scope & Utility
     # =========================================================================
 
@@ -249,25 +342,6 @@ class DragonflyClient:
         if workflow_id:
             self.workflow_id = workflow_id
 
-    async def get_stream_length(self) -> int:
-        """Get the number of events in the current stream."""
-        if not self.connected:
-            return 0
-        try:
-            return await self._client.xlen(self.stream_key)
-        except Exception:
-            return 0
-
-    async def clear_events(self) -> bool:
-        """Clear all events in the current stream."""
-        if not self.connected:
-            return False
-        try:
-            await self._client.delete(self.stream_key)
-            return True
-        except Exception as e:
-            logger.error(f"Clear events failed: {e}")
-            return False
 
 
 async def create_dragonfly_client(

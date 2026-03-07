@@ -17,12 +17,15 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .knowledge_store import normalize_label
+from .base_store import BaseStore, normalize_name
 
 logger = logging.getLogger(__name__)
 
+# Backwards-compatible alias
+normalize_label = normalize_name
 
-class ArtifactStore:
+
+class ArtifactStore(BaseStore):
     """
     Artifact storage with vector search and label-based retrieval on FalkorDB.
 
@@ -37,18 +40,6 @@ class ArtifactStore:
         (:Artifact)-[:HAS_LABEL]->(:Label)
         (:Artifact)-[:DERIVED_FROM]->(:Episode)
     """
-
-    def __init__(
-        self,
-        graph,           # falkordb.asyncio.AsyncGraph
-        openai_client,   # openai.AsyncOpenAI
-        embedding_model: str,
-        group_id: str = "default",
-    ):
-        self._graph = graph
-        self._client = openai_client
-        self._model = embedding_model
-        self._group_id = group_id
 
     async def ensure_indexes(self) -> None:
         """Create indexes on Artifact nodes if they don't exist."""
@@ -165,33 +156,6 @@ class ArtifactStore:
             f"(mission: {source_mission[:40]}...)"
         )
         return uuids
-
-    async def store_single_artifact(
-        self,
-        name: str,
-        artifact_type: str = "file",
-        description: str = "",
-        path: str = "",
-        labels: Optional[List[str]] = None,
-        source_mission: str = "",
-        mission_status: str = "success",
-        source_episode_uuid: str = "",
-    ) -> str:
-        """Store a single artifact entry. Returns its UUID."""
-        entry = {
-            "name": name,
-            "artifact_type": artifact_type,
-            "description": description,
-            "path": path,
-            "labels": labels or [],
-        }
-        uuids = await self.store_artifacts(
-            entries=[entry],
-            source_mission=source_mission,
-            mission_status=mission_status,
-            source_episode_uuid=source_episode_uuid,
-        )
-        return uuids[0]
 
     async def get_by_uuid(self, artifact_uuid: str) -> Optional[Dict[str, Any]]:
         """Fetch a single artifact by UUID. Returns dict or None."""
@@ -348,43 +312,3 @@ class ArtifactStore:
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
 
-    def _parse_results(self, result) -> List[Dict[str, Any]]:
-        """Parse FalkorDB QueryResult into list of dicts."""
-        if not result.result_set:
-            return []
-
-        columns = [
-            h[1] if isinstance(h, (list, tuple)) else h for h in result.header
-        ]
-        rows = []
-        for row in result.result_set:
-            record = {}
-            for i, col in enumerate(columns):
-                val = row[i] if i < len(row) else None
-                if col == "labels" and isinstance(val, str):
-                    try:
-                        val = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                record[col] = val
-            rows.append(record)
-
-        return rows
-
-    async def _embed(self, text: str) -> List[float]:
-        """Generate embedding via OpenAI-compatible API."""
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text,
-        )
-        return response.data[0].embedding
-
-    async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Batch embedding for multiple artifact entries."""
-        if not texts:
-            return []
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-        )
-        return [item.embedding for item in response.data]

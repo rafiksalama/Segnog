@@ -27,6 +27,7 @@ dependencies = [
     # Config
     "dynaconf>=3.2.0",
     # Utilities
+    "numpy>=1.26.0",
     "pydantic>=2.9.0",
     "httpx>=0.27.0",
 ]

@@ -94,11 +94,7 @@ async def update_tool_stats(body: UpdateToolStatsRequest, request: Request):
 
 
 @router.get("/state/tool-stats", response_model=GetToolStatsResponse)
-async def get_tool_stats(
-    request: Request,
-    group_id: str = "default",
-    workflow_id: str = "default",
-):
+async def get_tool_stats(request: Request):
     dragonfly = get_dragonfly(request)
     all_state = await dragonfly.hgetall("state")
 

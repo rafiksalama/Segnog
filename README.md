@@ -4,7 +4,7 @@
 
 Segnog is a memory service for AI agents. It stores what happened, distills what mattered, and hands it back at exactly the right moment — so the agent returns to the sign and plays it better.
 
-Short-term event streams. Long-term episodic memory. A knowledge graph. An artifact registry. LLM-powered curation that compresses experience into wisdom. Background offline consolidation inspired by biological memory. All behind dual gRPC and REST APIs.
+Short-term event streams. Long-term episodic memory. A knowledge graph. An artifact registry. LLM-powered curation that compresses experience into wisdom. Background offline consolidation inspired by biological memory. A single `observe` endpoint that handles everything automatically. All behind dual gRPC and REST APIs.
 
 Every mission is a performance. Segnog is the bookmark the agent jumps back to.
 
@@ -34,13 +34,14 @@ Every mission is a performance. Segnog is the bookmark the agent jumps back to.
                      consolidation)
 ```
 
-The service has two storage tiers, an LLM integration layer, two composite pipelines, and a background consolidation worker.
+The service has two storage tiers, an LLM integration layer, a simple observe API, two composite pipelines, and a background consolidation worker.
 
 ## Table of Contents
 
 - [Memory Model](#memory-model)
 - [Storage Tiers](#storage-tiers)
 - [Smart Operations](#smart-operations)
+- [Observe API](#observe-api)
 - [Composite Pipelines](#composite-pipelines)
 - [Background Consolidation (REM Worker)](#background-consolidation-rem-worker)
 - [Data Flow Between Tiers](#data-flow-between-tiers)
@@ -139,10 +140,59 @@ Eight LLM-powered operations that add intelligence to raw storage:
 | **Extract Knowledge** | DSPy | Mission data + reflection | Structured `[{content, type, labels, confidence}]` |
 | **Extract Artifacts** | DSPy | Mission data + execution trace | Structured `[{name, type, path, description, labels}]` |
 | **Compress Events** | LLM | Last 50 events from DragonflyDB | Single compressed episode in FalkorDB |
+| **Judge Observation** | DSPy | Observation text + source | `observation_type`, `storage_tier`, `search_query`, `search_labels`, `importance` |
 
 **DSPy** is used for structured extraction (knowledge, artifacts, task reinterpretation) because it enforces output schemas via Pydantic validation and auto-retries on parse failures. It uses a `DirectJSONAdapter` that requests `json_object` response format through OpenRouter.
 
 **Plain LLM calls** are used for free-form text generation (reflection, synthesis, filtering, state inference) via an `AsyncOpenAI` client pointed at OpenRouter.
+
+## Observe API
+
+The simplest way to use Segnog. A single endpoint that accepts an observation, intelligently routes it, and returns relevant context — no internal concepts exposed.
+
+```
+POST /api/v1/memory/observe
+```
+
+The caller sends content with a session key. The service handles everything else:
+
+1. **Judge** — A DSPy-powered observation judge analyzes the content and decides:
+   - `observation_type`: `chat`, `tool_call`, `tool_result`, `knowledge`, `artifact`, `action`, `error`, `state_update`
+   - `storage_tier`: `short_term` (DragonflyDB only), `long_term` (FalkorDB only), or `both`
+   - `importance`: `low`, `medium`, `high` — controls retrieval depth
+   - `search_query`: optimized for vector similarity
+   - `search_labels`: for knowledge hybrid search
+
+2. **Store** — Routes to the appropriate storage tier based on the judge's decision
+
+3. **Retrieve** — Searches episodes and knowledge in parallel using the judge's optimized query and labels
+
+4. **REM Worker** — Raw episodes stored as `pending` are automatically curated in the background (reflection, knowledge extraction, entity linking, compression)
+
+```
+Agent ──► POST /observe {session_id, content}
+              │
+              ├─ Judge (DSPy) → type, tier, query, labels, importance
+              ├─ Store → DragonflyDB and/or FalkorDB
+              ├─ Retrieve → episodes + knowledge (parallel)
+              └─ Response: {episode_uuid, observation_type, context}
+                                    │
+                              (within 60s)
+                                    │
+                              REM Worker → reflection, knowledge, entities, compression
+```
+
+### Caller-Facing Parameters
+
+| Parameter | Required | Maps To |
+|-----------|----------|---------|
+| `session_id` | yes | `group_id` + `workflow_id` (session isolation) |
+| `content` | yes | Observation text (embedded for storage + search) |
+| `timestamp` | no | `created_at` on episode (ISO string or epoch) |
+| `source` | no | `metadata.source` (agent name, tool name) |
+| `metadata` | no | Extra key-value context |
+
+No need to understand `group_id`, `workflow_id`, `episode_type`, `consolidation_status`, or any other internal concept.
 
 ## Composite Pipelines
 
@@ -798,6 +848,60 @@ Query params: `group_id`, `workflow_id`, `event_limit` (default 5)
 
 ---
 
+### Observe
+
+#### `POST /observe` — Simple single-endpoint memory interface
+
+```json
+// Request
+{
+  "session_id": "chat-abc123",
+  "content": "Called the weather API for Paris — got 22°C, partly cloudy",
+  "timestamp": "2026-03-06T10:30:00Z",
+  "source": "weather-agent",
+  "metadata": {}
+}
+
+// Response
+{
+  "episode_uuid": "ee2b712d-d556-46ac-84be-d1fc7e840f67",
+  "observation_type": "tool_result",
+  "context": {
+    "episodes": [
+      {
+        "uuid": "...",
+        "content": "...",
+        "episode_type": "reflection",
+        "score": 0.85,
+        "created_at": 1772793000.0,
+        "created_at_iso": "2026-03-06T10:30:00+00:00"
+      }
+    ],
+    "knowledge": [
+      {
+        "uuid": "...",
+        "content": "User prefers Celsius",
+        "knowledge_type": "fact",
+        "score": 0.84
+      }
+    ]
+  }
+}
+```
+
+The judge routes each observation automatically:
+
+| Judge Decision | Behavior |
+|----------------|----------|
+| `storage_tier = "short_term"` | Event logged to DragonflyDB only, no embedding |
+| `storage_tier = "long_term"` | Episode stored in FalkorDB with embedding |
+| `storage_tier = "both"` | Both event + episode |
+| `importance = "low"` | Retrieve top 5, min_score 0.60 |
+| `importance = "medium"` | Retrieve top 10, min_score 0.55 |
+| `importance = "high"` | Retrieve top 15, min_score 0.50 |
+
+---
+
 ### Pipelines (Composite Operations)
 
 #### `POST /pipelines/startup` — Full startup pipeline
@@ -886,6 +990,7 @@ All operations are available via gRPC on port `50051` using JSON-over-gRPC (gene
 /memory.v1.MemoryService/CompressEvents
 /memory.v1.MemoryService/StartupPipeline
 /memory.v1.MemoryService/RunCuration
+/memory.v1.MemoryService/Observe
 ```
 
 Proto definitions are in `proto/memory/v1/` for documentation and future compiled stub generation.
@@ -1101,7 +1206,8 @@ Segnog/
 │   │       ├── artifacts.py          # Artifact endpoints
 │   │       ├── state.py              # State endpoints
 │   │       ├── smart.py              # Smart operation endpoints
-│   │       └── pipelines.py          # Pipeline endpoints
+│   │       ├── pipelines.py          # Pipeline endpoints
+│   │       └── observe.py            # Observe endpoint (simple API)
 │   ├── smart/
 │   │   ├── reinterpret.py            # DSPy task reinterpretation
 │   │   ├── filter.py                 # LLM relevance filter
@@ -1111,6 +1217,7 @@ Segnog/
 │   │   ├── extract_knowledge.py      # DSPy knowledge extraction
 │   │   ├── extract_entities.py       # DSPy entity extraction
 │   │   ├── extract_artifacts.py      # DSPy artifact extraction
+│   │   ├── judge_observation.py      # DSPy observation routing
 │   │   └── compress.py               # LLM event compression
 │   ├── llm/
 │   │   ├── client.py                 # AsyncOpenAI singleton
@@ -1125,6 +1232,7 @@ Segnog/
 │   └── dspy_signatures/              # DSPy prompt templates
 │       ├── knowledge_signature.py    # Task reinterpretation + knowledge extraction
 │       ├── entity_signature.py       # Entity extraction
+│       ├── observation_signature.py  # Observation judge
 │       └── artifact_signature.py     # Artifact extraction
 ├── client/memory_client/
 │   ├── client.py                     # MemoryClient (unified async client)

@@ -54,24 +54,26 @@ class REMWorker:
             logger.info("REM worker stopped")
 
     async def _run_cycle(self) -> None:
-        """Find pending groups by priority and consolidate each."""
+        """Find pending groups by priority, consolidate each, then run Hebbian decay."""
         groups = await self._find_pending_groups()
-        if not groups:
-            return
 
-        logger.info(f"REM cycle: {len(groups)} group(s) to consolidate")
-        for group_info in groups:
-            gid = group_info["group_id"]
-            try:
-                result = await self._consolidate_group(group_info)
-                logger.info(
-                    f"REM consolidated '{gid}': "
-                    f"{result.get('episodes_consolidated', 0)} episodes, "
-                    f"compressed={result.get('compressed_uuid', '')[:8] or 'none'}"
-                )
-            except Exception as e:
-                logger.error(f"REM failed for '{gid}': {e}", exc_info=True)
-            await asyncio.sleep(0.1)
+        if groups:
+            logger.info(f"REM cycle: {len(groups)} group(s) to consolidate")
+            for group_info in groups:
+                gid = group_info["group_id"]
+                try:
+                    result = await self._consolidate_group(group_info)
+                    logger.info(
+                        f"REM consolidated '{gid}': "
+                        f"{result.get('episodes_consolidated', 0)} episodes, "
+                        f"compressed={result.get('compressed_uuid', '')[:8] or 'none'}"
+                    )
+                except Exception as e:
+                    logger.error(f"REM failed for '{gid}': {e}", exc_info=True)
+                await asyncio.sleep(0.1)
+
+        # Hebbian decay runs every cycle (even when no consolidation needed)
+        await self._decay_hebbian_weights()
 
     async def _find_pending_groups(self) -> List[Dict[str, Any]]:
         """
@@ -191,3 +193,58 @@ class REMWorker:
             "compressed_uuid": compressed_uuid,
             "curation": curation_result,
         }
+
+    async def _decay_hebbian_weights(self) -> None:
+        """Decay stale CO_ACTIVATED edge weights and prune near-zero edges.
+
+        Runs every REM cycle. Only decays edges whose last_activated_at
+        is older than decay_interval_hours. Prunes edges with weight < 0.01.
+        """
+        from ..config import (
+            get_hebbian_enabled, get_hebbian_decay_rate,
+            get_hebbian_decay_interval_hours,
+        )
+
+        if not get_hebbian_enabled():
+            return
+
+        decay_rate = get_hebbian_decay_rate()
+        interval_hours = get_hebbian_decay_interval_hours()
+        cutoff = time.time() - (interval_hours * 3600)
+        decay_factor = 1.0 - decay_rate
+
+        graph = self._episode_store._graph
+
+        # Decay stale edges
+        try:
+            result = await graph.query(
+                """MATCH ()-[r:CO_ACTIVATED]->()
+                WHERE r.last_activated_at < $cutoff
+                SET r.weight = r.weight * $decay_factor
+                RETURN count(r) AS decayed""",
+                params={"cutoff": cutoff, "decay_factor": decay_factor},
+            )
+            decayed = 0
+            if result.result_set:
+                decayed = result.result_set[0][0]
+            if decayed > 0:
+                logger.info(f"Hebbian decay: {decayed} edge(s) decayed (factor={decay_factor})")
+        except Exception as e:
+            logger.debug(f"Hebbian decay failed: {e}")
+            return
+
+        # Prune near-zero edges
+        try:
+            result = await graph.query(
+                """MATCH ()-[r:CO_ACTIVATED]->()
+                WHERE r.weight < 0.01
+                DELETE r
+                RETURN count(r) AS pruned""",
+            )
+            pruned = 0
+            if result.result_set:
+                pruned = result.result_set[0][0]
+            if pruned > 0:
+                logger.info(f"Hebbian prune: {pruned} near-zero edge(s) removed")
+        except Exception as e:
+            logger.debug(f"Hebbian prune failed: {e}")

@@ -17,15 +17,6 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-# Event type constants (framework-agnostic)
-EVENT_TYPES = {
-    "llm_request", "llm_response",
-    "tool_call", "tool_result",
-    "action", "observation",
-    "error", "state_update",
-}
-
-
 class ShortTermMemory:
     """
     Short-term memory store backed by DragonflyDB.

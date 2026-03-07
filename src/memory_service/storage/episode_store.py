@@ -10,14 +10,18 @@ Search path: embed query (~200ms) → cosine similarity (~50ms) → optional exp
 
 import json
 import logging
-import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from .base_store import BaseStore, normalize_name
+
 logger = logging.getLogger(__name__)
+
+# Backwards-compatible alias
+normalize_entity_name = normalize_name
 
 
 def _parse_datetime(dt_string: str) -> Optional[float]:
@@ -34,21 +38,7 @@ def _parse_datetime(dt_string: str) -> Optional[float]:
         return None
 
 
-def normalize_entity_name(raw: str) -> str:
-    """
-    Normalize an entity name for consistent storage and deduplication.
-
-    "Julia Horrocks" → "julia-horrocks"
-    "Dr. Smith" → "dr-smith"
-    """
-    name = raw.lower().strip()
-    name = name.replace("_", "-").replace(" ", "-")
-    name = re.sub(r"[^a-z0-9\-]", "", name)
-    name = re.sub(r"-+", "-", name).strip("-")
-    return name
-
-
-class EpisodeStore:
+class EpisodeStore(BaseStore):
     """
     Episode storage with vector search on FalkorDB.
 
@@ -61,23 +51,12 @@ class EpisodeStore:
         - "compressed": Archived summaries of old raw episodes
     """
 
-    def __init__(
-        self,
-        graph,           # falkordb.asyncio.AsyncGraph
-        openai_client,   # openai.AsyncOpenAI
-        embedding_model: str,
-        group_id: str = "default",
-    ):
-        self._graph = graph
-        self._client = openai_client
-        self._model = embedding_model
-        self._group_id = group_id
-
     async def ensure_indexes(self) -> None:
         """Create indexes on Episode nodes if they don't exist."""
         for field in (
             "uuid", "group_id", "episode_type",
             "created_at", "created_at_iso", "consolidation_status",
+            "activation_count",
         ):
             try:
                 await self._graph.query(
@@ -109,6 +88,16 @@ class EpisodeStore:
             """)
         except Exception:
             pass  # May fail on empty graph
+
+        # Backfill activation_count for Hebbian learning
+        try:
+            await self._graph.query("""
+                MATCH (e:Episode)
+                WHERE e.activation_count IS NULL
+                SET e.activation_count = 0, e.last_activated_at = e.created_at
+            """)
+        except Exception:
+            pass
 
         logger.debug("EpisodeStore indexes ensured")
 
@@ -143,9 +132,10 @@ class EpisodeStore:
         metadata: Optional[Dict[str, Any]] = None,
         episode_type: str = "raw",
         auto_link: bool = True,
+        episode_uuid: Optional[str] = None,
     ) -> str:
         """Store an episode using a pre-computed embedding vector."""
-        episode_uuid = str(uuid4())
+        episode_uuid = episode_uuid or str(uuid4())
         metadata_json = json.dumps(metadata or {})
 
         # Use metadata.date_time as timestamp if available (native temporal context)
@@ -273,6 +263,7 @@ class EpisodeStore:
             WITH collect(DISTINCT fwd_f) + collect(DISTINCT bwd_f)
                + collect(DISTINCT fwd_d) + collect(DISTINCT bwd_d) AS neighbors
             UNWIND neighbors AS neighbor
+            WITH neighbor
             WHERE neighbor IS NOT NULL
             RETURN DISTINCT
                 neighbor.uuid AS uuid,
@@ -289,23 +280,7 @@ class EpisodeStore:
             logger.warning(f"Graph expansion failed: {e}")
             return []
 
-        if not result.result_set:
-            return []
-
-        columns = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
-        rows = []
-        for row in result.result_set:
-            record = {}
-            for i, col in enumerate(columns):
-                val = row[i] if i < len(row) else None
-                if col == "metadata" and isinstance(val, str):
-                    try:
-                        val = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                record[col] = val
-            rows.append(record)
-        return rows
+        return self._parse_results(result, json_columns=("metadata",))
 
     async def _auto_link_to_predecessor(
         self,
@@ -387,6 +362,7 @@ class EpisodeStore:
         expansion_hops: int = 1,
         after_time: Optional[float] = None,
         before_time: Optional[float] = None,
+        include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
         """Vector similarity search using a pre-computed embedding vector."""
         type_filter = "AND e.episode_type = $episode_type" if episode_type else ""
@@ -395,6 +371,8 @@ class EpisodeStore:
             time_filter += " AND e.created_at > $after_time"
         if before_time is not None:
             time_filter += " AND e.created_at < $before_time"
+
+        embedding_return = ",\n                e.embedding AS embedding" if include_embedding else ""
 
         cypher = f"""
             MATCH (e:Episode)
@@ -408,7 +386,8 @@ class EpisodeStore:
                 e.metadata AS metadata,
                 e.created_at AS created_at,
                 e.created_at_iso AS created_at_iso,
-                score
+                score,
+                COALESCE(e.activation_count, 0) AS activation_count{embedding_return}
             ORDER BY score DESC
             LIMIT $top_k
         """
@@ -417,7 +396,7 @@ class EpisodeStore:
             "group_id": self._group_id,
             "query_vec": embedding,
             "min_score": min_score,
-            "top_k": top_k,
+            "top_k": top_k * 2,  # Over-fetch for temporal re-ranking
         }
         if episode_type:
             params["episode_type"] = episode_type
@@ -427,23 +406,29 @@ class EpisodeStore:
             params["before_time"] = before_time
 
         result = await self._graph.ro_query(cypher, params=params)
+        rows = self._parse_results(result, json_columns=("metadata",))
 
-        if not result.result_set:
-            return []
+        # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
+        from ..scoring import apply_temporal_score, apply_hebbian_score
+        from ..config import (
+            get_episode_half_life, get_episode_alpha,
+            get_hebbian_enabled, get_hebbian_beta_episode,
+        )
 
-        columns = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
-        rows = []
-        for row in result.result_set:
-            record = {}
-            for i, col in enumerate(columns):
-                val = row[i] if i < len(row) else None
-                if col == "metadata" and isinstance(val, str):
-                    try:
-                        val = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                record[col] = val
-            rows.append(record)
+        if get_hebbian_enabled():
+            rows = apply_hebbian_score(
+                rows,
+                beta=get_hebbian_beta_episode(),
+                alpha=get_episode_alpha(),
+                half_life_hours=get_episode_half_life(),
+            )
+        else:
+            rows = apply_temporal_score(
+                rows,
+                alpha=get_episode_alpha(),
+                half_life_hours=get_episode_half_life(),
+            )
+        rows = rows[:top_k]
 
         if not expand_adjacent:
             logger.debug(f"Search returned {len(rows)} episodes")
@@ -656,31 +641,7 @@ class EpisodeStore:
             logger.warning(f"Entity search failed: {e}")
             return []
 
-        if not result.result_set:
-            return []
-
-        columns = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
-        rows = []
-        for row in result.result_set:
-            record = {}
-            for i, col in enumerate(columns):
-                val = row[i] if i < len(row) else None
-                if col == "metadata" and isinstance(val, str):
-                    try:
-                        val = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                record[col] = val
-            rows.append(record)
-        return rows
-
-    async def _embed(self, text: str) -> List[float]:
-        """Generate embedding via OpenAI-compatible API."""
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text,
-        )
-        return response.data[0].embedding
+        return self._parse_results(result, json_columns=("metadata",))
 
 
 async def create_episode_store(
@@ -699,7 +660,6 @@ async def create_episode_store(
     Returns:
         Initialized EpisodeStore with indexes created.
     """
-    import os
     from falkordb.asyncio import FalkorDB
     from openai import AsyncOpenAI
 

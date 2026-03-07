@@ -10,30 +10,19 @@ Search path: embed query (~200ms) → hybrid vector + label search (~50ms) → d
 
 import json
 import logging
-import re
 import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from .base_store import BaseStore, normalize_name
+
 logger = logging.getLogger(__name__)
 
-
-def normalize_label(raw: str) -> str:
-    """
-    Normalize a semantic label for consistent storage and retrieval.
-
-    "Web Search" → "web-search"
-    "web_search" → "web-search"
-    "Machine Learning!" → "machine-learning"
-    """
-    label = raw.lower().strip()
-    label = label.replace("_", "-").replace(" ", "-")
-    label = re.sub(r"[^a-z0-9\-]", "", label)
-    label = re.sub(r"-+", "-", label).strip("-")
-    return label
+# Backwards-compatible alias
+normalize_label = normalize_name
 
 
-class KnowledgeStore:
+class KnowledgeStore(BaseStore):
     """
     Knowledge storage with vector search and label-based retrieval on FalkorDB.
 
@@ -49,18 +38,6 @@ class KnowledgeStore:
         (:Knowledge)-[:DERIVED_FROM]->(:Episode)
     """
 
-    def __init__(
-        self,
-        graph,           # falkordb.asyncio.AsyncGraph
-        openai_client,   # openai.AsyncOpenAI
-        embedding_model: str,
-        group_id: str = "default",
-    ):
-        self._graph = graph
-        self._client = openai_client
-        self._model = embedding_model
-        self._group_id = group_id
-
     async def ensure_indexes(self) -> None:
         """Create indexes on Knowledge and Label nodes if they don't exist."""
         index_queries = [
@@ -68,6 +45,7 @@ class KnowledgeStore:
             "CREATE INDEX FOR (k:Knowledge) ON (k.group_id)",
             "CREATE INDEX FOR (k:Knowledge) ON (k.knowledge_type)",
             "CREATE INDEX FOR (k:Knowledge) ON (k.created_at)",
+            "CREATE INDEX FOR (k:Knowledge) ON (k.activation_count)",
             "CREATE INDEX FOR (l:Label) ON (l.name)",
         ]
         for q in index_queries:
@@ -75,6 +53,17 @@ class KnowledgeStore:
                 await self._graph.query(q)
             except Exception:
                 pass  # Index may already exist
+
+        # Backfill activation_count for Hebbian learning
+        try:
+            await self._graph.query("""
+                MATCH (k:Knowledge)
+                WHERE k.activation_count IS NULL
+                SET k.activation_count = 0, k.last_activated_at = k.created_at
+            """)
+        except Exception:
+            pass
+
         logger.debug("KnowledgeStore indexes ensured")
 
     async def store_knowledge(
@@ -203,7 +192,8 @@ class KnowledgeStore:
                 k.confidence AS confidence,
                 k.source_mission AS source_mission,
                 k.created_at AS created_at,
-                score
+                score,
+                COALESCE(k.activation_count, 0) AS activation_count
             ORDER BY score DESC
             LIMIT $top_k
         """
@@ -212,13 +202,35 @@ class KnowledgeStore:
             "group_id": self._group_id,
             "query_vec": query_embedding,
             "min_score": min_score,
-            "top_k": top_k,
+            "top_k": top_k * 2,  # Over-fetch for temporal re-ranking
         }
         if knowledge_type:
             params["knowledge_type"] = knowledge_type
 
         result = await self._graph.ro_query(cypher, params=params)
-        return self._parse_results(result)
+        rows = self._parse_results(result)
+
+        # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
+        from ..scoring import apply_temporal_score, apply_hebbian_score
+        from ..config import (
+            get_knowledge_half_life, get_knowledge_alpha,
+            get_hebbian_enabled, get_hebbian_beta_knowledge,
+        )
+
+        if get_hebbian_enabled():
+            rows = apply_hebbian_score(
+                rows,
+                beta=get_hebbian_beta_knowledge(),
+                alpha=get_knowledge_alpha(),
+                half_life_hours=get_knowledge_half_life(),
+            )
+        else:
+            rows = apply_temporal_score(
+                rows,
+                alpha=get_knowledge_alpha(),
+                half_life_hours=get_knowledge_half_life(),
+            )
+        return rows[:top_k]
 
     async def search_by_labels(
         self,
@@ -317,43 +329,3 @@ class KnowledgeStore:
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
 
-    def _parse_results(self, result) -> List[Dict[str, Any]]:
-        """Parse FalkorDB QueryResult into list of dicts."""
-        if not result.result_set:
-            return []
-
-        columns = [
-            h[1] if isinstance(h, (list, tuple)) else h for h in result.header
-        ]
-        rows = []
-        for row in result.result_set:
-            record = {}
-            for i, col in enumerate(columns):
-                val = row[i] if i < len(row) else None
-                if col == "labels" and isinstance(val, str):
-                    try:
-                        val = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                record[col] = val
-            rows.append(record)
-
-        return rows
-
-    async def _embed(self, text: str) -> List[float]:
-        """Generate embedding via OpenAI-compatible API."""
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text,
-        )
-        return response.data[0].embedding
-
-    async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Batch embedding for multiple knowledge entries."""
-        if not texts:
-            return []
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-        )
-        return [item.embedding for item in response.data]

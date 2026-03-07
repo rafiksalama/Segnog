@@ -25,20 +25,45 @@ graph_name = "episode_store"
 
 # Embeddings
 [default.embeddings]
-model = "qwen/qwen3-embedding-8b"
+model = "qwen/qwen3-embedding-8b:nitro"
 base_url = "https://openrouter.ai/api/v1"
 
 # LLM (for smart operations)
 [default.llm]
-flash_model = "x-ai/grok-4.1-fast"
+flash_model = "arcee-ai/trinity-mini"
 base_url = "https://openrouter.ai/api/v1"
 
 # DSPy (for knowledge/artifact extraction)
 [default.dspy]
 models = [
-    "deepseek/deepseek-v3.2",
-    "x-ai/grok-4.1-fast",
+    "arcee-ai/trinity-mini",
 ]
+
+# Session (short-term memory in DragonflyDB)
+[default.session]
+ttl_seconds = 3600
+hydration_enabled = true
+cold_start_sync = true
+
+# Temporal scoring (dual-dimension: semantic + temporal)
+[default.scoring]
+session_half_life_hours = 0.5
+session_alpha = 0.3
+episode_half_life_hours = 168.0
+episode_alpha = 0.2
+knowledge_half_life_hours = 720.0
+knowledge_alpha = 0.1
+
+# Hebbian learning (co-activation reinforcement)
+[default.hebbian]
+enabled = true
+learning_rate = 0.1
+beta_episode = 0.1
+beta_knowledge = 0.05
+max_co_activation_pairs = 15
+decay_rate = 0.01
+decay_interval_hours = 168
+activation_cap = 1000
 
 # Background worker (REM sleep cycles)
 [default.background]

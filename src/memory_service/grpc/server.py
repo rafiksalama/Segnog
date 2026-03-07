@@ -17,7 +17,6 @@ from typing import Any, Dict
 
 import grpc
 from grpc import aio as grpc_aio
-from grpc_reflection.v1alpha import reflection
 
 from .service_handler import MemoryServiceHandler
 

@@ -35,16 +35,25 @@ class MemoryServiceHandler:
         self._knowledge_store = knowledge_store
         self._artifact_store = artifact_store
 
+    def _apply_scope(self, req: dict, *stores) -> tuple:
+        """Extract scope from request and apply to dragonfly + stores.
+
+        Returns (group_id, workflow_id).
+        """
+        scope = req.get("scope", {})
+        group_id = scope.get("group_id", "default")
+        workflow_id = scope.get("workflow_id", "default")
+        self._dragonfly.set_scope(group_id=group_id, workflow_id=workflow_id)
+        for store in stores:
+            store._group_id = group_id
+        return group_id, workflow_id
+
     # =========================================================================
     # Events
     # =========================================================================
 
     async def log_event(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._dragonfly.set_scope(
-            group_id=scope.get("group_id", "default"),
-            workflow_id=scope.get("workflow_id", "default"),
-        )
+        self._apply_scope(req)
         data = req.get("event_data_json", "{}")
         if isinstance(data, str):
             try:
@@ -59,11 +68,7 @@ class MemoryServiceHandler:
         return {"event_id": event_id or ""}
 
     async def get_recent_events(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._dragonfly.set_scope(
-            group_id=scope.get("group_id", "default"),
-            workflow_id=scope.get("workflow_id", "default"),
-        )
+        self._apply_scope(req)
         events = await self._dragonfly.get_recent_events(
             count=req.get("count", 10),
             event_type=req.get("event_type_filter") or None,
@@ -71,11 +76,7 @@ class MemoryServiceHandler:
         return {"events": events}
 
     async def search_events(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._dragonfly.set_scope(
-            group_id=scope.get("group_id", "default"),
-            workflow_id=scope.get("workflow_id", "default"),
-        )
+        self._apply_scope(req)
         event_types = req.get("event_types", [])
         limit = req.get("limit", 50)
         events = await self._dragonfly.get_recent_events(count=limit)
@@ -88,9 +89,7 @@ class MemoryServiceHandler:
     # =========================================================================
 
     async def store_episode(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._episode_store._group_id = scope.get("group_id", "default")
-
+        self._apply_scope(req, self._episode_store)
         metadata = req.get("metadata_json")
         if isinstance(metadata, str):
             try:
@@ -106,8 +105,7 @@ class MemoryServiceHandler:
         return {"uuid": uuid}
 
     async def search_episodes(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._episode_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._episode_store)
         results = await self._episode_store.search_episodes(
             query=req.get("query", ""),
             top_k=req.get("top_k", 25),
@@ -121,8 +119,7 @@ class MemoryServiceHandler:
         return {"episodes": results}
 
     async def link_episodes(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._episode_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._episode_store)
         success = await self._episode_store.link_episodes(
             from_uuid=req.get("from_uuid", ""),
             to_uuid=req.get("to_uuid", ""),
@@ -136,8 +133,7 @@ class MemoryServiceHandler:
     # =========================================================================
 
     async def store_knowledge(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._knowledge_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._knowledge_store)
         entries = req.get("entries", [])
         uuids = await self._knowledge_store.store_knowledge(
             entries=entries,
@@ -148,8 +144,7 @@ class MemoryServiceHandler:
         return {"uuids": uuids}
 
     async def search_knowledge(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._knowledge_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._knowledge_store)
         results = await self._knowledge_store.search_hybrid(
             query=req.get("query", ""),
             labels=req.get("labels") or None,
@@ -159,8 +154,7 @@ class MemoryServiceHandler:
         return {"entries": results}
 
     async def search_by_labels(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._knowledge_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._knowledge_store)
         results = await self._knowledge_store.search_by_labels(
             labels=req.get("labels", []),
             top_k=req.get("top_k", 10),
@@ -172,8 +166,7 @@ class MemoryServiceHandler:
     # =========================================================================
 
     async def store_artifacts(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._artifact_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._artifact_store)
         entries = req.get("entries", [])
         uuids = await self._artifact_store.store_artifacts(
             entries=entries,
@@ -184,8 +177,7 @@ class MemoryServiceHandler:
         return {"uuids": uuids}
 
     async def search_artifacts(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._artifact_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._artifact_store)
         results = await self._artifact_store.search_hybrid(
             query=req.get("query", ""),
             labels=req.get("labels") or None,
@@ -195,22 +187,19 @@ class MemoryServiceHandler:
         return {"entries": results}
 
     async def get_artifact(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._artifact_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._artifact_store)
         result = await self._artifact_store.get_by_uuid(req.get("uuid", ""))
         return {"artifact": result, "found": result is not None}
 
     async def list_recent_artifacts(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._artifact_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._artifact_store)
         results = await self._artifact_store.list_recent(
             limit=req.get("limit", 50),
         )
         return {"entries": results}
 
     async def delete_artifact(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._artifact_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._artifact_store)
         existed = await self._artifact_store.delete_by_uuid(req.get("uuid", ""))
         return {"existed": existed}
 
@@ -219,9 +208,7 @@ class MemoryServiceHandler:
     # =========================================================================
 
     async def persist_execution_state(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        group_id = scope.get("group_id", "default")
-        workflow_id = scope.get("workflow_id", "default")
+        group_id, workflow_id = self._apply_scope(req)
         state_key = f"exec_state:{group_id}:{workflow_id}"
 
         mapping = {
@@ -238,9 +225,7 @@ class MemoryServiceHandler:
         return {"success": True}
 
     async def get_execution_state(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        group_id = scope.get("group_id", "default")
-        workflow_id = scope.get("workflow_id", "default")
+        group_id, workflow_id = self._apply_scope(req)
         state_key = f"exec_state:{group_id}:{workflow_id}"
 
         data = await self._dragonfly.hgetall(state_key)
@@ -327,11 +312,7 @@ class MemoryServiceHandler:
         }
 
     async def get_memory_context(self, req: dict) -> dict:
-        scope = req.get("scope", {})
-        self._dragonfly.set_scope(
-            group_id=scope.get("group_id", "default"),
-            workflow_id=scope.get("workflow_id", "default"),
-        )
+        self._apply_scope(req)
         event_limit = req.get("event_limit", 5)
         events = await self._dragonfly.get_recent_events(count=event_limit)
 
@@ -382,8 +363,7 @@ class MemoryServiceHandler:
 
     async def synthesize_background_op(self, req: dict) -> dict:
         from ..smart.synthesize import synthesize_background
-        scope = req.get("scope", {})
-        self._episode_store._group_id = scope.get("group_id", "default")
+        self._apply_scope(req, self._episode_store)
         result = await synthesize_background(
             task=req.get("task", ""),
             long_term_context=req.get("long_term_context", ""),
@@ -429,11 +409,7 @@ class MemoryServiceHandler:
 
     async def compress_events_op(self, req: dict) -> dict:
         from ..smart.compress import compress_events
-        scope = req.get("scope", {})
-        self._dragonfly.set_scope(
-            group_id=scope.get("group_id", "default"),
-            workflow_id=scope.get("workflow_id", "default"),
-        )
+        self._apply_scope(req)
         result = await compress_events(
             short_term_memory=self._short_term,
             episode_store=self._episode_store,
@@ -449,136 +425,23 @@ class MemoryServiceHandler:
 
     async def observe(self, req: dict) -> dict:
         """
-        Observe endpoint — accept an observation, judge it, store it,
-        and return relevant context automatically.
+        Observe endpoint — delegates to core observe logic.
 
-        Input keys:
-            session_id: str — identifies the session (maps to group_id)
-            content: str — the observation text
-            timestamp: str (optional) — ISO or epoch timestamp
-            source: str (optional) — who generated this
-            metadata: dict (optional) — extra context
-
-        Returns:
-            episode_uuid, observation_type, context (episodes + knowledge)
+        Uses the short-term first architecture: DragonflyDB session as primary,
+        with background FalkorDB hydration.
         """
-        import asyncio
-        from ..smart.judge_observation import judge_observation
+        from ..core.observe import observe_core
 
-        session_id = req.get("session_id", "default")
-        content = req.get("content", "")
-        timestamp = req.get("timestamp")
-        source = req.get("source", "")
-        metadata = dict(req.get("metadata") or {})
-        model = req.get("model")
-
-        if timestamp:
-            metadata["date_time"] = timestamp
-        if source:
-            metadata["source"] = source
-
-        # Set scope
-        self._dragonfly.set_scope(group_id=session_id, workflow_id=session_id)
-        self._episode_store._group_id = session_id
-        self._knowledge_store._group_id = session_id
-
-        # Step 1: Judge the observation
-        try:
-            judge_result = await judge_observation(content, source, model)
-        except Exception as e:
-            logger.warning(f"Observation judge failed: {e}")
-            judge_result = {
-                "observation_type": "chat",
-                "storage_tier": "both",
-                "search_query": content,
-                "search_labels": [],
-                "importance": "medium",
-            }
-
-        obs_type = judge_result["observation_type"]
-        tier = judge_result["storage_tier"]
-        search_query = judge_result["search_query"]
-        search_labels = judge_result["search_labels"]
-        importance = judge_result["importance"]
-
-        importance_params = {
-            "low":    {"top_k": 5,  "min_score": 0.60},
-            "medium": {"top_k": 10, "min_score": 0.55},
-            "high":   {"top_k": 15, "min_score": 0.50},
-        }
-        params = importance_params.get(importance, importance_params["medium"])
-
-        # Step 2: Store
-        episode_uuid = ""
-        embedding = None
-
-        if tier in ("short_term", "both"):
-            try:
-                await self._dragonfly.log_event(obs_type, {
-                    "content": content,
-                    **(req.get("metadata") or {}),
-                })
-            except Exception as e:
-                logger.warning(f"Failed to log short-term event: {e}")
-
-        if tier in ("long_term", "both"):
-            try:
-                embedding = await self._episode_store._embed(content)
-                episode_uuid = await self._episode_store._store_with_embedding(
-                    content=content,
-                    embedding=embedding,
-                    metadata=metadata,
-                    episode_type="raw",
-                    auto_link=True,
-                )
-            except Exception as e:
-                logger.error(f"Failed to store episode: {e}")
-
-        # Step 3: Retrieve
-        episode_results = []
-        knowledge_results = []
-
-        try:
-            if embedding is not None:
-                ep_task = self._episode_store._search_with_embedding(
-                    embedding=embedding,
-                    top_k=params["top_k"],
-                    min_score=params["min_score"],
-                )
-            else:
-                ep_task = self._episode_store.search_episodes(
-                    query=search_query,
-                    top_k=params["top_k"],
-                    min_score=params["min_score"],
-                )
-
-            kn_task = self._knowledge_store.search_hybrid(
-                query=search_query,
-                labels=search_labels if search_labels else None,
-                top_k=5,
-                min_score=0.50,
-            )
-
-            episode_results, knowledge_results = await asyncio.gather(
-                ep_task, kn_task,
-            )
-        except Exception as e:
-            logger.error(f"Retrieval failed: {e}")
-
-        # Filter out the just-stored episode
-        if episode_uuid:
-            episode_results = [
-                e for e in episode_results if e.get("uuid") != episode_uuid
-            ]
-
-        return {
-            "episode_uuid": episode_uuid,
-            "observation_type": obs_type,
-            "context": {
-                "episodes": episode_results,
-                "knowledge": knowledge_results,
-            },
-        }
+        return await observe_core(
+            episode_store=self._episode_store,
+            knowledge_store=self._knowledge_store,
+            dragonfly=self._dragonfly,
+            session_id=req.get("session_id", "default"),
+            content=req.get("content", ""),
+            timestamp=req.get("timestamp"),
+            source=req.get("source", ""),
+            metadata=dict(req.get("metadata") or {}),
+        )
 
     # =========================================================================
     # Pipelines (composite operations — reduce round trips)
@@ -599,17 +462,11 @@ class MemoryServiceHandler:
         """
         import asyncio
 
-        scope = req.get("scope", {})
-        group_id = scope.get("group_id", "default")
-        workflow_id = scope.get("workflow_id", "default")
+        self._apply_scope(
+            req, self._episode_store, self._knowledge_store, self._artifact_store,
+        )
         task = req.get("task", "")
         model = req.get("model") or None
-
-        # Set scope on all stores
-        self._dragonfly.set_scope(group_id=group_id, workflow_id=workflow_id)
-        self._episode_store._group_id = group_id
-        self._knowledge_store._group_id = group_id
-        self._artifact_store._group_id = group_id
 
         # Step 0: Task reinterpretation
         search_labels = []
@@ -788,9 +645,9 @@ class MemoryServiceHandler:
           6. Store artifacts in graph
           7. Compress old raw events
         """
-        scope = req.get("scope", {})
-        group_id = scope.get("group_id", "default")
-        workflow_id = scope.get("workflow_id", "default")
+        self._apply_scope(
+            req, self._episode_store, self._knowledge_store, self._artifact_store,
+        )
         model = req.get("model") or None
 
         mission_data_json = req.get("mission_data_json", "{}")
@@ -798,12 +655,6 @@ class MemoryServiceHandler:
             mission_data = json.loads(mission_data_json)
         else:
             mission_data = mission_data_json
-
-        # Set scope
-        self._dragonfly.set_scope(group_id=group_id, workflow_id=workflow_id)
-        self._episode_store._group_id = group_id
-        self._knowledge_store._group_id = group_id
-        self._artifact_store._group_id = group_id
 
         task = mission_data.get("task", "")
         status = mission_data.get("status", "")
@@ -940,6 +791,3 @@ class MemoryServiceHandler:
             "artifact_count": artifact_count,
             "events_compressed": events_compressed,
         }
-
-    async def not_implemented(self, req: dict) -> dict:
-        return {"error": "Not implemented"}
