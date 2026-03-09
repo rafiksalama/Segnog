@@ -7,7 +7,7 @@ DSPy Signatures for Knowledge Operations
    entries from completed mission data.
 """
 
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 import dspy
@@ -21,28 +21,47 @@ class KnowledgeEntryModel(BaseModel):
     """A single extracted knowledge entry."""
     content: str = Field(
         description="The knowledge statement: specific, actionable, 1-3 sentences. "
-                    "Include concrete details (numbers, names, methods, URLs) — "
+                    "Include concrete details (numbers, names, dates, methods, URLs) — "
                     "not vague summaries."
     )
     knowledge_type: str = Field(
-        description="One of: 'fact' (concrete finding), 'pattern' (recurring strategy), "
-                    "'tool_insight' (tool effectiveness/usage), 'experience' (lesson learned), "
-                    "'conclusion' (high-level takeaway)"
+        description="One of: "
+                    "'fact' (concrete finding or personal detail), "
+                    "'pattern' (recurring strategy or behavior), "
+                    "'tool_insight' (tool effectiveness/usage), "
+                    "'experience' (lesson learned), "
+                    "'conclusion' (high-level takeaway), "
+                    "'preference' (stated like/dislike, e.g. 'prefers dark mode'), "
+                    "'relationship' (connection between people, e.g. 'X is Y\\'s sister'), "
+                    "'event' (something that happened/will happen at a specific time), "
+                    "'identity' (who someone is, their role, characteristics), "
+                    "'temporal_fact' (time-bound or recurring fact, e.g. 'yoga every Tuesday')"
     )
     labels: List[str] = Field(
-        description="3-7 semantic labels for retrieval. Lowercase, hyphenated. "
+        description="5-15 semantic labels for retrieval. Lowercase, hyphenated. "
                     "Include: domain terms ('itin-processing'), tool names ('web-search'), "
-                    "methodologies ('parallel-research'), topics ('tax-filing'). "
-                    "Be specific: 'python-asyncio' not 'programming'."
+                    "entity names ('caroline', 'dr-smith'), "
+                    "methodologies ('parallel-research'), topics ('tax-filing'), "
+                    "temporal markers ('weekly', 'summer-2023'). "
+                    "Be specific: 'python-asyncio' not 'programming'. "
+                    "More labels means better retrieval — be generous."
     )
     confidence: float = Field(
         ge=0.0, le=1.0,
         description="Confidence in this knowledge: 0.0 (speculative) to 1.0 (verified fact). "
-                    "Lower for inferences, higher for directly observed results."
+                    "Lower for inferences, higher for directly stated information."
+    )
+    event_date: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date (YYYY-MM-DD) when the fact/event occurred or will occur, "
+                    "if a specific date is mentioned or can be inferred. "
+                    "Examples: '2023-05-07' for 'May 7, 2023'. "
+                    "Resolve relative dates ('yesterday', 'last year') using context dates. "
+                    "Use null if no specific date is associated."
     )
     reasoning: str = Field(
         description="Brief explanation of why this knowledge is valuable and how it was "
-                    "derived from the mission data. 1-2 sentences."
+                    "derived from the source data. 1-2 sentences."
     )
 
 
@@ -60,55 +79,70 @@ class KnowledgeExtractionResult(BaseModel):
 # =========================================================================
 
 class KnowledgeExtractionSignature(dspy.Signature):
-    """You are a knowledge extraction specialist. Your job is to mine completed mission data
-    for every piece of reusable knowledge — facts discovered, patterns observed, tool insights
-    gained, lessons learned, and conclusions drawn.
+    """You are a knowledge extraction specialist. Your job is to mine source data
+    for every piece of reusable knowledge — facts discovered, patterns observed,
+    tool insights gained, lessons learned, personal preferences, relationships,
+    events, and identity information.
 
-    Be EXHAUSTIVE and DETAILED. Extract every piece of knowledge that could be useful in
-    future missions on related topics. Each entry should be self-contained and specific enough
+    Be EXHAUSTIVE and DETAILED. Extract every piece of knowledge that could be useful
+    in future interactions. Each entry should be self-contained and specific enough
     to be useful without additional context.
 
     Knowledge types:
     - fact: Concrete, verifiable findings ("ITIN processing via mail takes 7-11 weeks")
-    - pattern: Recurring strategies or approaches ("Parallel web searches outperform sequential for multi-faceted research")
-    - tool_insight: Tool effectiveness, limitations, or best practices ("web-search fails for academic papers, use scholar-search instead")
-    - experience: Lessons learned from execution ("Fetching >3 URLs per iteration doesn't improve quality")
-    - conclusion: High-level synthesized takeaways ("Framework X is best for real-time applications")
+    - pattern: Recurring strategies or behaviors ("User always asks for summaries first")
+    - tool_insight: Tool effectiveness, limitations, best practices
+    - experience: Lessons learned from execution
+    - conclusion: High-level synthesized takeaways
+    - preference: Stated like/dislike ("prefers dark mode", "vegetarian")
+    - relationship: Connection between people ("Caroline is Julia's daughter")
+    - event: Something that happened/will happen ("Caroline went to LGBTQ group on May 7, 2023")
+    - identity: Who someone is ("Dr. Smith is a cardiologist at Mayo Clinic")
+    - temporal_fact: Time-bound or recurring facts ("yoga class every Tuesday at 6pm")
+
+    Temporal extraction:
+    - When a knowledge entry references a SPECIFIC date, extract it as event_date (YYYY-MM-DD)
+    - Resolve relative dates ("yesterday", "last year") using the context date if available
+    - Recurring events ("every Tuesday") should NOT get an event_date — use temporal_fact type
 
     Label guidelines:
     - Use specific domain terms: "itin-processing" not "taxes"
-    - Include tool names when relevant: "web-search", "scholar-search", "fetch-url"
-    - Include methodology labels: "parallel-research", "sequential-workflow", "delegation"
-    - Include topic labels: "pricing", "comparison", "how-to", "best-practices"
+    - Include entity names: "caroline", "dr-smith", "mayo-clinic"
+    - Include tool names when relevant: "web-search", "scholar-search"
+    - Include methodology labels: "parallel-research", "sequential-workflow"
+    - Include topic labels: "pricing", "comparison", "how-to", "health"
+    - Include temporal markers when relevant: "weekly", "summer-2023", "deadline"
     - Each label should be a single concept, lowercase, hyphenated
-    - Be generous with labels — more labels means better retrieval later
+    - Aim for 5-15 labels per entry — more labels means better retrieval
     """
 
+    data_source_type: str = dspy.InputField(
+        desc="Type of source data: 'mission' (agent task execution with tool calls, "
+             "plans, and execution trace) or 'conversation' (dialogue between people). "
+             "Adjusts extraction focus accordingly."
+    )
     mission_task: str = dspy.InputField(
-        desc="The original task/question the agent was asked to accomplish"
+        desc="The original task/question or conversation topic"
     )
     mission_outcome: str = dspy.InputField(
-        desc="Mission status ('success' or 'max_iterations') and iteration count"
+        desc="Outcome summary: mission status + iterations, or conversation summary"
     )
     full_report: str = dspy.InputField(
-        desc="The agent's complete final output/report"
+        desc="The complete output/report or full conversation text"
     )
     execution_trace: str = dspy.InputField(
-        desc="Complete execution trace: all tool calls with their full outputs, "
-             "agent reasoning at each step, intermediate state descriptions, "
-             "and any agent delegations with their results"
+        desc="Execution trace (tool calls, reasoning steps) or conversation context"
     )
     plan_execution: str = dspy.InputField(
-        desc="The execution plan with status of each step "
-             "(completed/in-progress/blocked/skipped/pending)"
+        desc="Plan with step statuses, or 'N/A' for conversations"
     )
     reflection: str = dspy.InputField(
-        desc="Post-mission reflection analyzing what worked, what didn't, "
-             "and lessons learned"
+        desc="Post-completion reflection or summary analysis"
     )
 
     extraction: KnowledgeExtractionResult = dspy.OutputField(
-        desc="Exhaustive list of extracted knowledge entries with semantic labels"
+        desc="Exhaustive list of extracted knowledge entries with semantic labels "
+             "and optional event_date for temporally-anchored knowledge"
     )
 
 

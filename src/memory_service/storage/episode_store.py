@@ -48,8 +48,16 @@ class EpisodeStore(BaseStore):
     Episode types:
         - "raw": Mission execution traces
         - "reflection": Curator-produced summaries
-        - "compressed": Archived summaries of old raw episodes
+
+    Set an event publisher via set_event_publisher() to emit NATS events
+    after each episode is stored.
     """
+
+    _event_publisher = None
+
+    def set_event_publisher(self, publisher) -> None:
+        """Inject NATS event publisher for episode lifecycle events."""
+        self._event_publisher = publisher
 
     async def ensure_indexes(self) -> None:
         """Create indexes on Episode nodes if they don't exist."""
@@ -186,6 +194,20 @@ class EpisodeStore(BaseStore):
             f"Stored episode {episode_uuid[:8]} "
             f"(type={episode_type}, len={len(content)})"
         )
+
+        # Publish event to NATS (fire-and-forget)
+        if self._event_publisher:
+            import asyncio
+
+            asyncio.create_task(self._event_publisher.episode_stored(
+                episode_uuid=episode_uuid,
+                group_id=self._group_id,
+                episode_type=episode_type,
+                content_length=len(content),
+                consolidation_status=consolidation_status,
+                created_at=created_at,
+            ))
+
         return episode_uuid
 
     # ── Linking ────────────────────────────────────────────────────────

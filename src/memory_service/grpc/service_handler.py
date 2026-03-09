@@ -150,6 +150,8 @@ class MemoryServiceHandler:
             labels=req.get("labels") or None,
             top_k=req.get("top_k", 10),
             min_score=req.get("min_score", 0.50),
+            start_date=req.get("start_date"),
+            end_date=req.get("end_date"),
         )
         return {"entries": results}
 
@@ -389,10 +391,12 @@ class MemoryServiceHandler:
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
+        data_source_type = mission_data.get("data_source_type", "mission")
         entries = await extract_knowledge(
             mission_data=mission_data,
             reflection=req.get("reflection", ""),
             model=req.get("model") or None,
+            data_source_type=data_source_type,
         )
         return {"entries_json": json.dumps(entries)}
 
@@ -716,10 +720,12 @@ class MemoryServiceHandler:
         knowledge_entries = []
         try:
             from ..smart.extract_knowledge import extract_knowledge
+            data_source_type = mission_data.get("data_source_type", "mission")
             knowledge_entries = await extract_knowledge(
                 mission_data=mission_data,
                 reflection=reflection,
                 model=model,
+                data_source_type=data_source_type,
             )
             logger.info(f"Extracted {len(knowledge_entries)} knowledge entries")
         except Exception as e:

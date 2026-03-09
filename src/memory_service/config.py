@@ -82,7 +82,7 @@ def get_rest_port() -> int:
 
 def get_flash_model() -> str:
     s = get_settings()
-    return s.get("llm.flash_model", "arcee-ai/trinity-mini")
+    return s.get("llm.flash_model", "minimax/minimax-m2.5")
 
 
 def get_llm_base_url() -> str:
@@ -133,7 +133,7 @@ def get_session_half_life() -> float:
 
 def get_session_alpha() -> float:
     s = get_settings()
-    return float(s.get("scoring.session_alpha", 0.3))
+    return float(s.get("scoring.session_alpha", 0.5))
 
 
 def get_episode_half_life() -> float:
@@ -143,7 +143,7 @@ def get_episode_half_life() -> float:
 
 def get_episode_alpha() -> float:
     s = get_settings()
-    return float(s.get("scoring.episode_alpha", 0.2))
+    return float(s.get("scoring.episode_alpha", 0.3))
 
 
 def get_knowledge_half_life() -> float:
@@ -153,13 +153,13 @@ def get_knowledge_half_life() -> float:
 
 def get_knowledge_alpha() -> float:
     s = get_settings()
-    return float(s.get("scoring.knowledge_alpha", 0.1))
+    return float(s.get("scoring.knowledge_alpha", 0.2))
 
 
 # Hebbian learning
 def get_hebbian_enabled() -> bool:
     s = get_settings()
-    return bool(s.get("hebbian.enabled", False))
+    return bool(s.get("hebbian.enabled", True))
 
 
 def get_hebbian_learning_rate() -> float:
@@ -169,12 +169,12 @@ def get_hebbian_learning_rate() -> float:
 
 def get_hebbian_beta_episode() -> float:
     s = get_settings()
-    return float(s.get("hebbian.beta_episode", 0.1))
+    return float(s.get("hebbian.beta_episode", 0.2))
 
 
 def get_hebbian_beta_knowledge() -> float:
     s = get_settings()
-    return float(s.get("hebbian.beta_knowledge", 0.05))
+    return float(s.get("hebbian.beta_knowledge", 0.1))
 
 
 def get_hebbian_max_pairs() -> int:
@@ -195,3 +195,32 @@ def get_hebbian_decay_interval_hours() -> float:
 def get_hebbian_activation_cap() -> int:
     s = get_settings()
     return int(s.get("hebbian.activation_cap", 1000))
+
+
+# NATS event bus
+def get_nats_enabled() -> bool:
+    s = get_settings()
+    return bool(s.get("nats.enabled", False))
+
+
+def get_nats_url() -> str:
+    s = get_settings()
+    return os.environ.get(
+        "MEMORY_SERVICE_NATS__URL",
+        s.get("nats.url", "nats://localhost:4222"),
+    )
+
+
+def get_nats_curation_min_episodes() -> int:
+    s = get_settings()
+    return int(s.get("nats.curation_min_episodes", 3))
+
+
+def get_nats_curation_max_wait() -> float:
+    s = get_settings()
+    return float(s.get("nats.curation_max_wait_seconds", 30.0))
+
+
+def get_nats_curation_max_concurrent() -> int:
+    s = get_settings()
+    return int(s.get("nats.curation_max_concurrent", 2))

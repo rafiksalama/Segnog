@@ -10,8 +10,10 @@ services:
     volumes:
       - dragonfly_data:/data/dragonfly
       - falkordb_data:/data/falkordb
+      - nats_data:/data/nats
     restart: unless-stopped
 
 volumes:
   dragonfly_data:
   falkordb_data:
+  nats_data:

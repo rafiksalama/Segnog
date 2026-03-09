@@ -29,10 +29,13 @@ async def setup_backends(app: FastAPI) -> None:
     app.state.knowledge_store = backends["knowledge_store"]
     app.state.artifact_store = backends["artifact_store"]
     app.state.openai_client = backends["openai_client"]
+    app.state.nats_client = backends.get("nats_client")
 
 
 async def teardown_backends(app: FastAPI) -> None:
     """Clean up storage backends."""
+    if hasattr(app.state, "nats_client") and app.state.nats_client:
+        await app.state.nats_client.close()
     if hasattr(app.state, "dragonfly"):
         await app.state.dragonfly.close()
     if hasattr(app.state, "openai_client"):

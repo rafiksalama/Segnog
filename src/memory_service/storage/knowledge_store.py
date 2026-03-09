@@ -46,6 +46,7 @@ class KnowledgeStore(BaseStore):
             "CREATE INDEX FOR (k:Knowledge) ON (k.knowledge_type)",
             "CREATE INDEX FOR (k:Knowledge) ON (k.created_at)",
             "CREATE INDEX FOR (k:Knowledge) ON (k.activation_count)",
+            "CREATE INDEX FOR (k:Knowledge) ON (k.event_date)",
             "CREATE INDEX FOR (l:Label) ON (l.name)",
         ]
         for q in index_queries:
@@ -60,6 +61,16 @@ class KnowledgeStore(BaseStore):
                 MATCH (k:Knowledge)
                 WHERE k.activation_count IS NULL
                 SET k.activation_count = 0, k.last_activated_at = k.created_at
+            """)
+        except Exception:
+            pass
+
+        # Backfill event_date for existing nodes
+        try:
+            await self._graph.query("""
+                MATCH (k:Knowledge)
+                WHERE k.event_date IS NULL
+                SET k.event_date = ''
             """)
         except Exception:
             pass
@@ -112,6 +123,7 @@ class KnowledgeStore(BaseStore):
                     mission_status: $mission_status,
                     source_episode_uuid: $source_episode_uuid,
                     created_at: $created_at,
+                    event_date: $event_date,
                     embedding: vecf32($embedding)
                 })""",
                 params={
@@ -125,6 +137,7 @@ class KnowledgeStore(BaseStore):
                     "mission_status": mission_status,
                     "source_episode_uuid": source_episode_uuid,
                     "created_at": now,
+                    "event_date": entry.get("event_date") or "",
                     "embedding": embedding,
                 },
             )
@@ -192,6 +205,7 @@ class KnowledgeStore(BaseStore):
                 k.confidence AS confidence,
                 k.source_mission AS source_mission,
                 k.created_at AS created_at,
+                COALESCE(k.event_date, '') AS event_date,
                 score,
                 COALESCE(k.activation_count, 0) AS activation_count
             ORDER BY score DESC
@@ -254,6 +268,7 @@ class KnowledgeStore(BaseStore):
                 k.confidence AS confidence,
                 k.source_mission AS source_mission,
                 k.created_at AS created_at,
+                COALESCE(k.event_date, '') AS event_date,
                 toFloat(label_matches) / $total_labels AS score
             ORDER BY label_matches DESC, k.created_at DESC
             LIMIT $top_k
@@ -270,6 +285,49 @@ class KnowledgeStore(BaseStore):
         )
         return self._parse_results(result)
 
+    async def search_by_date_range(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        knowledge_type: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Search knowledge by event_date range. Dates are ISO 8601 (YYYY-MM-DD)."""
+        filters = ["k.group_id = $group_id", "k.event_date <> ''"]
+        params: Dict[str, Any] = {"group_id": self._group_id, "top_k": top_k}
+
+        if start_date:
+            filters.append("k.event_date >= $start_date")
+            params["start_date"] = start_date
+        if end_date:
+            filters.append("k.event_date <= $end_date")
+            params["end_date"] = end_date
+        if knowledge_type:
+            filters.append("k.knowledge_type = $knowledge_type")
+            params["knowledge_type"] = knowledge_type
+
+        where_clause = " AND ".join(filters)
+
+        cypher = f"""
+            MATCH (k:Knowledge)
+            WHERE {where_clause}
+            RETURN
+                k.uuid AS uuid,
+                k.content AS content,
+                k.knowledge_type AS knowledge_type,
+                k.labels AS labels,
+                k.confidence AS confidence,
+                k.source_mission AS source_mission,
+                k.created_at AS created_at,
+                COALESCE(k.event_date, '') AS event_date,
+                1.0 AS score
+            ORDER BY k.event_date DESC
+            LIMIT $top_k
+        """
+
+        result = await self._graph.ro_query(cypher, params=params)
+        return self._parse_results(result)
+
     async def search_hybrid(
         self,
         query: str,
@@ -277,6 +335,8 @@ class KnowledgeStore(BaseStore):
         top_k: int = 10,
         min_score: float = 0.50,
         label_boost: float = 0.15,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: vector similarity + label match boosting.
@@ -325,6 +385,19 @@ class KnowledgeStore(BaseStore):
             match_count = label_map.get(candidate["uuid"], 0)
             label_ratio = match_count / total_labels if total_labels > 0 else 0
             candidate["score"] = candidate["score"] + (label_boost * label_ratio)
+
+        # Optional temporal filter (non-temporal knowledge passes through)
+        if start_date or end_date:
+            def _in_date_range(c):
+                ed = c.get("event_date", "")
+                if not ed:
+                    return True
+                if start_date and ed < start_date:
+                    return False
+                if end_date and ed > end_date:
+                    return False
+                return True
+            candidates = [c for c in candidates if _in_date_range(c)]
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]

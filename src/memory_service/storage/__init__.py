@@ -91,6 +91,22 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     artifact_store = ArtifactStore(graph, openai_client, embedding_model)
     await artifact_store.ensure_indexes()
 
+    # Optional NATS client
+    from ..config import get_nats_enabled, get_nats_url
+
+    nats_client = None
+    if get_nats_enabled():
+        from ..events.client import NatsClient
+        from ..events.publisher import EpisodeEventPublisher
+
+        nats_client = NatsClient(url=get_nats_url())
+        await nats_client.connect()
+
+        # Wire publisher so every episode store emits NATS events
+        publisher = EpisodeEventPublisher(nats_client)
+        episode_store.set_event_publisher(publisher)
+        logger.info("NATS client initialized")
+
     logger.info("All storage backends initialized")
 
     return {
@@ -100,4 +116,5 @@ async def init_backends(session_ttl: int = 3600) -> dict:
         "knowledge_store": knowledge_store,
         "artifact_store": artifact_store,
         "openai_client": openai_client,
+        "nats_client": nats_client,
     }

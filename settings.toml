@@ -30,13 +30,13 @@ base_url = "https://openrouter.ai/api/v1"
 
 # LLM (for smart operations)
 [default.llm]
-flash_model = "arcee-ai/trinity-mini"
+flash_model = "x-ai/grok-4.1-fast"
 base_url = "https://openrouter.ai/api/v1"
 
 # DSPy (for knowledge/artifact extraction)
 [default.dspy]
 models = [
-    "arcee-ai/trinity-mini",
+    "x-ai/grok-4.1-fast",
 ]
 
 # Session (short-term memory in DragonflyDB)
@@ -48,18 +48,18 @@ cold_start_sync = true
 # Temporal scoring (dual-dimension: semantic + temporal)
 [default.scoring]
 session_half_life_hours = 0.5
-session_alpha = 0.3
+session_alpha = 0.5
 episode_half_life_hours = 168.0
-episode_alpha = 0.2
+episode_alpha = 0.3
 knowledge_half_life_hours = 720.0
-knowledge_alpha = 0.1
+knowledge_alpha = 0.2
 
 # Hebbian learning (co-activation reinforcement)
 [default.hebbian]
 enabled = true
 learning_rate = 0.1
-beta_episode = 0.1
-beta_knowledge = 0.05
+beta_episode = 0.2
+beta_knowledge = 0.1
 max_co_activation_pairs = 15
 decay_rate = 0.01
 decay_interval_hours = 168
@@ -71,3 +71,11 @@ enabled = true
 interval_seconds = 60
 batch_size = 5
 min_episodes_for_processing = 3
+
+# NATS event bus (event-driven curation)
+[default.nats]
+enabled = true
+url = "nats://localhost:4222"
+curation_min_episodes = 3
+curation_max_wait_seconds = 30.0
+curation_max_concurrent = 2

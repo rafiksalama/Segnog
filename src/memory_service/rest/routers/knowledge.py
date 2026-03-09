@@ -38,6 +38,8 @@ async def search_knowledge(body: SearchKnowledgeRequest, request: Request):
         labels=body.labels or None,
         top_k=body.top_k,
         min_score=body.min_score,
+        start_date=body.start_date,
+        end_date=body.end_date,
     )
     entries = [_to_record(r) for r in raw]
     return SearchKnowledgeResponse(entries=entries)
@@ -71,5 +73,6 @@ def _to_record(r: dict) -> KnowledgeRecord:
         confidence=r.get("confidence", 0.0),
         source_mission=r.get("source_mission", ""),
         created_at=r.get("created_at", 0.0),
+        event_date=r.get("event_date", ""),
         score=r.get("score", 0.0),
     )

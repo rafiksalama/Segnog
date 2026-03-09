@@ -20,6 +20,7 @@ async def extract_knowledge(
     mission_data: Dict[str, Any],
     reflection: str,
     model: Optional[str] = None,
+    data_source_type: str = "mission",
 ) -> List[Dict[str, Any]]:
     """
     Extract structured knowledge entries from a completed mission using DSPy.
@@ -28,9 +29,10 @@ async def extract_knowledge(
         mission_data: Dict with task, status, output, state, iterations, plan, context.
         reflection: Generated reflection text.
         model: Flash model identifier.
+        data_source_type: "mission" or "conversation" — adjusts extraction focus.
 
     Returns:
-        List of knowledge entry dicts with content, knowledge_type, labels, confidence.
+        List of knowledge entry dicts with content, knowledge_type, labels, confidence, event_date.
     """
     task = mission_data.get("task", "")
     status = mission_data.get("status", "")
@@ -104,6 +106,7 @@ async def extract_knowledge(
 
         with dspy.context(lm=lm, adapter=adapter):
             result = predictor(
+                data_source_type=data_source_type,
                 mission_task=task,
                 mission_outcome=mission_outcome,
                 full_report=full_report,
@@ -115,11 +118,22 @@ async def extract_knowledge(
         extraction = result.extraction
         valid = []
         for entry in extraction.entries:
+            # Validate event_date if present
+            validated_date = None
+            if entry.event_date:
+                try:
+                    from datetime import date
+                    date.fromisoformat(entry.event_date)
+                    validated_date = entry.event_date
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid event_date '{entry.event_date}', discarding")
+
             valid.append({
                 "content": str(entry.content)[:500],
                 "knowledge_type": entry.knowledge_type,
-                "labels": list(entry.labels)[:7],
+                "labels": list(entry.labels)[:15],
                 "confidence": min(1.0, max(0.0, float(entry.confidence))),
+                "event_date": validated_date,
             })
 
         logger.info(f"Extracted {len(valid)} knowledge entries via DSPy")

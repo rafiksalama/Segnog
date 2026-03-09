@@ -29,20 +29,29 @@ async def infer_state(
     Returns:
         One-sentence state description.
     """
-    prompt = f"""Based on this goal and any relevant past experience, describe the current situation in one sentence.
+    memories_text = retrieved_memories if retrieved_memories else "No relevant past experience."
 
-Goal: {task}
+    system = "You describe the current state of a task in one concise sentence. Always respond with exactly one sentence."
+    prompt = f"Goal: {task}\nPast experience: {memories_text}\nDescribe the current state:"
 
-Past experience:
-{retrieved_memories if retrieved_memories else "No relevant past experience."}
+    for attempt in range(2):
+        try:
+            result = await llm_call(
+                prompt, model=model, temperature=0.3, max_tokens=4096,
+                system_prompt=system,
+            )
+            # Take the first non-empty line
+            state = ""
+            for line in result.strip().splitlines():
+                line = line.strip()
+                if line:
+                    state = line
+                    break
+            if state:
+                logger.info(f"Inferred state: {state[:80]}...")
+                return state
+            logger.warning(f"State inference returned empty (attempt {attempt + 1})")
+        except Exception as e:
+            logger.error(f"State inference failed (attempt {attempt + 1}): {e}")
 
-Describe the current state in one sentence (what kind of task this is, what domain, what approach is needed):"""
-
-    try:
-        result = await llm_call(prompt, model=model, temperature=0.1, max_tokens=256)
-        state = result.strip().split("\n")[0].strip()
-        logger.info(f"Inferred state: {state[:80]}...")
-        return state
-    except Exception as e:
-        logger.error(f"State inference failed: {e}")
-        return ""
+    return ""

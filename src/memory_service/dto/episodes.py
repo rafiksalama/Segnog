@@ -72,14 +72,12 @@ class ObserveRequest(BaseModel):
     timestamp: Optional[str] = None  # ISO string or epoch, defaults to now
     source: Optional[str] = None     # who/what generated this observation
     metadata: Optional[Dict[str, Any]] = None
-
-
-class ObserveContext(BaseModel):
-    episodes: List[EpisodeRecord] = []
-    knowledge: List[Dict[str, Any]] = []
+    read_only: bool = False          # If True, return context without writing
 
 
 class ObserveResponse(BaseModel):
-    episode_uuid: str = ""           # empty if short_term only
+    episode_uuid: str = ""
     observation_type: str = "chat"
-    context: ObserveContext = ObserveContext()
+    context: str = ""                # LLM-generated context summary
+    search_labels: List[str] = []    # populated on cold start (reinterpreted)
+    search_query: str = ""           # populated on cold start (optimized query)

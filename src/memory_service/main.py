@@ -18,6 +18,10 @@ from .config import (
     get_background_interval,
     get_background_batch_size,
     get_background_min_episodes,
+    get_nats_enabled,
+    get_nats_curation_min_episodes,
+    get_nats_curation_max_wait,
+    get_nats_curation_max_concurrent,
 )
 from .storage import init_backends
 from .grpc.service_handler import MemoryServiceHandler
@@ -77,13 +81,51 @@ async def main():
     rest_host = get_rest_host()
     rest_port = get_rest_port()
 
-    # Build task list: gRPC + REST + optional REM worker
+    # Build task list: gRPC + REST + background workers
     tasks = [
         run_grpc_server(handler, grpc_port),
         run_rest_server(rest_host, rest_port),
     ]
 
-    if get_background_enabled():
+    nats_client = backends.get("nats_client")
+
+    if nats_client and get_nats_enabled():
+        # NATS event-driven curation replaces polling-based REM worker
+        from .events.publisher import EpisodeEventPublisher
+        from .events.curation_worker import CurationWorker
+        from .events.rem_sweep_worker import REMSweepPublisher, REMSweepWorker
+
+        # Publisher already wired to episode_store in init_backends()
+        publisher = backends["episode_store"]._event_publisher or EpisodeEventPublisher(nats_client)
+
+        curation_worker = CurationWorker(
+            nats_client=nats_client,
+            handler=handler,
+            episode_store=backends["episode_store"],
+            publisher=publisher,
+            min_episodes=get_nats_curation_min_episodes(),
+            max_wait_seconds=get_nats_curation_max_wait(),
+            max_concurrent=get_nats_curation_max_concurrent(),
+        )
+        tasks.append(curation_worker.run())
+
+        sweep_publisher = REMSweepPublisher(
+            nats_client=nats_client,
+            interval_seconds=get_background_interval(),
+        )
+        sweep_worker = REMSweepWorker(
+            nats_client=nats_client,
+            handler=handler,
+            episode_store=backends["episode_store"],
+            batch_size=get_background_batch_size(),
+            min_episodes=1,
+        )
+        tasks.append(sweep_publisher.run())
+        tasks.append(sweep_worker.run())
+        logger.info("NATS event workers enabled (curation + sweep)")
+
+    elif get_background_enabled():
+        # Fallback: traditional polling-based REM worker
         from .background.rem_worker import REMWorker
 
         rem_worker = REMWorker(
@@ -94,13 +136,15 @@ async def main():
             min_episodes=get_background_min_episodes(),
         )
         tasks.append(rem_worker.run())
-        logger.info("REM background worker enabled")
+        logger.info("REM background worker enabled (polling mode)")
 
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
         pass
     finally:
+        if nats_client:
+            await nats_client.close()
         await backends["dragonfly"].close()
         await backends["openai_client"].close()
         logger.info("Agent Memory Service stopped")

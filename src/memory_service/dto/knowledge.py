@@ -9,6 +9,7 @@ class KnowledgeEntry(BaseModel):
     knowledge_type: str = "fact"
     labels: List[str] = Field(default_factory=list)
     confidence: float = 0.8
+    event_date: Optional[str] = None
 
 
 class StoreKnowledgeRequest(BaseModel):
@@ -31,6 +32,7 @@ class KnowledgeRecord(BaseModel):
     confidence: float = 0.0
     source_mission: str = ""
     created_at: float = 0.0
+    event_date: str = ""
     score: float = 0.0
 
 
@@ -40,6 +42,8 @@ class SearchKnowledgeRequest(BaseModel):
     labels: List[str] = Field(default_factory=list)
     top_k: int = 10
     min_score: float = 0.50
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 
 class SearchKnowledgeResponse(BaseModel):

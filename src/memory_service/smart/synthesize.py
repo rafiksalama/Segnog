@@ -90,7 +90,7 @@ Rules:
     episode_uuid = ""
 
     try:
-        narrative = await llm_call(prompt, model=model, temperature=0.2, max_tokens=512)
+        narrative = await llm_call(prompt, model=model, temperature=0.2, max_tokens=4096)
         narrative = narrative.strip()
         logger.info(f"Background narrative synthesized: {len(narrative)} chars")
     except Exception as e:

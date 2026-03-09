@@ -82,7 +82,7 @@ Produce a concise reflection covering:
 """
 
     try:
-        reflection = await llm_call(prompt, model=model, temperature=0.3, max_tokens=1024)
+        reflection = await llm_call(prompt, model=model, temperature=0.3, max_tokens=4096)
         logger.info(f"Generated reflection: {len(reflection)} chars")
         return reflection
     except Exception as e:

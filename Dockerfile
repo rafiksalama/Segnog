@@ -36,6 +36,14 @@ COPY --from=docker.dragonflydb.io/dragonflydb/dragonfly:latest /usr/local/bin/dr
 COPY --from=falkordb/falkordb:latest /usr/local/bin/redis-server /usr/local/bin/falkordb-server
 COPY --from=falkordb/falkordb:latest /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
 
+# ── Install NATS server ──────────────────────────────────────────────────
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    curl -L https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | \
+    tar xz -C /usr/local/bin --strip-components=1 nats-server-v2.10.24-linux-amd64/nats-server && \
+    apt-get purge -y curl && apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # ── Copy Python packages + app source ────────────────────────────────────
 COPY --from=builder /install /usr/local
 COPY src/ src/
@@ -43,7 +51,7 @@ COPY client/ client/
 COPY settings.toml ./
 
 # ── Data directories ──────────────────────────────────────────────────────
-RUN mkdir -p /data/dragonfly /data/falkordb /var/log/supervisor
+RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /var/log/supervisor
 
 # ── Supervisord config ────────────────────────────────────────────────────
 COPY <<'EOF' /etc/supervisor/conf.d/segnog.conf
@@ -66,6 +74,14 @@ autorestart=true
 stdout_logfile=/var/log/supervisor/falkordb.log
 stderr_logfile=/var/log/supervisor/falkordb.log
 
+[program:nats]
+command=nats-server --js --store_dir /data/nats --port 4222
+autostart=true
+autorestart=true
+priority=1
+stdout_logfile=/var/log/supervisor/nats.log
+stderr_logfile=/var/log/supervisor/nats.log
+
 [program:memory-service]
 command=memory-service
 directory=/app
@@ -77,14 +93,14 @@ stdout_logfile=/dev/fd/1
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/fd/2
 stderr_logfile_maxbytes=0
-environment=MEMORY_SERVICE_DRAGONFLY__URL="redis://localhost:6381",MEMORY_SERVICE_FALKORDB__URL="redis://localhost:6380"
+environment=MEMORY_SERVICE_DRAGONFLY__URL="redis://localhost:6381",MEMORY_SERVICE_FALKORDB__URL="redis://localhost:6380",MEMORY_SERVICE_NATS__URL="nats://localhost:4222",MEMORY_SERVICE_NATS__ENABLED="true"
 EOF
 
 # gRPC + REST
 EXPOSE 50051 9000
 
 # Persist database state
-VOLUME ["/data/dragonfly", "/data/falkordb"]
+VOLUME ["/data/dragonfly", "/data/falkordb", "/data/nats"]
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')" || exit 1

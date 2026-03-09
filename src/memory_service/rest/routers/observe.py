@@ -2,11 +2,11 @@
 
 from fastapi import APIRouter, Request
 
-from ...dto.episodes import (
-    ObserveRequest, ObserveResponse, ObserveContext, EpisodeRecord,
-)
+from ...dto.episodes import ObserveRequest, ObserveResponse
 from ...core.observe import observe_core
-from ..dependencies import get_dragonfly, get_episode_store, get_knowledge_store
+from ..dependencies import (
+    get_dragonfly, get_episode_store, get_knowledge_store,
+)
 
 router = APIRouter()
 
@@ -16,9 +16,9 @@ async def observe(body: ObserveRequest, request: Request):
     """
     Observe endpoint — short-term first architecture.
 
-    Hot path: embed -> store in DragonflyDB session -> search session -> return context.
+    Hot path: embed -> store in DragonflyDB -> LLM summarize session -> return context.
     Background: store in FalkorDB -> search -> hydrate session -> judge.
-    Cold start: synchronous FalkorDB search when session is empty.
+    Cold start: synchronous FalkorDB search to pre-fill session.
     """
     result = await observe_core(
         episode_store=get_episode_store(request),
@@ -29,31 +29,13 @@ async def observe(body: ObserveRequest, request: Request):
         timestamp=body.timestamp,
         source=body.source,
         metadata=dict(body.metadata or {}),
+        read_only=body.read_only,
     )
-
-    # Convert core result to REST response DTOs
-    if result["is_cold"]:
-        context = ObserveContext(
-            episodes=[EpisodeRecord(**e) for e in result["context"]["episodes"]],
-            knowledge=result["context"]["knowledge"],
-        )
-    else:
-        context = ObserveContext(
-            episodes=[
-                EpisodeRecord(
-                    uuid=r["uuid"],
-                    content=r["content"],
-                    metadata=r.get("metadata"),
-                    created_at=r.get("created_at", 0),
-                    score=r.get("score", 0),
-                    source=r.get("source_type", ""),
-                )
-                for r in result["context"]["episodes"]
-            ],
-        )
 
     return ObserveResponse(
         episode_uuid=result["episode_uuid"],
         observation_type=result["observation_type"],
-        context=context,
+        context=result["context"],
+        search_labels=result.get("search_labels", []),
+        search_query=result.get("search_query", ""),
     )

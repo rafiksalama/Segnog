@@ -251,7 +251,11 @@ class DragonflyClient:
         top_k: int = 25,
         min_score: float = 0.40,
     ) -> List[Dict[str, Any]]:
-        """Search session entries by cosine similarity (computed in Python)."""
+        """Search session entries by cosine similarity (computed in Python).
+
+        Returns raw cosine similarity results sorted by score descending.
+        Caller is responsible for multi-dimensional scoring.
+        """
         import numpy as np
 
         entries = await self.session_get_all(session_id)
@@ -283,14 +287,7 @@ class DragonflyClient:
                     "score": score,
                 })
 
-        from ..scoring import apply_temporal_score
-        from ..config import get_session_half_life, get_session_alpha
-
-        results = apply_temporal_score(
-            results,
-            alpha=get_session_alpha(),
-            half_life_hours=get_session_half_life(),
-        )
+        results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
 
     async def session_get_all(self, session_id: str) -> Dict[str, Any]:
