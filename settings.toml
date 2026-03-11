@@ -30,13 +30,13 @@ base_url = "https://openrouter.ai/api/v1"
 
 # LLM (for smart operations)
 [default.llm]
-flash_model = "google/gemma-3-27b-it"
+flash_model = "x-ai/grok-4.1-fast"
 base_url = "https://openrouter.ai/api/v1"
 
 # DSPy (for knowledge/artifact extraction)
 [default.dspy]
 models = [
-    "google/gemma-3-27b-it",
+    "x-ai/grok-4.1-fast",
 ]
 
 # Session (short-term memory in DragonflyDB)

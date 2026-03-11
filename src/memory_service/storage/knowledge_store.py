@@ -106,6 +106,51 @@ class KnowledgeStore(BaseStore):
         now = time.time()
 
         for entry, embedding in zip(entries, embeddings):
+            # --- Dedup check: find most similar existing knowledge ---
+            similar_uuid = None
+            similar_score = 0.0
+            if embedding:
+                try:
+                    dedup_result = await self._graph.ro_query(
+                        """MATCH (k:Knowledge)
+                        WHERE k.group_id = $group_id
+                        WITH k, (2 - vec.cosineDistance(k.embedding, vecf32($query_vec))) / 2 AS score
+                        WHERE score >= $threshold
+                        RETURN k.uuid AS uuid, score
+                        ORDER BY score DESC
+                        LIMIT 1""",
+                        params={
+                            "group_id": self._group_id,
+                            "query_vec": embedding,
+                            "threshold": 0.75,  # Capture both duplicates and near-similar
+                        },
+                    )
+                    if dedup_result.result_set:
+                        similar_uuid = dedup_result.result_set[0][0]
+                        similar_score = dedup_result.result_set[0][1]
+                except Exception as e:
+                    logger.debug("Knowledge similarity check failed (non-fatal): %s", e)
+
+            # If >= 0.90 similar: skip CREATE, reinforce existing with REINFORCES edge
+            if similar_uuid and similar_score >= 0.90:
+                logger.debug(
+                    "Knowledge dedup: skipping '%s...' (similar=%.3f to %s)",
+                    entry.get("content", "")[:40], similar_score, similar_uuid[:8],
+                )
+                if source_episode_uuid:
+                    try:
+                        await self._graph.query(
+                            """MATCH (k:Knowledge {uuid: $k_uuid})
+                            MATCH (e:Episode {uuid: $e_uuid})
+                            MERGE (k)-[:REINFORCES]->(e)""",
+                            params={"k_uuid": similar_uuid, "e_uuid": source_episode_uuid},
+                        )
+                    except Exception:
+                        pass
+                uuids.append(similar_uuid)
+                continue
+
+            # Otherwise: create new knowledge node
             knowledge_uuid = str(uuid4())
             labels_raw = entry.get("labels", [])
             labels_normalized = [normalize_label(l) for l in labels_raw if l]
@@ -141,6 +186,18 @@ class KnowledgeStore(BaseStore):
                     "embedding": embedding,
                 },
             )
+
+            # Link to similar-but-not-duplicate knowledge with SIMILAR_TO edge
+            if similar_uuid and similar_score >= 0.75:
+                try:
+                    await self._graph.query(
+                        """MATCH (new:Knowledge {uuid: $new_uuid})
+                        MATCH (similar:Knowledge {uuid: $sim_uuid})
+                        MERGE (new)-[:SIMILAR_TO]->(similar)""",
+                        params={"new_uuid": knowledge_uuid, "sim_uuid": similar_uuid},
+                    )
+                except Exception:
+                    pass
 
             for label in labels_normalized:
                 await self._graph.query(
