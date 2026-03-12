@@ -342,7 +342,18 @@ async def observe_core(
         metadata["source"] = source
 
     # Step 1: Embed + store in DragonflyDB
-    embedding = await episode_store._embed(content)
+    try:
+        embedding = await episode_store._embed(content)
+    except Exception as e:
+        logger.warning(f"Embedding failed, returning empty context: {e}")
+        return {
+            "episode_uuid": str(uuid4()),
+            "observation_type": "observe",
+            "context": "",
+            "is_cold": False,
+            "search_labels": [],
+            "search_query": "",
+        }
     episode_uuid = str(uuid4())
 
     await dragonfly.session_add(
@@ -397,6 +408,11 @@ async def observe_core(
     # Step 3: LLM context summary
     entries = await dragonfly.session_get_all(session_id)
     entries.pop(episode_uuid, None)
+
+    # Cap to 100 most recent entries to keep LLM prompt bounded
+    if len(entries) > 100:
+        sorted_items = sorted(entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True)
+        entries = dict(sorted_items[:100])
 
     summary = ""
     if entries:
