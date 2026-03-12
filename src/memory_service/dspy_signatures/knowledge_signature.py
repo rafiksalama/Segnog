@@ -22,27 +22,36 @@ class KnowledgeEntryModel(BaseModel):
     content: str = Field(
         description="The knowledge statement: specific, actionable, 1-3 sentences. "
                     "Include concrete details (numbers, names, dates, methods, URLs) — "
-                    "not vague summaries."
+                    "not vague summaries. "
+                    "CRITICAL: if the source uses relative time ('last week', 'yesterday', "
+                    "'last month'), resolve it using the session header date and write the "
+                    "resolved date explicitly in this field. "
+                    "Example: session date is 9 June 2023, source says 'we met up last week' "
+                    "→ write 'Caroline met up with friends the week before 9 June 2023 "
+                    "(approximately 2–8 June 2023)'."
     )
     knowledge_type: str = Field(
         description="One of: "
-                    "'fact' (concrete finding or personal detail), "
-                    "'pattern' (recurring strategy or behavior), "
+                    "'event' (ANYTHING that happened or will happen at a specific time — "
+                    "use this even for brief single-sentence mentions like 'we met up last week' "
+                    "or 'I went to X yesterday'; do NOT collapse events into pattern or relationship), "
+                    "'fact' (concrete, verifiable personal detail with no specific time), "
+                    "'pattern' (ONLY for behaviors observed recurring across MULTIPLE separate instances), "
                     "'tool_insight' (tool effectiveness/usage), "
-                    "'experience' (lesson learned), "
-                    "'conclusion' (high-level takeaway), "
+                    "'experience' (lesson learned from a completed activity), "
+                    "'conclusion' (high-level synthesized takeaway), "
                     "'preference' (stated like/dislike, e.g. 'prefers dark mode'), "
-                    "'relationship' (connection between people, e.g. 'X is Y\\'s sister'), "
-                    "'event' (something that happened/will happen at a specific time), "
+                    "'relationship' (connection between people, e.g. 'X is Y\\'s sister'; "
+                    "do NOT use for time-bound events involving people), "
                     "'identity' (who someone is, their role, characteristics), "
-                    "'temporal_fact' (time-bound or recurring fact, e.g. 'yoga every Tuesday')"
+                    "'temporal_fact' (recurring fact with no single date, e.g. 'yoga every Tuesday')"
     )
     labels: List[str] = Field(
         description="5-15 semantic labels for retrieval. Lowercase, hyphenated. "
                     "Include: domain terms ('itin-processing'), tool names ('web-search'), "
                     "entity names ('caroline', 'dr-smith'), "
                     "methodologies ('parallel-research'), topics ('tax-filing'), "
-                    "temporal markers ('weekly', 'summer-2023'). "
+                    "temporal markers ('weekly', 'summer-2023', 'june-2023'). "
                     "Be specific: 'python-asyncio' not 'programming'. "
                     "More labels means better retrieval — be generous."
     )
@@ -53,11 +62,17 @@ class KnowledgeEntryModel(BaseModel):
     )
     event_date: Optional[str] = Field(
         default=None,
-        description="ISO 8601 date (YYYY-MM-DD) when the fact/event occurred or will occur, "
-                    "if a specific date is mentioned or can be inferred. "
-                    "Examples: '2023-05-07' for 'May 7, 2023'. "
-                    "Resolve relative dates ('yesterday', 'last year') using context dates. "
-                    "Use null if no specific date is associated."
+        description="ISO 8601 date (YYYY-MM-DD) when the fact/event occurred or will occur. "
+                    "ALWAYS populate this for 'event' entries — never leave it null for events. "
+                    "Each session starts with a header like 'Session N — 7:55 pm on 9 June, 2023' — "
+                    "use that date as the anchor to resolve relative references: "
+                    "'last week' from a 9 June 2023 session → 2023-06-02; "
+                    "'yesterday' from a 9 June 2023 session → 2023-06-08; "
+                    "'last month' from a 9 June 2023 session → 2023-05-01; "
+                    "'3 years ago' from a 9 June 2023 session → 2020-06-09. "
+                    "If the event has no specific date at all, use the session header date itself. "
+                    "Use null ONLY for 'pattern', 'preference', 'relationship', 'identity', "
+                    "'conclusion', and 'temporal_fact' types where no date applies."
     )
     reasoning: str = Field(
         description="Brief explanation of why this knowledge is valuable and how it was "
@@ -70,7 +85,8 @@ class KnowledgeExtractionResult(BaseModel):
     entries: List[KnowledgeEntryModel] = Field(
         description="Extracted knowledge entries. Extract ALL valuable knowledge — "
                     "err on the side of more entries rather than fewer. "
-                    "Typical range: 5-15 entries depending on mission complexity."
+                    "Every event mentioned, every preference stated, every relationship "
+                    "described must appear as its own entry. Do not merge or omit."
     )
 
 
@@ -88,22 +104,39 @@ class KnowledgeExtractionSignature(dspy.Signature):
     in future interactions. Each entry should be self-contained and specific enough
     to be useful without additional context.
 
+    RULE 1 — EVENT EXTRACTION (most important):
+    Every statement about something that happened or will happen — even a single brief
+    sentence — MUST become a separate 'event' entry. Do NOT collapse events into
+    'pattern' or 'relationship' types. Examples that must each become their own event:
+    - "we met up last week" → event
+    - "I went to X yesterday" → event
+    - "she attended Y last month" → event
+    - "they are planning a trip next summer" → event
+
+    RULE 2 — RELATIVE DATE RESOLUTION (critical for temporal accuracy):
+    Each session starts with a header like "Session N — 7:55 pm on 9 June, 2023".
+    Use that session date to resolve ALL relative time references in that session:
+    - "last week" from 9 June → week of 2–8 June 2023; use event_date 2023-06-02
+    - "yesterday" from 9 June → 2023-06-08
+    - "last month" from 9 June → May 2023; use event_date 2023-05-01
+    - "next week" from 9 June → week of 12–18 June 2023; use event_date 2023-06-12
+    Write the resolved date explicitly in the content field — never leave "last week" unresolved.
+
+    RULE 3 — 'pattern' type only for confirmed recurring behaviors:
+    Use 'pattern' ONLY when the source explicitly shows the same behavior happening
+    multiple times. A single mention of an activity is an 'event', not a 'pattern'.
+
     Knowledge types:
-    - fact: Concrete, verifiable findings ("ITIN processing via mail takes 7-11 weeks")
-    - pattern: Recurring strategies or behaviors ("User always asks for summaries first")
+    - event: Anything that happened/will happen at a specific time (use liberally)
+    - fact: Concrete, verifiable personal detail with no specific time
+    - pattern: ONLY recurring behaviors confirmed across multiple instances
     - tool_insight: Tool effectiveness, limitations, best practices
-    - experience: Lessons learned from execution
+    - experience: Lessons learned from a completed activity
     - conclusion: High-level synthesized takeaways
     - preference: Stated like/dislike ("prefers dark mode", "vegetarian")
-    - relationship: Connection between people ("Caroline is Julia's daughter")
-    - event: Something that happened/will happen ("Caroline went to LGBTQ group on May 7, 2023")
+    - relationship: Static connections between people ("Caroline is Julia's daughter")
     - identity: Who someone is ("Dr. Smith is a cardiologist at Mayo Clinic")
-    - temporal_fact: Time-bound or recurring facts ("yoga class every Tuesday at 6pm")
-
-    Temporal extraction:
-    - When a knowledge entry references a SPECIFIC date, extract it as event_date (YYYY-MM-DD)
-    - Resolve relative dates ("yesterday", "last year") using the context date if available
-    - Recurring events ("every Tuesday") should NOT get an event_date — use temporal_fact type
+    - temporal_fact: Recurring facts with no single date ("yoga every Tuesday at 6pm")
 
     Label guidelines:
     - Use specific domain terms: "itin-processing" not "taxes"
@@ -111,7 +144,7 @@ class KnowledgeExtractionSignature(dspy.Signature):
     - Include tool names when relevant: "web-search", "scholar-search"
     - Include methodology labels: "parallel-research", "sequential-workflow"
     - Include topic labels: "pricing", "comparison", "how-to", "health"
-    - Include temporal markers when relevant: "weekly", "summer-2023", "deadline"
+    - Include temporal markers: "weekly", "summer-2023", "june-2023", "deadline"
     - Each label should be a single concept, lowercase, hyphenated
     - Aim for 5-15 labels per entry — more labels means better retrieval
     """

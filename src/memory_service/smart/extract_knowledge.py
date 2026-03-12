@@ -100,42 +100,81 @@ async def extract_knowledge(
 
     reflection_text = reflection or "No reflection available."
 
+    def _validate_entries(raw_entries: list) -> list:
+        """Validate and normalise a list of raw entry dicts."""
+        from datetime import date as _date
+        valid = []
+        for entry in raw_entries:
+            validated_date = None
+            ev = entry.get("event_date") if isinstance(entry, dict) else getattr(entry, "event_date", None)
+            if ev:
+                try:
+                    _date.fromisoformat(str(ev))
+                    validated_date = str(ev)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid event_date '{ev}', discarding")
+
+            if isinstance(entry, dict):
+                content = entry.get("content", "")
+                ktype = entry.get("knowledge_type", "fact")
+                labels = entry.get("labels", [])
+                confidence = entry.get("confidence", 0.8)
+            else:
+                content = getattr(entry, "content", "")
+                ktype = getattr(entry, "knowledge_type", "fact")
+                labels = getattr(entry, "labels", [])
+                confidence = getattr(entry, "confidence", 0.8)
+
+            valid.append({
+                "content": str(content)[:500],
+                "knowledge_type": ktype,
+                "labels": list(labels)[:15],
+                "confidence": min(1.0, max(0.0, float(confidence))),
+                "event_date": validated_date,
+            })
+        return valid
+
     try:
         lm = configure_dspy_lm(model=model, temperature=0.3, max_tokens=4096)
         predictor = dspy.Predict(KnowledgeExtractionSignature)
 
-        with dspy.context(lm=lm, adapter=adapter):
-            result = predictor(
-                data_source_type=data_source_type,
-                mission_task=task,
-                mission_outcome=mission_outcome,
-                full_report=full_report,
-                execution_trace=execution_trace,
-                plan_execution=plan_execution,
-                reflection=reflection_text,
-            )
+        try:
+            with dspy.context(lm=lm, adapter=adapter):
+                result = predictor(
+                    data_source_type=data_source_type,
+                    mission_task=task,
+                    mission_outcome=mission_outcome,
+                    full_report=full_report,
+                    execution_trace=execution_trace,
+                    plan_execution=plan_execution,
+                    reflection=reflection_text,
+                )
+            raw_entries = result.extraction.entries
+        except Exception as parse_err:
+            # DSPy's JSONAdapter may fail when the LM returns {"entries": [...]}
+            # instead of {"extraction": {"entries": [...]}}. Fall back to lm.history.
+            logger.warning(f"DSPy parse failed ({parse_err}), trying raw LM history fallback")
+            import json
+            raw_entries = []
+            try:
+                history = lm.history or []
+                if history:
+                    last = history[-1]
+                    outputs = last.get("outputs") or last.get("completions") or []
+                    for out in outputs:
+                        text = out if isinstance(out, str) else out.get("text", "")
+                        parsed = json.loads(text)
+                        # Handle {"entries": [...]} or {"extraction": {"entries": [...]}}
+                        if "entries" in parsed:
+                            raw_entries = parsed["entries"]
+                        elif "extraction" in parsed:
+                            raw_entries = parsed["extraction"].get("entries", [])
+                        if raw_entries:
+                            break
+            except Exception as fb_err:
+                logger.error(f"Raw LM fallback also failed: {fb_err}")
 
-        extraction = result.extraction
-        valid = []
-        for entry in extraction.entries:
-            # Validate event_date if present
-            validated_date = None
-            if entry.event_date:
-                try:
-                    from datetime import date
-                    date.fromisoformat(entry.event_date)
-                    validated_date = entry.event_date
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid event_date '{entry.event_date}', discarding")
-
-            valid.append({
-                "content": str(entry.content)[:500],
-                "knowledge_type": entry.knowledge_type,
-                "labels": list(entry.labels)[:15],
-                "confidence": min(1.0, max(0.0, float(entry.confidence))),
-                "event_date": validated_date,
-            })
-
+        valid = _validate_entries(raw_entries)
         logger.info(f"Extracted {len(valid)} knowledge entries via DSPy")
         return valid
 
