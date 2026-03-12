@@ -33,6 +33,31 @@ _PROPER_NOUN_SKIP = {
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+async def _get_recent_episodes(episode_store, n: int = 1) -> List[Dict[str, Any]]:
+    """Get the N most recent raw episodes for the current group from FalkorDB."""
+    try:
+        # FalkorDB does not support parameterised LIMIT — embed n directly.
+        cypher = (
+            f"MATCH (e:Episode {{group_id: $gid, episode_type: 'raw'}}) "
+            f"RETURN e.uuid, e.content, e.created_at, e.created_at_iso "
+            f"ORDER BY e.created_at DESC LIMIT {int(n)}"
+        )
+        result = await episode_store._graph.query(cypher, params={"gid": episode_store._group_id})
+        episodes = []
+        for row in result.result_set:
+            episodes.append({
+                "uuid": row[0] or "",
+                "content": row[1] or "",
+                "created_at": row[2] or 0,
+                "created_at_iso": row[3] or "",
+                "source_type": "recent_episode",
+            })
+        return episodes
+    except Exception as e:
+        logger.warning(f"_get_recent_episodes failed: {e}")
+        return []
+
+
 def _extract_proper_nouns(text: str) -> List[str]:
     words = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
     return [w for w in words if w not in _PROPER_NOUN_SKIP and len(w) > 1]
@@ -309,6 +334,7 @@ async def observe_core(
     summarize: bool = False,
     top_k: int = 10,
     knowledge_top_k: int = 10,
+    minimal: bool = False,
 ) -> dict:
     """Core observe logic — store, summarize, return context.
 
@@ -317,10 +343,58 @@ async def observe_core(
     Both paths converge: add to DragonflyDB → LLM summarize session → return.
 
     If read_only=True, skip all writes and use the warm path summarization only.
+    If minimal=True, skip DragonflyDB entirely — return only FalkorDB knowledge
+      (knowledge_top_k entries) + the most semantically relevant raw episode.
+      Implies read_only.
     """
     # Scope
     episode_store._group_id = session_id
     knowledge_store._group_id = session_id
+
+    if minimal:
+        # Fast path: knowledge + 1 most relevant episode, no DragonflyDB at all
+        knowledge_results, relevant_episodes = await asyncio.gather(
+            knowledge_store.search_hybrid(
+                query=content,
+                top_k=knowledge_top_k,
+                min_score=KNOWLEDGE_PARAMS["min_score"],
+            ),
+            episode_store.search_episodes(
+                query=content,
+                top_k=1,
+                episode_type="raw",
+                min_score=0.0,
+            ),
+        )
+        entries: Dict[str, Any] = {}
+        for kn in knowledge_results:
+            kn_uuid = kn.get("uuid", "")
+            entries[f"kn_{kn_uuid}"] = {
+                "content": kn.get("content", ""),
+                "source_type": "hydrated_knowledge",
+                "created_at": 0,
+            }
+        for ep in relevant_episodes:
+            ep_uuid = ep.get("uuid", "")
+            entries[f"ep_{ep_uuid}"] = {
+                "content": ep.get("content", ""),
+                "source_type": "relevant_episode",
+                "created_at": ep.get("created_at", 0),
+            }
+        from ..smart.summarize_context import _format_entries
+        context = _format_entries(entries) if entries else ""
+        logger.info(
+            f"minimal observe: {len(knowledge_results)} knowledge + "
+            f"{len(relevant_episodes)} relevant episode → {len(context)} chars"
+        )
+        return {
+            "episode_uuid": "",
+            "observation_type": "observe",
+            "context": context,
+            "is_cold": False,
+            "search_labels": [],
+            "search_query": content,
+        }
 
     metadata = dict(metadata or {})
     if timestamp:

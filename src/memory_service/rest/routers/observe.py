@@ -33,6 +33,7 @@ async def observe(body: ObserveRequest, request: Request):
         summarize=body.summarize,
         top_k=body.top_k,
         knowledge_top_k=body.knowledge_top_k,
+        minimal=body.minimal,
     )
 
     return ObserveResponse(
