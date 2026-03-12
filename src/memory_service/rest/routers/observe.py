@@ -30,6 +30,9 @@ async def observe(body: ObserveRequest, request: Request):
         source=body.source,
         metadata=dict(body.metadata or {}),
         read_only=body.read_only,
+        summarize=body.summarize,
+        top_k=body.top_k,
+        knowledge_top_k=body.knowledge_top_k,
     )
 
     return ObserveResponse(

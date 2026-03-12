@@ -1,1279 +1,596 @@
 # Segnog
 
-> **Dal Segno** — *from the sign*. In music, the performer returns to the segno mark and replays the passage with everything they've learned. The second time through is never the same as the first.
+> **Dal Segno** — *from the sign*. In music, the performer returns to the segno mark and replays the passage with everything they have learned. The second time through is never the same as the first.
 
-Segnog is a memory service for AI agents. It stores what happened, distills what mattered, and hands it back at exactly the right moment — so the agent returns to the sign and plays it better.
+Segnog is a memory microservice for AI agents. It stores what happened, distills what mattered, and returns the right context at exactly the right moment — so the agent returns to the sign and plays it better.
 
-Short-term event streams. Long-term episodic memory. A knowledge graph. An artifact registry. LLM-powered curation that compresses experience into wisdom. Background offline consolidation inspired by biological memory. A single `observe` endpoint that handles everything automatically. All behind dual gRPC and REST APIs.
+---
 
-Every mission is a performance. Segnog is the bookmark the agent jumps back to.
+## What It Does
 
-## Architecture Overview
+An AI agent calls `observe` with its current observation. Segnog automatically:
+
+1. **Stores** the observation in short-term session memory (DragonflyDB)
+2. **Retrieves** related episodes and knowledge from long-term memory (FalkorDB) using 3D scoring (semantic + temporal + Hebbian)
+3. **Summarizes** the session context via LLM into a concise, relevant passage
+4. **Returns** that context so the agent can act immediately
+5. **Consolidates** in the background — stores to the graph, reinforces Hebbian associations, judges importance, and extracts structured knowledge
+
+All of this happens through a single endpoint.
+
+---
+
+## Architecture
 
 ```
-                          Agent Framework (caller)
-                                  |
+                        Agent Framework (caller)
+                                  │
                     ┌─────────────┴──────────────┐
-                    |                            |
+                    │                            │
               gRPC :50051                  REST :9000
               (JSON-over-gRPC)             (FastAPI)
-                    |                            |
-                    └──────────┬─────────────────┘
-                               |
-                    MemoryServiceHandler
-                    (shared business logic)
-                               |
-            ┌──────────┬───────┴────────┬──────────┐
-            |          |                |          |
-       DragonflyDB   FalkorDB      LLM Client   DSPy
-       (short-term)  (long-term)   (OpenAI API)  (structured
-        Redis         Graph DB      via OpenRouter  extraction)
-                         |
-                    REM Worker
-                    (background offline
-                     consolidation)
+                    │                            │
+                    └─────────────┬──────────────┘
+                                  │
+                       MemoryServiceHandler
+                       (shared business logic)
+                                  │
+         ┌──────────┬─────────────┼─────────────┬──────────────┐
+         │          │             │             │              │
+    DragonflyDB  FalkorDB       NATS        OpenAI          DSPy
+    (short-term) (long-term)  (event bus)  (embeddings    (structured
+     Redis        Graph DB    JetStream     + LLM calls)   extraction)
+    :6381         :6380        :4222
+         │          │
+    Session     Episodes
+    Cache       Knowledge
+    Events      Artifacts
+                Entities
+                Hebbian Graph
+                    │
+         ┌──────────┴──────────┐
+         │                     │
+   CurationWorker        REMSweepWorker
+   (NATS subscriber      (background
+    or polling)           consolidation)
 ```
 
-The service has two storage tiers, an LLM integration layer, a simple observe API, two composite pipelines, and a background consolidation worker.
-
-## Table of Contents
-
-- [Memory Model](#memory-model)
-- [Storage Tiers](#storage-tiers)
-- [Smart Operations](#smart-operations)
-- [Observe API](#observe-api)
-- [Composite Pipelines](#composite-pipelines)
-- [Background Consolidation (REM Worker)](#background-consolidation-rem-worker)
-- [Data Flow Between Tiers](#data-flow-between-tiers)
-- [Graph Schema](#graph-schema)
-- [API Reference](#api-reference)
-- [Client Library](#client-library)
-- [Configuration](#configuration)
-- [Running](#running)
-- [Testing](#testing)
-- [Benchmarks](#benchmarks)
-- [Project Structure](#project-structure)
-
-## Memory Model
-
-The service manages five entity types across two storage tiers:
-
-| Entity | Storage | Purpose | Lifecycle |
-|--------|---------|---------|-----------|
-| **Events** | DragonflyDB (Redis Streams) | Real-time agent activity log | Written during mission, compressed post-mission |
-| **Execution State** | DragonflyDB (Redis Hashes) | Agent iteration, plan, judge state | Overwritten each iteration |
-| **Episodes** | FalkorDB (Graph nodes + vectors) | Mission traces and reflections | `pending` → `consolidated` via REM worker |
-| **Knowledge** | FalkorDB (Graph nodes + vectors + edges) | Extracted facts, patterns, insights | Permanent, searchable by vector + labels |
-| **Artifacts** | FalkorDB (Graph nodes + vectors + edges) | Registered outputs (files, reports, datasets) | Permanent, CRUD + search |
-
-All operations are scoped by `group_id` (tenant) and `workflow_id` (workflow instance).
-
-## Storage Tiers
-
-### Tier 1: Short-Term Memory (DragonflyDB)
-
-DragonflyDB is a Redis-compatible in-memory store. The service uses two Redis data structures:
-
-**Events** via Redis Streams (key: `events:{group_id}:{workflow_id}`)
-
-Events are the real-time activity log. Every LLM call, tool invocation, observation, and error is appended as a stream entry. Events are ordered, filterable by type, and retrievable newest-first.
-
-```python
-# Event types (framework-agnostic)
-"llm_request", "llm_response",
-"tool_call", "tool_result",
-"action", "observation",
-"error", "state_update"
-```
-
-Each event contains: `event_id`, `type`, `timestamp`, `group_id`, `workflow_id`, and `data` (arbitrary JSON).
-
-**Execution State** via Redis Hashes (key: `exec_state:{group_id}:{workflow_id}`)
-
-Stores the agent's current state between iterations: `state_description`, `iteration` count, serialized `plan` JSON, and `judge` evaluation JSON. Also stores per-tool usage statistics (call counts, success rates, avg latency) under `state:tool_stats:*` keys.
-
-**ShortTermMemory** is a routing layer that dispatches by key prefix:
-- `event:*` keys route to Redis Streams
-- `state:*` keys route to Redis Hashes
-- Other keys fall back to an in-memory dict
-
-### Tier 2: Long-Term Memory (FalkorDB)
-
-FalkorDB is a graph database with native vector search. All three long-term entity types share a single graph (`episode_store` by default) and are connected through labeled relationships.
-
-**Episodes** store mission execution history as graph nodes with vector embeddings. Four types:
-- `raw` — direct mission execution traces (task, output, final state)
-- `reflection` — structured post-mission reflections generated by the curation pipeline
-- `compressed` — LLM summaries of raw episodes, created by the REM worker
-- `narrative` — synthesized background briefings generated during startup
-
-Episodes have a `consolidation_status` field tracking their lifecycle:
-- `pending` — raw episodes not yet processed by the REM worker
-- `consolidated` — episodes that have been processed (reflections, compressed summaries, narratives are born consolidated)
-
-Consecutive episodes within a group are linked with `FOLLOWS` edges, forming a temporal chain. Search is cosine similarity on the embedding vector with optional graph expansion along FOLLOWS edges.
-
-**Knowledge** stores extracted facts, patterns, and insights as graph nodes. Each entry has:
-- `content` — the knowledge text
-- `knowledge_type` — one of `fact`, `pattern`, `tool_insight`, `experience`, `conclusion`
-- `labels` — normalized semantic tags (e.g., `til-density`, `drug-response-markers`)
-- `confidence` — 0.0 to 1.0
-- `embedding` — vector for similarity search
-
-Labels are stored as separate `(:Label)` nodes, deduplicated via `MERGE`, and connected to knowledge nodes via `[:HAS_LABEL]` edges. This enables both vector search and graph traversal.
-
-Search is **hybrid**: vector similarity retrieves candidates, then label overlap provides a score boost (`final_score = vector_score + 0.15 * label_match_ratio`).
-
-**Artifacts** track tangible outputs: files written, reports generated, datasets compiled. Same structure as knowledge (embeddings, labels, hybrid search) plus `name`, `artifact_type` (file/report/dataset), and `path`. Supports full CRUD (get by UUID, list recent, delete).
-
-## Smart Operations
-
-Eight LLM-powered operations that add intelligence to raw storage:
-
-| Operation | Engine | Input | Output |
-|-----------|--------|-------|--------|
-| **Reinterpret Task** | DSPy | Raw user task | `search_labels[]`, `search_query`, `complexity` |
-| **Filter Memory** | LLM | Task + raw search results | Relevance-filtered results |
-| **Infer State** | LLM | Task + retrieved memories | One-sentence state description |
-| **Synthesize Background** | LLM | Task + episodes + knowledge + artifacts + tool stats | Natural-language briefing paragraph |
-| **Generate Reflection** | LLM | Mission data (task, output, plan, iterations) | Structured 7-section reflection |
-| **Extract Knowledge** | DSPy | Mission data + reflection | Structured `[{content, type, labels, confidence}]` |
-| **Extract Artifacts** | DSPy | Mission data + execution trace | Structured `[{name, type, path, description, labels}]` |
-| **Compress Events** | LLM | Last 50 events from DragonflyDB | Single compressed episode in FalkorDB |
-| **Judge Observation** | DSPy | Observation text + source | `observation_type`, `storage_tier`, `search_query`, `search_labels`, `importance` |
-
-**DSPy** is used for structured extraction (knowledge, artifacts, task reinterpretation) because it enforces output schemas via Pydantic validation and auto-retries on parse failures. It uses a `DirectJSONAdapter` that requests `json_object` response format through OpenRouter.
-
-**Plain LLM calls** are used for free-form text generation (reflection, synthesis, filtering, state inference) via an `AsyncOpenAI` client pointed at OpenRouter.
-
-## Observe API
-
-The simplest way to use Segnog. A single endpoint that accepts an observation, intelligently routes it, and returns relevant context — no internal concepts exposed.
-
-```
-POST /api/v1/memory/observe
-```
-
-The caller sends content with a session key. The service handles everything else:
-
-1. **Judge** — A DSPy-powered observation judge analyzes the content and decides:
-   - `observation_type`: `chat`, `tool_call`, `tool_result`, `knowledge`, `artifact`, `action`, `error`, `state_update`
-   - `storage_tier`: `short_term` (DragonflyDB only), `long_term` (FalkorDB only), or `both`
-   - `importance`: `low`, `medium`, `high` — controls retrieval depth
-   - `search_query`: optimized for vector similarity
-   - `search_labels`: for knowledge hybrid search
-
-2. **Store** — Routes to the appropriate storage tier based on the judge's decision
-
-3. **Retrieve** — Searches episodes and knowledge in parallel using the judge's optimized query and labels
-
-4. **REM Worker** — Raw episodes stored as `pending` are automatically curated in the background (reflection, knowledge extraction, entity linking, compression)
-
-```
-Agent ──► POST /observe {session_id, content}
-              │
-              ├─ Judge (DSPy) → type, tier, query, labels, importance
-              ├─ Store → DragonflyDB and/or FalkorDB
-              ├─ Retrieve → episodes + knowledge (parallel)
-              └─ Response: {episode_uuid, observation_type, context}
-                                    │
-                              (within 60s)
-                                    │
-                              REM Worker → reflection, knowledge, entities, compression
-```
-
-### Caller-Facing Parameters
-
-| Parameter | Required | Maps To |
-|-----------|----------|---------|
-| `session_id` | yes | `group_id` + `workflow_id` (session isolation) |
-| `content` | yes | Observation text (embedded for storage + search) |
-| `timestamp` | no | `created_at` on episode (ISO string or epoch) |
-| `source` | no | `metadata.source` (agent name, tool name) |
-| `metadata` | no | Extra key-value context |
-
-No need to understand `group_id`, `workflow_id`, `episode_type`, `consolidation_status`, or any other internal concept.
-
-## Composite Pipelines
-
-Two pipelines reduce multi-step workflows to single RPCs:
-
-### Startup Pipeline
-
-Runs at the beginning of a mission. Retrieves all relevant context and synthesizes a briefing.
-
-```
-Step 0: reinterpret_task(task)
-        → search_labels[], search_query, complexity
-                |
-Step 1: episode_store.search_episodes(search_query)
-        → raw episode results
-                |
-Step 2: knowledge_store.search_hybrid(query, labels)  ─┐  parallel
-        artifact_store.search_hybrid(query, labels)    ─┘
-        → knowledge_context, artifacts_context
-                |
-Step 3: filter_memory_results(task, episode_results)
-        → filtered long_term_context
-                |
-Step 4: get_tool_stats()
-        → formatted tool experience stats
-                |
-Step 5: infer_state(task, long_term_context)
-        → one-sentence state description
-                |
-Step 6: synthesize_background(task, all_context)
-        → natural-language briefing paragraph
-        → also stored as "narrative" episode in FalkorDB
-```
-
-Returns all fields in a single response so the caller can inject them into the agent's system prompt.
-
-### Curation Pipeline
-
-Runs after a mission completes. Promotes volatile short-term data into permanent long-term memory.
-
-```
-Step 1: generate_reflection(mission_data)
-        → structured reflection text
-                |
-Step 2: episode_store.store_episode(reflection, type="reflection")
-        → reflection_uuid
-                |
-Step 2b: link reflection → source raw episodes (DERIVED_FROM edges)
-        → source traceability
-                |
-Step 3: extract_knowledge(mission_data, reflection)
-        → knowledge entries with types, labels, confidence
-                |
-Step 4: knowledge_store.store_knowledge(entries, source_episode=reflection_uuid)
-        → knowledge UUIDs, Label nodes, HAS_LABEL + DERIVED_FROM edges
-                |
-Step 5: extract_artifacts(mission_data)
-        → artifact entries with names, types, paths, labels
-                |
-Step 6: artifact_store.store_artifacts(entries, source_episode=reflection_uuid)
-        → artifact UUIDs, Label nodes, HAS_LABEL + DERIVED_FROM edges
-                |
-Step 7: compress_events(last 50 events from DragonflyDB)
-        → compressed episode (LLM summary) stored in FalkorDB
-```
-
-## Background Consolidation (REM Worker)
-
-The REM (Replay-Enhanced Memory) worker is a background process inspired by biological sleep-dependent memory consolidation. It periodically scans for unprocessed raw episodes and consolidates them into higher-level representations.
-
-### How It Works
-
-1. **Priority-scored discovery**: Queries for groups with `pending` raw episodes, scores them by `raw_count * 0.5 + age_hours * 0.5` — groups with more unprocessed episodes and older pending episodes are processed first.
-
-2. **Consolidation per group**:
-   - Fetches pending raw episodes (oldest first, up to 20)
-   - Runs the curation pipeline with `source_episode_uuids` for full provenance tracking
-   - Marks source episodes as `consolidated` (durable lifecycle transition in FalkorDB)
-   - Creates a `compressed` summary episode with `DERIVED_FROM` edges back to each source
-
-3. **Idempotency**: Once episodes are marked `consolidated`, they are never reprocessed. State is durable in FalkorDB, surviving service restarts.
-
-### Configuration
-
-```toml
-[default.background]
-enabled = true
-interval_seconds = 60        # How often cycles run
-batch_size = 5               # Max groups per cycle
-min_episodes_for_processing = 3  # Minimum raw episodes before a group is eligible
-```
-
-### Graph Structure After Consolidation
-
-```
-Knowledge ─[DERIVED_FROM]→ Reflection ─[DERIVED_FROM]→ Raw Episode
-Compressed ─[DERIVED_FROM]→ Raw Episode
-Episode ─[FOLLOWS]→ Episode  (temporal chain)
-```
-
-## Data Flow Between Tiers
-
-Data moves from short-term to long-term memory through the curation pipeline and the REM worker. Curation is triggered explicitly by the caller; the REM worker runs automatically in the background.
-
-```
-Agent actions ──► Events (DragonflyDB, Redis Streams)
-                      |
-                      |  [Curation Pipeline - called by agent framework]
-                      |
-                      ├──► compress_events() ──► Episode (type="compressed")
-                      |
-     mission_data ────┤
-     (from caller)    ├──► generate_reflection() ──► Episode (type="reflection")
-                      |                                   |
-                      ├──► extract_knowledge() ────► Knowledge nodes
-                      |    (DSPy)                    + Label nodes + edges
-                      |                              + DERIVED_FROM → Episode
-                      |
-                      └──► extract_artifacts() ────► Artifact nodes
-                           (DSPy)                    + Label nodes + edges
-                                                     + DERIVED_FROM → Episode
-
-     [REM Worker - runs automatically in background]
-
-     Raw episodes ──► priority scoring ──► curation pipeline
-     (pending)           |                      |
-                         |                      ├──► Reflection + DERIVED_FROM → Raw Episodes
-                         |                      ├──► Knowledge extraction
-                         |                      └──► Compressed summary + DERIVED_FROM → Raw Episodes
-                         |
-                         └──► mark episodes as "consolidated"
-```
-
-## Graph Schema
-
-All long-term entities live in a single FalkorDB graph:
-
-```
-(:Episode) ─[:FOLLOWS]→ (:Episode)                        # temporal chain
-(:Episode) ←[:DERIVED_FROM]─ (:Episode)                    # compressed/reflection → raw
-(:Episode) ─[:MENTIONS]→ (:Entity)                         # entity resolution
-(:Episode) ←[:DERIVED_FROM]─ (:Knowledge) ─[:HAS_LABEL]→ (:Label)
-(:Episode) ←[:DERIVED_FROM]─ (:Artifact)  ─[:HAS_LABEL]→ (:Label)
-```
-
-**Node types:**
-
-| Node | Key Properties | Indexed On |
-|------|---------------|------------|
-| `Episode` | uuid, group_id, content, episode_type, consolidation_status, metadata, created_at, created_at_iso, embedding | uuid, group_id, episode_type, created_at, consolidation_status |
-| `Knowledge` | uuid, group_id, content, knowledge_type, labels, confidence, source_mission, created_at, embedding | uuid, group_id, knowledge_type, created_at |
-| `Artifact` | uuid, group_id, name, artifact_type, path, description, labels, source_mission, created_at, embedding | uuid, group_id, artifact_type, created_at |
-| `Entity` | name, display_name, entity_type, created_at | name, entity_type |
-| `Label` | name, created_at | name |
-
-**Edge types:**
-
-| Edge | From | To | Meaning |
-|------|------|-----|---------|
-| `FOLLOWS` | Episode | Episode | Temporal ordering within a group |
-| `DERIVED_FROM` | Knowledge or Artifact | Episode | Provenance — which reflection this was extracted from |
-| `DERIVED_FROM` | Episode (reflection/compressed) | Episode (raw) | Source traceability — which raw episodes were consolidated |
-| `MENTIONS` | Episode | Entity | Entity resolution — people, places, orgs mentioned in the episode |
-| `HAS_LABEL` | Knowledge or Artifact | Label | Semantic tag association |
-
-Labels are normalized before storage: `"Web Search"` → `"web-search"`, `"web_search"` → `"web-search"`. This deduplication ensures consistent graph traversal.
-
-## API Reference
-
-Base URL: `http://localhost:9000/api/v1/memory`
-
-Health check: `GET http://localhost:9000/health` → `{"status": "ok", "service": "agent-memory-service"}`
+All six services — DragonflyDB, FalkorDB, NATS, gRPC server, REST server, and background workers — run in a single Docker container managed by supervisord.
 
 ---
 
-### Events
-
-#### `POST /events` — Log an event
-
-```json
-// Request
-{
-  "group_id": "default",         // optional, default "default"
-  "workflow_id": "default",      // optional, default "default"
-  "event_type": "tool_call",     // required
-  "event_data": { ... },         // required, arbitrary JSON
-  "context": ""                  // optional
-}
-
-// Response
-{ "event_id": "1709734800000-0" }
-```
-
-#### `GET /events/recent` — Get recent events
-
-Query params: `group_id`, `workflow_id`, `count` (default 10), `event_type` (optional filter)
-
-```json
-// Response
-{
-  "events": [
-    {
-      "event_id": "...",
-      "stream_id": "...",
-      "event_type": "tool_call",
-      "timestamp": 1709734800.0,
-      "group_id": "default",
-      "workflow_id": "default",
-      "data": { ... }
-    }
-  ]
-}
-```
-
-#### `POST /events/search` — Search events by type
-
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "event_types": ["tool_call", "observation"],
-  "limit": 50
-}
-
-// Response
-{ "events": [ ... ] }
-```
-
----
+## Core Concepts
 
 ### Episodes
 
-#### `POST /episodes` — Store an episode
+An episode is a single observation or experience: a raw conversation turn, a tool call result, a mission trace. Episodes are the atomic unit of memory.
 
-```json
-// Request
-{
-  "group_id": "default",
-  "content": "Agent completed the analysis...",  // required
-  "metadata": { "date_time": "2024-06-15" },     // optional
-  "episode_type": "raw"                           // "raw" | "reflection" | "compressed" | "narrative"
-}
+Every episode is stored with:
+- A vector embedding for semantic retrieval
+- Metadata (timestamp, source, group scope)
+- A consolidation status: `pending` → `consolidated` (or `duplicate`)
+- An activation count that grows with retrieval (Hebbian)
 
-// Response
-{ "uuid": "aae036b2-81cb-457a-9422-409c0fa7649e" }
-```
-
-#### `POST /episodes/search` — Vector similarity search
-
-```json
-// Request
-{
-  "group_id": "default",
-  "query": "quarterly sales report",       // required
-  "top_k": 25,
-  "min_score": 0.55,
-  "episode_type_filter": null,             // optional, e.g. "reflection"
-  "expand_adjacent": false,                // graph expansion via FOLLOWS + DERIVED_FROM edges
-  "expansion_hops": 1,
-  "after_time": null,                      // optional, epoch float
-  "before_time": null                      // optional, epoch float
-}
-
-// Response
-{
-  "episodes": [
-    {
-      "uuid": "...",
-      "content": "...",
-      "episode_type": "raw",
-      "metadata": { "date_time": "2024-06-15" },
-      "created_at": 1718409600.0,
-      "created_at_iso": "2024-06-15T00:00:00+00:00",
-      "score": 0.876,
-      "source": null                       // "graph_expansion" for expanded results
-    }
-  ]
-}
-```
-
-#### `POST /episodes/search/entities` — Search by entity names
-
-Finds episodes linked to the given entities via `MENTIONS` edges (created during curation).
-
-```json
-// Request
-{
-  "group_id": "default",
-  "entity_names": ["Julia", "Mark"],      // required
-  "top_k": 25
-}
-
-// Response
-{
-  "episodes": [
-    {
-      "uuid": "...",
-      "content": "...",
-      "score": 0.5,                        // mention_count / total_entities
-      "source": "entity_search"
-    }
-  ]
-}
-```
-
-#### `POST /episodes/link` — Create edge between episodes
-
-```json
-// Request
-{
-  "group_id": "default",
-  "from_uuid": "aae036b2-...",            // required
-  "to_uuid": "7f01c00c-...",              // required
-  "edge_type": "FOLLOWS",                 // "FOLLOWS" | "DERIVED_FROM"
-  "properties": { "time_delta_seconds": 86400 }  // optional
-}
-
-// Response
-{ "linked": true }
-```
-
----
+**Lifecycle:** `observe` → DragonflyDB (hot) → FalkorDB (background) → REM consolidation → knowledge extraction
 
 ### Knowledge
 
-#### `POST /knowledge` — Store knowledge entries
+Knowledge is extracted from episodes by LLM during the REM cycle. It represents distilled facts, patterns, and insights — things the agent has learned across many missions.
 
-```json
-// Request
-{
-  "group_id": "default",
-  "entries": [
-    {
-      "content": "Revenue increased 15% in Q3",    // required
-      "knowledge_type": "fact",                     // "fact" | "pattern" | "tool_insight" | "experience" | "conclusion"
-      "labels": ["revenue", "q3-results"],          // normalized to lowercase-hyphenated
-      "confidence": 0.92                            // 0.0–1.0
-    }
-  ],
-  "source_mission": "Analyze Q3 financials",        // required
-  "mission_status": "success",
-  "source_episode_uuid": ""                          // optional, for DERIVED_FROM edge
-}
+Each knowledge entry has a type (`fact`, `pattern`, `insight`, `procedure`), semantic labels, a confidence score, and is linked back to its source episode via a `DERIVED_FROM` edge.
 
-// Response
-{ "uuids": ["b1c2d3e4-..."] }
+Knowledge is deduplicated at write time: entries with >0.90 cosine similarity to existing knowledge are dropped; instead, a `REINFORCES` edge is added to strengthen the existing entry.
+
+### Sessions (Short-Term Memory)
+
+A session is a scoped cache in DragonflyDB keyed by `session_id`. It holds:
+- **Local entries**: the raw observations added in this session
+- **Hydrated episodes**: related episodes pulled from FalkorDB during cold start or background hydration
+- **Hydrated knowledge**: relevant knowledge entries pulled from FalkorDB
+
+Sessions expire by TTL (default 24 hours). They are the fast path — when a session is warm, context generation is a single LLM call over cached data.
+
+### The Observe Endpoint
+
+`observe` is the single entry point for all memory operations. It handles routing, retrieval, summarization, and background consolidation automatically.
+
+**Cold start** (session entry count < 2):
+1. Reinterpret the content for optimized FalkorDB search (DSPy)
+2. Search FalkorDB: vector similarity + entity search, scored in 3D
+3. Pre-fill the session cache with the top relevant episodes and knowledge
+4. LLM summarize the session → return context
+
+**Warm path** (session already populated):
+1. Read session entries from DragonflyDB (capped at 100 most recent)
+2. If `read_only`, also search FalkorDB knowledge live for the question
+3. LLM summarize → return context
+
+In both cases, background tasks fire-and-forget to store in FalkorDB, reinforce Hebbian associations, and judge observation importance.
+
+**Read-only mode** (`read_only: true`): skips all writes. Useful for evaluation and read-only agents.
+
+---
+
+## 3D Scoring
+
+Every retrieval result is scored on three dimensions before being returned to the agent.
+
+### Dimension 1 — Semantic
+
+Cosine similarity between the query embedding and the episode embedding, computed by FalkorDB's vector index.
+
+### Dimension 2 — Temporal (Recency)
+
+Freshness decays hyperbolically over time:
+
+```
+freshness = 1 / (1 + age_hours / half_life_hours)
 ```
 
-#### `POST /knowledge/search` — Hybrid search (vector + label boost)
+Configurable half-lives per store tier:
+- **Session**: 0.5 hours (strong recency bias)
+- **Episodes**: 168 hours / 1 week
+- **Knowledge**: 720 hours / 30 days
 
-```json
-// Request
-{
-  "group_id": "default",
-  "query": "revenue growth trends",                  // required
-  "labels": ["revenue", "sales"],                     // optional, boosts matching entries
-  "top_k": 10,
-  "min_score": 0.50
-}
+### Dimension 3 — Hebbian (Co-activation)
 
-// Response
-{
-  "entries": [
-    {
-      "uuid": "...",
-      "content": "Revenue increased 15% in Q3",
-      "knowledge_type": "fact",
-      "labels": ["revenue", "q3-results"],
-      "confidence": 0.92,
-      "source_mission": "Analyze Q3 financials",
-      "created_at": 1709734800.0,
-      "score": 0.87
-    }
-  ]
-}
+Episodes that have been retrieved together repeatedly develop stronger associative links — "neurons that fire together, wire together."
+
+```
+hebbian_boost = 0.5 × activation_strength + 0.5 × co_activation_weight
+activation_strength = log(1 + count) / log(1 + activation_cap)
 ```
 
-#### `POST /knowledge/search-labels` — Label-only search
+Co-activation weights grow asymptotically with each co-retrieval:
+```
+new_weight = old_weight + lr × (1 − old_weight)
+```
 
-```json
-// Request
-{
-  "group_id": "default",
-  "labels": ["revenue", "sales"],                     // required
-  "top_k": 10
-}
+This means frequently co-retrieved episodes surface together over time, without ever exceeding 1.0.
 
-// Response
-{ "entries": [ ... ] }                                // same shape as /knowledge/search
+### Final Score
+
+```
+score = (1 − α − β) × semantic + α × freshness + β × hebbian
+
+Defaults:  α = 0.3 (temporal),  β = 0.2 (Hebbian)
 ```
 
 ---
 
-### Artifacts
+## Background Consolidation (REM)
 
-#### `POST /artifacts` — Store artifacts
+Inspired by biological REM sleep, the REM worker runs periodic cycles to consolidate short-term experiences into long-term structured knowledge.
 
-```json
-// Request
-{
-  "group_id": "default",
-  "entries": [
-    {
-      "name": "Q3 Sales Report",                      // required
-      "artifact_type": "report",                       // "file" | "report" | "dataset"
-      "path": "/outputs/q3_sales.pdf",
-      "description": "Comprehensive Q3 analysis",
-      "labels": ["sales", "quarterly-report"]
-    }
-  ],
-  "source_mission": "Generate Q3 report",
-  "mission_status": "success",
-  "source_episode_uuid": ""
-}
+### Cycle
 
-// Response
-{ "uuids": ["c2d3e4f5-..."] }
-```
+1. **Discovery**: Find groups with ≥3 pending raw episodes, prioritized by volume × age
+2. **Deduplication**: Compare each pending episode against consolidated ones
+   - ≥0.90 similarity → mark `DUPLICATE_OF`, skip curation
+   - <0.90 → include in curation batch
+3. **Curation**: DSPy pipeline extracts knowledge, artifacts, and a reflection narrative from the unique episode batch
+4. **Storage**: Knowledge stored to FalkorDB with deduplication and label linking
+5. **Consolidation**: Source episodes marked `consolidated`
+6. **Compression**: Unique episodes compressed into a summary episode
+7. **Hebbian Decay**: Stale `CO_ACTIVATED` edge weights decayed; edges below 0.01 pruned
 
-#### `POST /artifacts/search` — Hybrid search
+### Modes
 
-```json
-// Request
-{
-  "group_id": "default",
-  "query": "sales report",
-  "labels": ["sales"],
-  "top_k": 10,
-  "min_score": 0.45
-}
+**Polling** (default): REMWorker polls on a configurable interval (default 60s).
 
-// Response
-{
-  "entries": [
-    {
-      "uuid": "...",
-      "name": "Q3 Sales Report",
-      "artifact_type": "report",
-      "path": "/outputs/q3_sales.pdf",
-      "description": "Comprehensive Q3 analysis",
-      "labels": ["sales", "quarterly-report"],
-      "source_mission": "Generate Q3 report",
-      "mission_status": "success",
-      "created_at": 1709734800.0,
-      "score": 0.82
-    }
-  ]
-}
-```
-
-#### `GET /artifacts/{uuid}` — Get artifact by UUID
-
-Query params: `group_id` (default "default")
-
-```json
-// Response
-{ "artifact": { ... }, "found": true }
-```
-
-#### `GET /artifacts/recent/list` — List recent artifacts
-
-Query params: `group_id` (default "default"), `limit` (default 50)
-
-```json
-// Response
-{ "entries": [ ... ] }
-```
-
-#### `DELETE /artifacts/{uuid}` — Delete artifact
-
-Query params: `group_id` (default "default")
-
-```json
-// Response
-{ "existed": true }
-```
+**Event-driven** (NATS): CurationWorker subscribes to `memory.episodes.created` events, batches episodes, and triggers consolidation. Lower latency, no polling overhead.
 
 ---
 
-### State
+## Storage Backends
 
-#### `PUT /state/execution` — Persist execution state
+### DragonflyDB — Short-Term Memory (`:6381`)
 
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "state_description": "Analyzing Q3 data...",    // required
-  "iteration": 3,
-  "plan_json": "{...}",                           // optional, serialized plan
-  "judge_json": "{...}"                            // optional, serialized judge eval
-}
+Redis-compatible in-memory store with snapshot persistence (`--snapshot_cron "* * * * *"`).
 
-// Response
-{ "success": true }
-```
+- **Session hashes**: per-session caches with TTL
+- **Event streams**: Redis Streams for observation logging scoped by `group_id:workflow_id`
+- **Semantic search within session**: cosine similarity computed in Python over session entries
 
-#### `GET /state/execution` — Get execution state
+### FalkorDB — Long-Term Memory (`:6380`)
 
-Query params: `group_id`, `workflow_id`
+Property graph database. All data persisted to RDB snapshot.
 
-```json
-// Response
-{
-  "state_description": "Analyzing Q3 data...",
-  "iteration": 3,
-  "plan_json": "{...}",
-  "judge_json": "{...}",
-  "found": true
-}
-```
+**Node types:**
+| Node | Purpose |
+|------|---------|
+| `Episode` | Raw + consolidated observations with embeddings |
+| `Knowledge` | Extracted facts, patterns, insights |
+| `Artifact` | Generated files, tools, summaries |
+| `Entity` | Named entities, people, organizations |
+| `Label` | Semantic tags (deduplicated via MERGE) |
 
-#### `POST /state/tool-stats` — Update tool statistics
+**Edge types:**
+| Edge | Purpose |
+|------|---------|
+| `FOLLOWS` | Sequential ordering within a group |
+| `DUPLICATE_OF` | Deduplication link (REM) |
+| `CO_ACTIVATED` | Hebbian co-occurrence (weight, count, timestamps) |
+| `DERIVED_FROM` | Knowledge → source Episode |
+| `REINFORCES` | Strengthened knowledge link on dedup |
+| `HAS_LABEL` | Knowledge ↔ Label |
 
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "tool_name": "web_search",                      // required
-  "success": true,                                 // required
-  "duration_ms": 450,
-  "state_description": ""
-}
+**Vector search**: Cosine distance index on `vecf32` embeddings.
 
-// Response
-{ "success": true }
-```
+### NATS JetStream (`:4222`)
 
-#### `GET /state/tool-stats` — Get tool stats
-
-Query params: `group_id`, `workflow_id`
-
-```json
-// Response
-{
-  "formatted_stats": "web_search: 12 calls (92% success, avg 340ms)\n...",
-  "raw_stats_json": "{...}"
-}
-```
-
-#### `GET /state/context` — Get formatted memory context
-
-Query params: `group_id`, `workflow_id`, `event_limit` (default 5)
-
-```json
-// Response
-{ "formatted_context": "## Recent Events\n..." }
-```
+Optional event bus for event-driven curation. When enabled, replaces the polling REM worker with:
+- `CurationWorker`: subscribes to `memory.episodes.created`, batches, curates
+- `REMSweepWorker`: processes curation completion events, runs consolidation
 
 ---
 
-### Smart Operations (LLM-Powered)
+## APIs
 
-#### `POST /smart/reinterpret-task` — DSPy task reinterpretation
+### REST (`:9000`)
+
+All endpoints are under `/api/v1/memory/`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/observe` | POST | Core observe — store, retrieve, summarize, return context |
+| `/episodes` | POST | Direct episode storage |
+| `/episodes/search` | POST | Semantic episode search with 3D scoring |
+| `/episodes/search/entities` | POST | Search by named entity |
+| `/episodes/link` | POST | Create explicit edge between episodes |
+| `/knowledge` | POST | Store knowledge entries |
+| `/knowledge/search` | POST | Hybrid knowledge search (vector + label) |
+| `/artifacts` | POST | Store artifacts |
+| `/artifacts/search` | POST | Search artifacts |
+| `/events` | POST | Log custom events |
+| `/events/recent` | GET | Retrieve recent events |
+| `/pipelines/curation` | POST | Trigger curation manually |
+| `/smart/reinterpret-task` | POST | Optimize a task query |
+| `/smart/extract-knowledge` | POST | Extract knowledge from mission data |
+| `/smart/synthesize-background` | POST | Synthesize background narrative |
+| `/health` | GET | Health check |
+
+### gRPC (`:50051`)
+
+Mirror of the REST API over Protocol Buffers with JSON-over-gRPC support. Reflection enabled for client discovery.
+
+### Observe Request
 
 ```json
-// Request
-{ "task": "Find Q3 revenue numbers", "model": null }
-
-// Response
 {
-  "search_labels": ["revenue", "q3", "financial-data", ...],
-  "search_query": "Q3 quarterly revenue figures financial results",
-  "complexity": "simple"
+  "session_id": "my-agent-session",
+  "content": "User asked about last week's deployment.",
+  "timestamp": "2025-05-01T14:30:00Z",
+  "source": "chat",
+  "metadata": {"user_id": "u123"},
+  "read_only": false
 }
 ```
 
-#### `POST /smart/filter-results` — LLM relevance filter
+### Observe Response
 
 ```json
-// Request
-{ "task": "...", "search_results": "...", "model": null, "max_results": 5 }
-
-// Response
-{ "filtered_results": "..." }
-```
-
-#### `POST /smart/infer-state` — LLM state inference
-
-```json
-// Request
-{ "task": "...", "retrieved_memories": "...", "model": null }
-
-// Response
-{ "state_description": "Previously analyzed Q2, now extending to Q3." }
-```
-
-#### `POST /smart/synthesize-background` — LLM background narrative
-
-```json
-// Request
 {
-  "group_id": "default",
-  "task": "...",
-  "long_term_context": "...",
-  "tool_stats_context": "...",
-  "state_description": "...",
-  "knowledge_context": "...",
-  "artifacts_context": "...",
-  "model": null
-}
-
-// Response (object with synthesized narrative)
-```
-
-#### `POST /smart/generate-reflection` — Post-mission reflection
-
-```json
-// Request
-{ "mission_data_json": "{...}" }
-
-// Response
-{ "reflection": "## What Worked\n..." }
-```
-
-#### `POST /smart/extract-knowledge` — DSPy knowledge extraction
-
-```json
-// Request
-{ "mission_data_json": "{...}", "reflection": "...", "model": null }
-
-// Response
-{ "entries_json": "[{\"content\": \"...\", \"knowledge_type\": \"fact\", ...}]" }
-```
-
-#### `POST /smart/extract-artifacts` — DSPy artifact extraction
-
-```json
-// Request
-{ "mission_data_json": "{...}", "model": null }
-
-// Response
-{ "entries_json": "[{\"name\": \"...\", \"artifact_type\": \"file\", ...}]" }
-```
-
-#### `POST /smart/compress-events` — Compress events into episode
-
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "run_id": "",
-  "state_description": "",
-  "model": null
-}
-
-// Response (object with compression result)
-```
-
----
-
-### Observe
-
-#### `POST /observe` — Simple single-endpoint memory interface
-
-```json
-// Request
-{
-  "session_id": "chat-abc123",
-  "content": "Called the weather API for Paris — got 22°C, partly cloudy",
-  "timestamp": "2026-03-06T10:30:00Z",
-  "source": "weather-agent",
-  "metadata": {}
-}
-
-// Response
-{
-  "episode_uuid": "ee2b712d-d556-46ac-84be-d1fc7e840f67",
-  "observation_type": "tool_result",
-  "context": {
-    "episodes": [
-      {
-        "uuid": "...",
-        "content": "...",
-        "episode_type": "reflection",
-        "score": 0.85,
-        "created_at": 1772793000.0,
-        "created_at_iso": "2026-03-06T10:30:00+00:00"
-      }
-    ],
-    "knowledge": [
-      {
-        "uuid": "...",
-        "content": "User prefers Celsius",
-        "knowledge_type": "fact",
-        "score": 0.84
-      }
-    ]
-  }
-}
-```
-
-The judge routes each observation automatically:
-
-| Judge Decision | Behavior |
-|----------------|----------|
-| `storage_tier = "short_term"` | Event logged to DragonflyDB only, no embedding |
-| `storage_tier = "long_term"` | Episode stored in FalkorDB with embedding |
-| `storage_tier = "both"` | Both event + episode |
-| `importance = "low"` | Retrieve top 5, min_score 0.60 |
-| `importance = "medium"` | Retrieve top 10, min_score 0.55 |
-| `importance = "high"` | Retrieve top 15, min_score 0.50 |
-
----
-
-### Pipelines (Composite Operations)
-
-#### `POST /pipelines/startup` — Full startup pipeline
-
-Runs: reinterpret task → search episodes → search knowledge + artifacts → filter → tool stats → infer state → synthesize background.
-
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "task": "Analyze Q1 2026 financials",
-  "model": null
-}
-
-// Response
-{
-  "background_narrative": "You previously analyzed Q3-Q4...",
-  "inferred_state": "Continuing financial analysis series.",
-  "long_term_context": "...",
-  "knowledge_context": "...",
-  "artifacts_context": "...",
-  "tool_stats_context": "...",
-  "search_labels": ["financials", "q1-2026", ...],
-  "search_query": "...",
-  "complexity": "moderate"
-}
-```
-
-#### `POST /pipelines/curation` — Full curation pipeline
-
-Runs: reflect → store reflection → extract entities → extract knowledge → store knowledge → extract artifacts → store artifacts → compress events.
-
-```json
-// Request
-{
-  "group_id": "default",
-  "workflow_id": "default",
-  "mission_data_json": "{\"task\": \"...\", \"status\": \"success\", ...}",
-  "model": null
-}
-
-// Response
-{
-  "reflection": "## What Worked\n...",
-  "reflection_uuid": "f05cfa2d-...",
-  "knowledge_count": 8,
-  "artifact_count": 2,
-  "events_compressed": true
+  "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "observation_type": "chat",
+  "context": "Last week you deployed v2.3 to staging on April 24th. The deployment had a memory leak in the worker pool that was patched in v2.3.1 the following day...",
+  "search_labels": ["deployment", "infrastructure"],
+  "search_query": "deployment events and incidents last week"
 }
 ```
 
 ---
 
-### gRPC
+## DSPy Smart Operations
 
-All operations are available via gRPC on port `50051` using JSON-over-gRPC (generic handler). Method names map directly:
+All LLM operations use DSPy structured signatures with configurable models via OpenRouter.
 
-```
-/memory.v1.MemoryService/LogEvent
-/memory.v1.MemoryService/GetRecentEvents
-/memory.v1.MemoryService/SearchEvents
-/memory.v1.MemoryService/StoreEpisode
-/memory.v1.MemoryService/SearchEpisodes
-/memory.v1.MemoryService/LinkEpisodes
-/memory.v1.MemoryService/StoreKnowledge
-/memory.v1.MemoryService/SearchKnowledge
-/memory.v1.MemoryService/SearchByLabels
-/memory.v1.MemoryService/StoreArtifacts
-/memory.v1.MemoryService/SearchArtifacts
-/memory.v1.MemoryService/GetArtifact
-/memory.v1.MemoryService/ListRecent
-/memory.v1.MemoryService/DeleteArtifact
-/memory.v1.MemoryService/PersistExecutionState
-/memory.v1.MemoryService/GetExecutionState
-/memory.v1.MemoryService/UpdateToolStats
-/memory.v1.MemoryService/GetToolStats
-/memory.v1.MemoryService/GetMemoryContext
-/memory.v1.MemoryService/ReinterpretTask
-/memory.v1.MemoryService/FilterMemoryResults
-/memory.v1.MemoryService/InferState
-/memory.v1.MemoryService/SynthesizeBackground
-/memory.v1.MemoryService/GenerateReflection
-/memory.v1.MemoryService/ExtractKnowledge
-/memory.v1.MemoryService/ExtractArtifacts
-/memory.v1.MemoryService/CompressEvents
-/memory.v1.MemoryService/StartupPipeline
-/memory.v1.MemoryService/RunCuration
-/memory.v1.MemoryService/Observe
-```
+| Operation | Purpose |
+|-----------|---------|
+| `judge_observation` | Route observation type; assess importance |
+| `reinterpret_task` | Optimize cold-start search query + labels |
+| `summarize_context` | Synthesize session entries into coherent context |
+| `extract_knowledge` | Mine facts, patterns, insights from mission data |
+| `extract_artifacts` | Extract generated code, tools, documents |
+| `extract_entities` | Extract named entities and relationships |
+| `compress` | Temporal compression of episode sequences |
+| `reflect` | Generate narrative reflection on what was learned |
+| `synthesize` | Synthesize mission background narrative |
+| `infer_state` | Infer agent state from execution trace |
+| `filter` | Filter results for relevance |
 
-Proto definitions are in `proto/memory/v1/` for documentation and future compiled stub generation.
-
-## Client Library
-
-A unified async client supporting both transports:
-
-```python
-from memory_client import MemoryClient
-
-# Connect via REST
-client = await MemoryClient.rest("http://localhost:9000", group_id="my-agent")
-
-# Or via gRPC
-client = await MemoryClient.grpc("localhost:50051", group_id="my-agent")
-
-# Log events
-await client.log_event("observation", {"content": "Found 3 reports"})
-
-# Store and search episodes
-uuid = await client.store_episode("Agent completed sales analysis...")
-results = await client.search_episodes("quarterly sales report")
-
-# Store and search knowledge
-await client.store_knowledge(
-    entries=[{"content": "Revenue up 15%", "knowledge_type": "fact",
-              "labels": ["sales", "revenue"], "confidence": 0.92}],
-    source_mission="analyze Q3-Q4 sales",
-)
-results = await client.search_knowledge("revenue growth", labels=["sales"])
-
-# Run pipelines
-startup = await client.startup_pipeline("Analyze Q1 2026 financials")
-curation = await client.run_curation(mission_data)
-
-# Fire-and-forget (non-blocking)
-client.log_event_fire_and_forget("tool_call", {"tool": "web_search"})
-client.update_tool_stats_fire_and_forget("web_search", success=True, duration_ms=450)
-
-await client.close()
-```
+---
 
 ## Configuration
 
-Configuration is managed via Dynaconf with `settings.toml` and environment variable overrides.
-
-### settings.toml
+Configured via `settings.toml` with optional `.secrets.toml` overrides (not committed).
 
 ```toml
-[default]
-service_name = "agent-memory-service"
-version = "0.1.0"
-
-[default.grpc]
-port = 50051
-max_workers = 10
-
-[default.rest]
-host = "0.0.0.0"
-port = 9000
-
-[default.dragonfly]
-url = "redis://localhost:6381"
-
 [default.falkordb]
 url = "redis://localhost:6380"
 graph_name = "episode_store"
 
+[default.dragonfly]
+url = "redis://localhost:6381"
+
 [default.embeddings]
-model = "qwen/qwen3-embedding-8b"
+model = "qwen/qwen3-embedding-8b:nitro"
 base_url = "https://openrouter.ai/api/v1"
 
 [default.llm]
 flash_model = "x-ai/grok-4.1-fast"
 base_url = "https://openrouter.ai/api/v1"
 
-[default.dspy]
-models = ["deepseek/deepseek-v3.2", "x-ai/grok-4.1-fast"]
+[default.session]
+ttl_seconds = 86400          # 24 hours
+
+[default.scoring]
+episode_half_life_hours = 168.0    # 1 week
+episode_alpha = 0.3                # temporal weight
+knowledge_half_life_hours = 720.0  # 30 days
+knowledge_alpha = 0.2
+
+[default.hebbian]
+enabled = true
+learning_rate = 0.1
+beta_episode = 0.2           # Hebbian weight in 3D score
+activation_cap = 1000
+decay_rate = 0.01
+decay_interval_hours = 168
 
 [default.background]
 enabled = true
-interval_seconds = 60
+interval_seconds = 60        # REM cycle interval
 batch_size = 5
 min_episodes_for_processing = 3
+
+[default.nats]
+enabled = false              # Set true for event-driven mode
+url = "nats://localhost:4222"
 ```
 
-### Environment Overrides
+**Secrets** (in `.secrets.toml` or environment):
 
+```toml
+[default.embeddings]
+api_key = "sk-or-v1-..."
+
+[default.llm]
+api_key = "sk-or-v1-..."
+```
+
+Or via environment variables:
 ```bash
-MEMORY_SERVICE_DRAGONFLY__URL=redis://localhost:6381
-MEMORY_SERVICE_FALKORDB__URL=redis://localhost:6380
-MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-...
-MEMORY_SERVICE_LLM__API_KEY=sk-or-...
+MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
+MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
 ```
 
-API keys go in `.secrets.toml` (gitignored) or environment variables.
+---
 
-## Running
+## Deployment
 
-### Prerequisites
+### Docker (Recommended)
 
-- Docker
-- OpenRouter API key (or any OpenAI-compatible endpoint)
-
-### Docker (all-in-one container)
-
-The Dockerfile bundles DragonflyDB + FalkorDB + the memory service into a single container using supervisord.
+The Docker image bundles all six services (DragonflyDB, FalkorDB, NATS, gRPC, REST, workers) into a single container supervised by supervisord.
 
 ```bash
 # Build
-docker build -t segnog:latest .
+docker-compose build
 
-# Run
-docker run -d --name segnog \
-  -p 50051:50051 -p 9000:9000 \
-  -e MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-... \
-  -e MEMORY_SERVICE_LLM__API_KEY=sk-or-... \
-  segnog:latest
+# Start
+docker-compose up -d
+
+# Check health
+curl http://localhost:9000/health
 ```
 
-Or with Docker Compose:
+Named Docker volumes persist data across rebuilds:
+- `dragonfly_data` — Session cache + event streams (snapshots every minute)
+- `falkordb_data` — Long-term episodes, knowledge, artifacts
+- `nats_data` — Event stream persistence
 
-```bash
-export OPENROUTER_API_KEY=sk-or-...
-docker-compose up
+```yaml
+# docker-compose.yml excerpt
+services:
+  segnog:
+    build: .
+    ports:
+      - "50051:50051"   # gRPC
+      - "9000:9000"     # REST
+    environment:
+      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${OPENROUTER_API_KEY}
+      - MEMORY_SERVICE_LLM__API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - dragonfly_data:/data/dragonfly
+      - falkordb_data:/data/falkordb
+      - nats_data:/data/nats
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 ```
-
-The container runs three processes:
-- **DragonflyDB** on port 6381 (internal)
-- **FalkorDB** on port 6380 (internal)
-- **Memory Service** — REST on `:9000`, gRPC on `:50051`, REM worker (background, every 60s)
-
-Data is persisted via Docker volumes at `/data/dragonfly` and `/data/falkordb`.
-
-Health check: `GET http://localhost:9000/health`
 
 ### Local Development
 
 ```bash
-# Start storage backends separately
-docker run -d --name dragonfly -p 6381:6379 docker.dragonflydb.io/dragonflydb/dragonfly:latest
-docker run -d --name falkordb -p 6380:6379 falkordb/falkordb:latest
+pip install -e .
 
-# Install the service
-pip install -e ".[dev]"
+# Set secrets
+cp .secrets.toml.example .secrets.toml
+# Edit .secrets.toml with your OpenRouter API key
 
-# Configure API key
-export MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-...
-export MEMORY_SERVICE_LLM__API_KEY=sk-or-...
-
-# Run
+# Run (requires DragonflyDB, FalkorDB, NATS already running)
 python -m memory_service.main
 ```
 
-## Testing
+---
+
+## Scoping
+
+All data is scoped by `group_id` (and optionally `workflow_id`). This allows multiple independent agents or conversations to share the same service instance without data leakage.
+
+- **group_id**: typically the agent ID, user ID, or conversation ID
+- **workflow_id**: sub-scope within a group (e.g., a specific task or run)
+
+All FalkorDB queries filter by `group_id`. All session keys include `group_id`. All NATS events carry `group_id` metadata.
+
+---
+
+## Benchmark — LoCoMo
+
+The repository includes a LoCoMo (Long Conversation Modeling) benchmark to evaluate retrieval quality.
+
+### Running
 
 ```bash
-# Run all tests (requires running service + backends)
-pytest tests/ -v -s
+# Ingestion phase — ingest conversation into memory service
+python -m benchmarks.locomo run --phase ingest --conversations 0
 
-# Integration tests only
-pytest tests/integration/ -v -s
+# Evaluation phase — QA evaluation with F1 + LLM-as-judge scoring
+python -m benchmarks.locomo run --phase evaluate --conversations 0 \
+    --retrieval observe --rate-limit 2 --use-llm-judge
 ```
 
-The E2E test suite (`tests/integration/test_e2e_full.py`) covers 30 tests across all layers:
-- Storage operations (events, episodes, knowledge, artifacts, state)
-- Smart operations (reinterpret, filter, synthesize, reflect, extract)
-- Composite pipelines (startup, curation)
-- Full agent lifecycle (startup → work → curate → verify retrieval)
+### Retrieval Modes
 
-## Benchmarks
+| Mode | Description |
+|------|-------------|
+| `observe` | Full observe pipeline (warm path + knowledge search) |
+| `episodes_only` | Direct FalkorDB episode search |
+| `episodes_knowledge` | Episode + knowledge search combined |
+| `full_pipeline` | Startup pipeline (background narrative + context) |
 
-The service is benchmarked against the [LoCoMo](https://arxiv.org/abs/2402.10790) dataset — 10 long conversations (272 sessions) with 1,986 QA pairs across 5 categories:
+### Scoring
 
-| Category | Description | Count | F1 Score |
-|----------|-------------|-------|----------|
-| 1. Single-hop | Direct factual recall | 282 | 0.564 |
-| 2. Temporal | Time-dependent questions | 321 | 0.691 |
-| 3. Multi-hop | Multi-step reasoning | 96 | 0.366 |
-| 4. Open-domain | Broad knowledge questions | 841 | 0.683 |
-| 5. Adversarial | Trick/misleading questions | 446 | 0.962 |
-| **Overall (1-4)** | **Excluding adversarial** | **1540** | **0.643** |
-| **Overall (1-5)** | **All categories** | **1986** | **0.715** |
+| Metric | Description |
+|--------|-------------|
+| F1 | Token overlap between predicted and ground-truth answer |
+| LLM Judge | Binary CORRECT/WRONG by a separate LLM evaluator |
 
-*Measured with qwen3-embedding-8b embeddings and grok-4.1-fast answer generation.*
+Results are saved per-run to `benchmarks/locomo/results/` with full per-question breakdowns.
 
-## Project Structure
+### QA Categories
+
+| Category | Description |
+|----------|-------------|
+| 1. Single-hop | Direct factual recall |
+| 2. Temporal | Date and sequence reasoning |
+| 3. Multi-hop | Cross-session inference |
+| 4. Open-domain | General knowledge + conversation context |
+| 5. Adversarial | Questions about facts not in the conversation |
+
+---
+
+## File Structure
 
 ```
-Segnog/
-├── src/memory_service/
-│   ├── main.py                       # Entry point — starts gRPC + REST + REM worker
-│   ├── config.py                     # Dynaconf configuration
-│   ├── storage/
-│   │   ├── dragonfly.py              # DragonflyDB client (Streams + Hashes)
-│   │   ├── short_term.py             # Routing layer (event/state/memory)
-│   │   ├── episode_store.py          # Episode storage + vector search + lifecycle
-│   │   ├── knowledge_store.py        # Knowledge graph + hybrid search
-│   │   └── artifact_store.py         # Artifact registry + hybrid search
-│   ├── background/
-│   │   └── rem_worker.py             # REM sleep consolidation worker
-│   ├── grpc/
-│   │   ├── server.py                 # Generic JSON-over-gRPC server
-│   │   └── service_handler.py        # Shared business logic (all operations)
-│   ├── rest/
-│   │   ├── app.py                    # FastAPI app factory
-│   │   ├── dependencies.py           # Dependency injection
-│   │   └── routers/
-│   │       ├── events.py             # Event endpoints
-│   │       ├── episodes.py           # Episode endpoints
-│   │       ├── knowledge.py          # Knowledge endpoints
-│   │       ├── artifacts.py          # Artifact endpoints
-│   │       ├── state.py              # State endpoints
-│   │       ├── smart.py              # Smart operation endpoints
-│   │       ├── pipelines.py          # Pipeline endpoints
-│   │       └── observe.py            # Observe endpoint (simple API)
-│   ├── smart/
-│   │   ├── reinterpret.py            # DSPy task reinterpretation
-│   │   ├── filter.py                 # LLM relevance filter
-│   │   ├── infer_state.py            # LLM state inference
-│   │   ├── synthesize.py             # LLM background narrative
-│   │   ├── reflect.py                # LLM post-mission reflection
-│   │   ├── extract_knowledge.py      # DSPy knowledge extraction
-│   │   ├── extract_entities.py       # DSPy entity extraction
-│   │   ├── extract_artifacts.py      # DSPy artifact extraction
-│   │   ├── judge_observation.py      # DSPy observation routing
-│   │   └── compress.py               # LLM event compression
-│   ├── llm/
-│   │   ├── client.py                 # AsyncOpenAI singleton
-│   │   └── dspy_adapter.py           # DSPy LM config + DirectJSONAdapter
-│   ├── dto/                          # Pydantic request/response models
-│   │   ├── events.py
-│   │   ├── episodes.py
-│   │   ├── knowledge.py
-│   │   ├── artifacts.py
-│   │   ├── state.py
-│   │   └── pipelines.py
-│   └── dspy_signatures/              # DSPy prompt templates
-│       ├── knowledge_signature.py    # Task reinterpretation + knowledge extraction
-│       ├── entity_signature.py       # Entity extraction
-│       ├── observation_signature.py  # Observation judge
-│       └── artifact_signature.py     # Artifact extraction
-├── client/memory_client/
-│   ├── client.py                     # MemoryClient (unified async client)
-│   ├── rest_transport.py             # httpx-based REST transport
-│   ├── grpc_transport.py             # gRPC JSON transport
-│   └── exceptions.py
-├── proto/memory/v1/                  # Protocol Buffer definitions
-│   ├── common.proto
-│   ├── events.proto
-│   ├── episodes.proto
-│   ├── knowledge.proto
-│   ├── artifacts.proto
-│   ├── state.proto
-│   ├── smart.proto
-│   └── pipelines.proto
-├── tests/
-│   ├── integration/
-│   │   └── test_e2e_full.py          # 30 E2E tests
-│   └── unit/
+agent-memory-service/
+│
+├── Dockerfile                          # All-in-one container
 ├── docker-compose.yml
-├── Dockerfile
-├── pyproject.toml
-├── settings.toml
-└── README.md
+├── settings.toml                       # Service configuration
+├── .secrets.toml                       # API keys (git-ignored)
+│
+├── src/memory_service/
+│   ├── main.py                         # CLI entry point
+│   ├── config.py                       # Dynaconf settings
+│   │
+│   ├── core/
+│   │   ├── observe.py                  # observe_core() — hot path
+│   │   └── hebbian.py                  # Co-activation reinforcement
+│   │
+│   ├── storage/
+│   │   ├── dragonfly.py                # DragonflyDB client (sessions + events)
+│   │   ├── episode_store.py            # FalkorDB episodes
+│   │   ├── knowledge_store.py          # FalkorDB knowledge
+│   │   └── artifact_store.py           # FalkorDB artifacts
+│   │
+│   ├── scoring.py                      # 2D and 3D scoring functions
+│   │
+│   ├── smart/                          # DSPy-powered LLM operations
+│   │   ├── summarize_context.py
+│   │   ├── reinterpret.py
+│   │   ├── extract_knowledge.py
+│   │   ├── judge_observation.py
+│   │   └── ...
+│   │
+│   ├── dspy_signatures/                # DSPy prompt signatures
+│   │
+│   ├── rest/                           # FastAPI REST server
+│   │   ├── app.py
+│   │   └── routers/
+│   │       ├── observe.py
+│   │       ├── episodes.py
+│   │       ├── knowledge.py
+│   │       └── ...
+│   │
+│   ├── grpc/                           # gRPC server
+│   │   ├── server.py
+│   │   └── service_handler.py
+│   │
+│   ├── events/                         # NATS event-driven workers
+│   │   ├── curation_worker.py
+│   │   └── rem_sweep_worker.py
+│   │
+│   ├── background/
+│   │   └── rem_worker.py               # Polling-based REM consolidation
+│   │
+│   └── dto/                            # Pydantic request/response models
+│
+├── benchmarks/locomo/                  # LoCoMo benchmark suite
+│   ├── runner.py
+│   ├── ingest.py
+│   ├── retrieve.py
+│   ├── answer.py
+│   ├── score.py
+│   └── segnog_client.py
+│
+├── proto/                              # Protocol Buffer definitions
+└── tests/
 ```
 
-## Tech Stack
+---
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| REST API | FastAPI + uvicorn | HTTP endpoints |
-| gRPC API | grpcio (async) | RPC endpoints |
-| Short-term storage | DragonflyDB | Events (Streams), State (Hashes) |
-| Long-term storage | FalkorDB | Graph nodes, vector search, relationships |
-| Embeddings | Qwen3-Embedding-8B | 4096-dim vectors via OpenRouter |
-| LLM (free-form) | Grok 4.1 Fast | Reflection, synthesis, filtering, inference |
-| LLM (structured) | DeepSeek v3.2 / Grok 4.1 Fast | DSPy-powered extraction with schema validation |
-| Configuration | Dynaconf | TOML config + env overrides |
-| Data validation | Pydantic v2 | Request/response schemas, DSPy output models |
-| Python | 3.11+ | Async-first, type-annotated |
+## Initialization Sequence
 
-## License
+```
+python -m memory_service.main
+  │
+  ├── Connect DragonflyDB (redis.asyncio)
+  ├── Connect FalkorDB (select_graph "episode_store")
+  ├── Connect OpenAI client (OpenRouter)
+  ├── Init EpisodeStore + KnowledgeStore + ArtifactStore
+  │     └── ensure_indexes() — create vector/property indexes
+  ├── Connect NATS (if enabled)
+  │
+  ├── Start gRPC server :50051
+  ├── Start REST server :9000
+  │
+  ├── IF NATS enabled:
+  │     ├── CurationWorker.run()
+  │     ├── REMSweepPublisher.run()
+  │     └── REMSweepWorker.run()
+  └── ELSE:
+        └── REMWorker.run()   ← polling every 60s
+```
 
-MIT
+---
+
+## Design Decisions
+
+**Why DragonflyDB + FalkorDB?**
+Two storage tiers with different access patterns. DragonflyDB is the hot cache — sub-millisecond reads, TTL-based expiry, Redis-compatible. FalkorDB is the cold store — graph traversal, vector search, Cypher queries, permanent persistence. Keeping them separate means the hot path never touches the disk-backed store.
+
+**Why Hebbian scoring?**
+Pure semantic similarity retrieves what is *related to the query*. Hebbian scoring retrieves what has been *useful before* in similar situations. The combination lets the service adapt over time — episodes that are repeatedly helpful together develop stronger associative links and surface earlier in future retrievals.
+
+**Why a single `observe` endpoint?**
+An agent should not need to decide where to store an observation or how to search for relevant context. The observe endpoint encapsulates the full memory lifecycle: storage routing, retrieval, summarization, and background consolidation — all triggered by one call.
+
+**Why REM consolidation?**
+Raw episodes are redundant, noisy, and expensive to search at scale. Periodic consolidation compresses them into structured knowledge, deduplicates overlapping observations, and produces compact summaries. This mirrors the function of sleep in biological memory: forgetting the noise, retaining the signal.
+
+**Why DSPy?**
+Structured extraction requires reliable, schema-validated LLM outputs. DSPy provides type-checked signatures with retry logic and adapter-based output parsing, making extraction robust across models and providers.

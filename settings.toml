@@ -41,7 +41,7 @@ models = [
 
 # Session (short-term memory in DragonflyDB)
 [default.session]
-ttl_seconds = 3600
+ttl_seconds = 86400
 hydration_enabled = true
 cold_start_sync = true
 

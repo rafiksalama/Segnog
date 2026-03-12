@@ -121,9 +121,12 @@ async def _hydrate_episodes(
             except Exception:
                 continue
         try:
+            ep_meta = {**ep.get("metadata", {})}
+            if ep.get("episode_type"):
+                ep_meta["episode_type"] = ep["episode_type"]
             await dragonfly.session_add(
                 session_id, ep_uuid, ep["content"],
-                ep_emb, ep.get("metadata", {}),
+                ep_emb, ep_meta,
                 source_type="hydrated",
             )
             hydrated += 1
@@ -303,6 +306,9 @@ async def observe_core(
     session_id: str, content: str,
     timestamp: str = None, source: str = None, metadata: dict = None,
     read_only: bool = False,
+    summarize: bool = False,
+    top_k: int = 10,
+    knowledge_top_k: int = 10,
 ) -> dict:
     """Core observe logic — store, summarize, return context.
 
@@ -310,27 +316,8 @@ async def observe_core(
     Warm: DragonflyDB already populated by background hydration.
     Both paths converge: add to DragonflyDB → LLM summarize session → return.
 
-    If read_only=True, skip all writes and just summarize existing session.
+    If read_only=True, skip all writes and use the warm path summarization only.
     """
-    # Read-only: summarize existing session without any writes
-    if read_only:
-        entries = await dragonfly.session_get_all(session_id)
-        summary = ""
-        if entries:
-            from ..smart.summarize_context import summarize_context
-            summary = await summarize_context(
-                current_observation=content,
-                session_entries=entries,
-            )
-        return {
-            "episode_uuid": "",
-            "observation_type": "observe",
-            "context": summary,
-            "is_cold": False,
-            "search_labels": [],
-            "search_query": "",
-        }
-
     # Scope
     episode_store._group_id = session_id
     knowledge_store._group_id = session_id
@@ -341,104 +328,163 @@ async def observe_core(
     if source:
         metadata["source"] = source
 
-    # Step 1: Embed + store in DragonflyDB
-    try:
-        embedding = await episode_store._embed(content)
-    except Exception as e:
-        logger.warning(f"Embedding failed, returning empty context: {e}")
-        return {
-            "episode_uuid": str(uuid4()),
-            "observation_type": "observe",
-            "context": "",
-            "is_cold": False,
-            "search_labels": [],
-            "search_query": "",
-        }
-    episode_uuid = str(uuid4())
-
-    await dragonfly.session_add(
-        session_id=session_id, entry_uuid=episode_uuid,
-        content=content, embedding=embedding,
-        metadata=metadata, source_type="local",
-    )
-
-    # Step 2: Cold start pre-fill
-    session_entry_count = await dragonfly.session_count(session_id)
-    is_cold = session_entry_count < 2
-
+    episode_uuid = ""
     search_labels = []
     search_query = content
-    search_embedding = embedding
+    is_cold = False
     falkor_episodes = None
     falkor_knowledge = None
 
-    if is_cold:
-        logger.info(f"Cold start for session {session_id[:8]}")
-
-        # Reinterpret content for optimized search
+    if not read_only:
+        # Step 1: Embed + store in DragonflyDB
         try:
-            from ..smart.reinterpret import reinterpret_task
-            reinterpretation = await reinterpret_task(task=content)
-            search_labels = reinterpretation.get("search_labels", [])
-            search_query = reinterpretation.get("search_query", content)
+            embedding = await episode_store._embed(content)
         except Exception as e:
-            logger.warning(f"Reinterpret failed: {e}")
+            logger.warning(f"Embedding failed, returning empty context: {e}")
+            return {
+                "episode_uuid": str(uuid4()),
+                "observation_type": "observe",
+                "context": "",
+                "is_cold": False,
+                "search_labels": [],
+                "search_query": "",
+            }
+        episode_uuid = str(uuid4())
 
-        # Embed optimized query
-        if search_query != content:
-            search_embedding = await episode_store._embed(search_query)
-
-        # Search FalkorDB + score + enrich
-        falkor_episodes, falkor_knowledge = await _search_falkordb(
-            episode_store, knowledge_store, search_query,
-            search_embedding, episode_uuid, labels=search_labels,
-            entity_content=content,
+        await dragonfly.session_add(
+            session_id=session_id, entry_uuid=episode_uuid,
+            content=content, embedding=embedding,
+            metadata=metadata, source_type="local",
         )
 
-        # Pre-fill DragonflyDB
-        ep_count = await _hydrate_episodes(
-            episode_store, dragonfly, session_id,
-            falkor_episodes, episode_uuid,
+        # Step 2: Cold start pre-fill
+        session_entry_count = await dragonfly.session_count(session_id)
+        is_cold = session_entry_count < 2
+        search_embedding = embedding
+
+        if is_cold:
+            logger.info(f"Cold start for session {session_id[:8]}")
+
+            # Reinterpret content for optimized search
+            try:
+                from ..smart.reinterpret import reinterpret_task
+                reinterpretation = await reinterpret_task(task=content)
+                search_labels = reinterpretation.get("search_labels", [])
+                search_query = reinterpretation.get("search_query", content)
+            except Exception as e:
+                logger.warning(f"Reinterpret failed: {e}")
+
+            # Embed optimized query
+            if search_query != content:
+                search_embedding = await episode_store._embed(search_query)
+
+            # Search FalkorDB + score + enrich
+            falkor_episodes, falkor_knowledge = await _search_falkordb(
+                episode_store, knowledge_store, search_query,
+                search_embedding, episode_uuid, labels=search_labels,
+                entity_content=content,
+            )
+
+            # Pre-fill DragonflyDB
+            ep_count = await _hydrate_episodes(
+                episode_store, dragonfly, session_id,
+                falkor_episodes, episode_uuid,
+            )
+            kn_count = await _hydrate_knowledge(
+                episode_store, dragonfly, session_id, falkor_knowledge,
+            )
+            logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge")
+
+    # Step 3: Get session entries — use 3D scoring (semantic + temporal + Hebbian)
+    # instead of recency cap so the most relevant entries survive, not the most recent.
+    # read_only: embed here (cheap; LLM summarization is already skipped by default).
+    if read_only and not locals().get("embedding"):
+        try:
+            embedding = await episode_store._embed(content)
+        except Exception as e:
+            logger.warning(f"Embedding failed in read_only: {e}")
+            embedding = None
+
+    if embedding is not None:
+        # Semantic search within session → top 100 by cosine similarity
+        search_results = await dragonfly.session_search(
+            session_id=session_id,
+            query_embedding=embedding,
+            top_k=top_k,
+            min_score=0.0,
         )
-        kn_count = await _hydrate_knowledge(
-            episode_store, dragonfly, session_id, falkor_knowledge,
+        if episode_uuid:
+            search_results = [r for r in search_results if r.get("uuid") != episode_uuid]
+
+        # Apply 3D scoring: semantic + temporal + Hebbian
+        search_results = await _score_3dim(
+            episode_store, search_results, episode_uuid,
+            alpha=get_episode_alpha(),
+            half_life=get_episode_half_life(),
         )
-        logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge")
+        entries = {r["uuid"]: r for r in search_results}
+    else:
+        # Fallback: recency cap (no embedding available)
+        entries = await dragonfly.session_get_all(session_id)
+        if episode_uuid:
+            entries.pop(episode_uuid, None)
+        if len(entries) > top_k:
+            sorted_items = sorted(entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True)
+            entries = dict(sorted_items[:top_k])
 
-    # Step 3: LLM context summary
-    entries = await dragonfly.session_get_all(session_id)
-    entries.pop(episode_uuid, None)
+    # read_only: augment with a fresh synchronous knowledge search from FalkorDB.
+    # The warm session only has knowledge cached from ingest time; this brings in
+    # knowledge specifically relevant to the current question.
+    if read_only:
+        try:
+            kn_results = await knowledge_store.search_hybrid(
+                query=content,
+                top_k=knowledge_top_k,
+                min_score=KNOWLEDGE_PARAMS["min_score"],
+            )
+            for kn in kn_results:
+                kn_uuid = kn.get("uuid", "")
+                key = f"kn_{kn_uuid}"
+                if kn_uuid and key not in entries:
+                    entries[key] = {
+                        "content": kn.get("content", ""),
+                        "source_type": "hydrated_knowledge",
+                        "created_at": 0,
+                    }
+        except Exception as e:
+            logger.warning(f"read_only knowledge search failed: {e}")
 
-    # Cap to 100 most recent entries to keep LLM prompt bounded
-    if len(entries) > 100:
-        sorted_items = sorted(entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True)
-        entries = dict(sorted_items[:100])
-
-    summary = ""
+    context = ""
     if entries:
-        from ..smart.summarize_context import summarize_context
-        summary = await summarize_context(
-            current_observation=content,
-            session_entries=entries,
-        )
+        if summarize:
+            from ..smart.summarize_context import summarize_context
+            context = await summarize_context(
+                current_observation=content,
+                session_entries=entries,
+            )
+        else:
+            from ..smart.summarize_context import _format_entries
+            context = _format_entries(entries)
 
-    # Step 4: Fire background
-    asyncio.create_task(background_hydrate(
-        episode_store, knowledge_store, dragonfly,
-        session_id, content, embedding, metadata, episode_uuid,
-        prefill_episodes=falkor_episodes if is_cold else None,
-        prefill_knowledge=falkor_knowledge if is_cold else None,
-    ))
+    if not read_only:
+        # Step 4: Fire background
+        asyncio.create_task(background_hydrate(
+            episode_store, knowledge_store, dragonfly,
+            session_id, content, embedding, metadata, episode_uuid,
+            prefill_episodes=falkor_episodes if is_cold else None,
+            prefill_knowledge=falkor_knowledge if is_cold else None,
+        ))
 
     logger.info(
-        f"Observe done: session={session_id[:8]}, uuid={episode_uuid[:8]}, "
+        f"Observe done: session={session_id[:8]}, "
+        f"{'read_only' if read_only else f'uuid={episode_uuid[:8]}'}, "
         f"cold={is_cold}, entries={len(entries)}"
     )
 
     return {
         "episode_uuid": episode_uuid,
         "observation_type": "observe",
-        "context": summary,
+        "context": context,
         "is_cold": is_cold,
         "search_labels": search_labels,
         "search_query": search_query,
