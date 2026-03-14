@@ -16,7 +16,7 @@ Segnog is built around three convictions:
 Short-term memory is fast, volatile, and session-scoped. Long-term memory is permanent, structured, and accumulates over time. These are different problems with different tools. Keeping them separate — DragonflyDB for hot sessions, FalkorDB for the persistent graph — means the hot path never pays the cost of the cold store.
 
 **2. Relevance is not just semantic similarity.**
-A keyword match tells you what is *related*. What you actually need is what was *useful before in similar situations*. Segnog scores every retrieval on three dimensions: how similar, how recent, and how often co-retrieved. Episodes that fire together, wire together.
+A keyword match tells you what is *related*. What you actually need is what was *useful before in similar situations*. When reading from the session cache, Segnog re-scores results on three dimensions: how similar, how recent, and how often co-retrieved. Episodes that fire together, wire together.
 
 **3. Consolidation should be unconscious.**
 An agent should not have to decide how to manage its own memory. The observe endpoint handles everything in one call — store, retrieve, summarize, return context — while background workers consolidate experiences into knowledge asynchronously, the way biological memory is refined during sleep.
@@ -96,24 +96,23 @@ Every session entry has:
 - The raw content text
 - Its embedding vector (for in-session semantic search)
 - A timestamp and source label
-- A 3D score: semantic + temporal + Hebbian
 
-Sessions expire by TTL (default 24 hours). While a session is warm, all retrieval is in-memory — no FalkorDB query needed. Context generation costs one LLM call over cached data.
+Sessions expire by TTL (default 24 hours). On the warm path, episodes and knowledge come from the session cache; ontology node summaries are re-fetched from FalkorDB on each call since they are not reliably in the session.
 
 **Structure (per session key):**
 ```
-session:{session_id}  →  list of entries
-  [
-    { content, embedding, score, source, timestamp },
+session:{session_id}  →  hash of entries
+  {
+    uuid → { content, embedding, source_type, created_at, metadata },
     ...
-  ]
+  }
 ```
 
-The session can contain three types of entries:
+The session can contain four types of entries:
 1. **Local** — observations added in this session
 2. **Hydrated episodes** — related episodes pulled from FalkorDB during cold start
 3. **Hydrated knowledge** — knowledge entries pulled from FalkorDB on cold start
-4. **Hydrated ontology** — entity profile summaries from OntologyNodes
+4. **Hydrated ontology** — entity profile summaries from OntologyNodes (cold start only)
 
 ### Long-Term Memory — FalkorDB
 
@@ -163,12 +162,15 @@ POST /observe
    │
    ├─ 4. Semantic search within DragonflyDB session  ─── in-memory cosine
    │       Apply 3D scoring to results
+   │       Fetch fresh OntologyNode summaries from FalkorDB  [non-read_only]
    │
-   ├─ 5. LLM summarize session entries  ──────────────── DSPy ContextSummarization
+   ├─ 5. Format context
+   │       summarize=true:  LLM summarize session entries  (DSPy)
+   │       summarize=false: format entries as text list  (default)
    │
    ├─ 6. Return context to agent  ←─────────────── ~1–2 seconds total
    │
-   └─ 7. Fire background tasks (non-blocking)
+   └─ 7. Fire background tasks (non-blocking)  [skipped if read_only=true]
          ├─ Store episode to FalkorDB
          ├─ Extract knowledge from observation  (DSPy)
          │   └─ Set knowledge_extracted = true on Episode node
@@ -177,13 +179,13 @@ POST /observe
          └─ Judge observation type + importance
 ```
 
-The agent receives its context in ~1–2 seconds. Everything that touches FalkorDB or calls LLMs for extraction happens asynchronously in the background.
+The agent receives its context in ~1–2 seconds. Everything that touches FalkorDB or calls LLMs for extraction happens asynchronously in the background. When `read_only=true`, steps 2 and 7 are skipped entirely — no writes occur.
 
 ---
 
 ## 3D Scoring
 
-Every retrieval result is scored on three dimensions before ranking.
+When reading from the DragonflyDB session cache — the warm path of `/observe` — results are re-scored on three dimensions before being passed to the summarizer.
 
 ```
 score = (1 − α − β) × semantic + α × freshness + β × hebbian
@@ -193,6 +195,8 @@ Defaults:
   β = 0.20  (Hebbian weight)
 ```
 
+Direct FalkorDB searches (e.g. the benchmark's `episodes_knowledge` mode) return raw semantic scores from the vector index without 3D re-scoring.
+
 **Semantic** — cosine similarity between query embedding and result embedding.
 
 **Temporal (freshness)** — hyperbolic decay from the moment of creation:
@@ -200,9 +204,8 @@ Defaults:
 freshness = 1 / (1 + age_hours / half_life_hours)
 
 Half-lives:
-  Session entries:  0.5 hours
-  Episodes:       168 hours  (1 week)
-  Knowledge:      720 hours  (30 days)
+  Episodes:  168 hours  (1 week)
+  Knowledge: 720 hours  (30 days)
 ```
 
 **Hebbian (co-activation)** — reward for episodes that have been retrieved together repeatedly:
@@ -290,26 +293,26 @@ Inspired by biological REM sleep — the phase in which the brain consolidates s
 ```
 Every 60 seconds:
   │
-  ├─ 1. Find groups with ≥3 pending raw episodes
-  │       Prioritize by: volume × age
+  ├─ 1. Find groups with ≥3 pending raw episodes (since last sweep)
+  │       Priority = raw_count × 0.5 + age_hours × 0.5
   │
-  ├─ 2. Deduplication check
+  ├─ 2. Deduplication check (per group)
   │       Compare each pending episode against consolidated ones
-  │       ≥0.90 cosine → mark DUPLICATE_OF, skip
-  │       < 0.90         → include in curation batch
+  │       ≥0.90 cosine → mark DUPLICATE_OF, skip curation
+  │       < 0.90         → include in unique batch
   │
-  ├─ 3. Curation (DSPy)
-  │       Extract knowledge → store with dedup (REINFORCES if near-dup)
-  │       Mark episodes consolidated
+  ├─ 3. Curation on unique batch (DSPy)
+  │       Extract knowledge → store (REINFORCES edge if near-dup ≥ 0.90)
   │
-  ├─ 4. Temporal compression
-  │       Compress unique episodes into a single reflection episode
-  │       Link reflection → sources via DERIVED_FROM
+  ├─ 4. Ontology update (Steps 8a–8d above)
   │
-  ├─ 5. Ontology update (Steps 8a–8d above)
+  ├─ 5. Mark unique episodes consolidated
   │
-  └─ 6. Hebbian decay
-          Decay all CO_ACTIVATED edge weights by 0.01 / 168h
+  ├─ 6. Temporal compression  (if ≥ 2 unique episodes)
+  │       Compress into a single summary episode
+  │
+  └─ 7. Hebbian decay  (every cycle, even if no consolidation)
+          Multiply stale CO_ACTIVATED weights by (1 − 0.01)
           Prune edges below 0.01
 ```
 
@@ -360,7 +363,9 @@ Retrieval mode: `episodes_knowledge` (episodes + knowledge hybrid, top-25 + top-
 | 5. Adversarial | 47 | 0.872 | — |
 | **Overall (cat. 1–4)** | **152** | **0.853** | **0.840** |
 
-Temporal reasoning scores highest — the combination of timestamped episodes and temporal decay in the 3D scorer naturally handles date-relative questions. Multi-hop reasoning (cross-session inference) is the hardest category: it requires linking facts across separate sessions, which the Hebbian graph helps but does not fully solve.
+Temporal reasoning scores highest — episodes are stored with explicit session timestamps and the `expand_adjacent` hops pull in surrounding turns, giving the model strong sequential context for date-relative questions. Multi-hop reasoning (cross-session inference) is the hardest category: it requires linking facts across separate sessions, which the ontology and knowledge graph help but do not fully solve.
+
+Note: the `episodes_knowledge` retrieval mode queries FalkorDB directly and uses raw semantic scores from the vector index, not the 3D scorer (which applies only to the DragonflyDB warm path in `/observe`). The Hebbian component accumulates over repeated interactions and is therefore not a factor in single-pass benchmark evaluation.
 
 ### Running the Benchmark
 
@@ -428,7 +433,7 @@ min_episodes_for_processing = 3
 ttl_seconds = 86400                 # 24 hours
 
 [default.nats]
-enabled                     = false
+enabled                     = true
 url                         = "nats://localhost:4222"
 curation_min_episodes       = 3
 curation_max_wait_seconds   = 30.0
