@@ -125,17 +125,6 @@ def get_background_min_episodes() -> int:
     return int(s.get("background.min_episodes_for_processing", 3))
 
 
-# Temporal scoring
-def get_session_half_life() -> float:
-    s = get_settings()
-    return float(s.get("scoring.session_half_life_hours", 0.5))
-
-
-def get_session_alpha() -> float:
-    s = get_settings()
-    return float(s.get("scoring.session_alpha", 0.5))
-
-
 def get_episode_half_life() -> float:
     s = get_settings()
     return float(s.get("scoring.episode_half_life_hours", 168.0))

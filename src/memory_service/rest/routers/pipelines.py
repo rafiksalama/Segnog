@@ -8,6 +8,7 @@ from ..dependencies import (
     get_episode_store,
     get_knowledge_store,
     get_artifact_store,
+    get_ontology_store,
 )
 from ...grpc.service_handler import MemoryServiceHandler
 
@@ -22,6 +23,7 @@ def _build_handler(request: Request) -> MemoryServiceHandler:
         episode_store=get_episode_store(request),
         knowledge_store=get_knowledge_store(request),
         artifact_store=get_artifact_store(request),
+        ontology_store=get_ontology_store(request),
     )
 
 

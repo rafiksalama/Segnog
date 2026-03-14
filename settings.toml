@@ -1,11 +1,6 @@
-[default]
-service_name = "agent-memory-service"
-version = "0.1.0"
-
 # gRPC server
 [default.grpc]
 port = 50051
-max_workers = 10
 
 # REST server (FastAPI)
 [default.rest]
@@ -15,8 +10,6 @@ port = 9000
 # DragonflyDB (short-term memory)
 [default.dragonfly]
 url = "redis://localhost:6381"
-default_group_id = "framework"
-default_workflow_id = "default"
 
 # FalkorDB (long-term memory: episodes, knowledge, artifacts)
 [default.falkordb]
@@ -33,22 +26,12 @@ base_url = "https://openrouter.ai/api/v1"
 flash_model = "x-ai/grok-4.1-fast"
 base_url = "https://openrouter.ai/api/v1"
 
-# DSPy (for knowledge/artifact extraction)
-[default.dspy]
-models = [
-    "x-ai/grok-4.1-fast",
-]
-
 # Session (short-term memory in DragonflyDB)
 [default.session]
 ttl_seconds = 86400
-hydration_enabled = true
-cold_start_sync = true
 
 # Temporal scoring (dual-dimension: semantic + temporal)
 [default.scoring]
-session_half_life_hours = 0.5
-session_alpha = 0.5
 episode_half_life_hours = 168.0
 episode_alpha = 0.3
 knowledge_half_life_hours = 720.0

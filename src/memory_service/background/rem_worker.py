@@ -26,12 +26,14 @@ class REMWorker:
         interval_seconds: int = 60,
         batch_size: int = 5,
         min_episodes: int = 3,
+        ontology_store=None,
     ):
         self._handler = handler
         self._episode_store = episode_store
         self._interval = interval_seconds
         self._batch_size = batch_size
         self._min_episodes = min_episodes
+        self._ontology_store = ontology_store
         self._running = False
         self._last_sweep_ts: float = 0.0  # Unix timestamp of last completed sweep
 
@@ -199,7 +201,9 @@ class REMWorker:
 
         # --- Curation on unique episodes only ---
         source_uuids = [ep["uuid"] for ep in unique_episodes]
-        combined_content = "\n---\n".join(ep["content"] for ep in unique_episodes[:10])
+        combined_content = "\n---\n".join(
+            ep["content"] for ep in unique_episodes[:10] if ep.get("content")
+        ) or "(no content available)"
 
         mission_data = {
             "task": f"Background consolidation for group '{group_id}'",
@@ -213,6 +217,13 @@ class REMWorker:
             "mission_data_json": mission_data,
             "source_episode_uuids": source_uuids,
         })
+
+        # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
+        if self._ontology_store is not None:
+            try:
+                await self._update_ontology(group_id, unique_episodes, combined_content)
+            except Exception as e:
+                logger.error("REM Step 8 (ontology update) failed for '%s': %s", group_id, e, exc_info=True)
 
         consolidated_count = await self._episode_store.mark_episodes_consolidated(
             source_uuids
@@ -234,6 +245,18 @@ class REMWorker:
             "compressed_uuid": compressed_uuid,
             "curation": curation_result,
         }
+
+    async def _update_ontology(
+        self, group_id: str, unique_episodes: list, combined_text: str
+    ) -> None:
+        """Step 8: Update OntologyStore from consolidated episode text."""
+        from ..smart.ontology_pipeline import update_group_ontology
+        await update_group_ontology(
+            ontology_store=self._ontology_store,
+            group_id=group_id,
+            episodes=unique_episodes,
+            combined_text=combined_text,
+        )
 
     async def _find_similar_consolidated(
         self, group_id: str, embedding: list, threshold: float

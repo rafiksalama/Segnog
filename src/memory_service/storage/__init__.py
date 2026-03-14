@@ -13,16 +13,13 @@ from .short_term import ShortTermMemory
 from .episode_store import EpisodeStore, create_episode_store
 from .knowledge_store import KnowledgeStore
 from .artifact_store import ArtifactStore
-
-# Backwards-compatible alias
-normalize_label = normalize_name
+from .ontology_store import OntologyStore
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "BaseStore",
     "normalize_name",
-    "normalize_label",
     "DragonflyClient",
     "create_dragonfly_client",
     "ShortTermMemory",
@@ -30,6 +27,7 @@ __all__ = [
     "create_episode_store",
     "KnowledgeStore",
     "ArtifactStore",
+    "OntologyStore",
     "init_backends",
 ]
 
@@ -81,6 +79,10 @@ async def init_backends(session_ttl: int = 3600) -> dict:
 
     embedding_model = get_embedding_model()
 
+    # Schema.org Ontology (loaded once, shared singleton)
+    from ..schema_org import get_shared_ontology
+    schema_ontology = get_shared_ontology()
+
     # Initialize stores
     episode_store = EpisodeStore(graph, openai_client, embedding_model)
     await episode_store.ensure_indexes()
@@ -90,6 +92,9 @@ async def init_backends(session_ttl: int = 3600) -> dict:
 
     artifact_store = ArtifactStore(graph, openai_client, embedding_model)
     await artifact_store.ensure_indexes()
+
+    ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology)
+    await ontology_store.ensure_indexes()
 
     # Optional NATS client
     from ..config import get_nats_enabled, get_nats_url
@@ -115,6 +120,8 @@ async def init_backends(session_ttl: int = 3600) -> dict:
         "episode_store": episode_store,
         "knowledge_store": knowledge_store,
         "artifact_store": artifact_store,
+        "ontology_store": ontology_store,
+        "schema_ontology": schema_ontology,
         "openai_client": openai_client,
         "nats_client": nats_client,
     }

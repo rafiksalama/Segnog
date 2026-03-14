@@ -10,7 +10,7 @@ strengthen their CO_ACTIVATED edge with asymptotic weight growth:
 
 import logging
 import time
-from typing import Any, Dict, List
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ async def get_co_activation_weights(
     graph,
     trigger_uuid: str,
     result_uuids: List[str],
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Fetch existing CO_ACTIVATED edge weights from trigger to results.
 
     Returns dict mapping result_uuid -> weight (missing = 0.0).
@@ -151,7 +151,7 @@ async def get_co_activation_weights(
                 "result_uuids": result_uuids,
             },
         )
-        weights: Dict[str, float] = {}
+        weights: dict[str, float] = {}
         if result.result_set:
             for row in result.result_set:
                 weights[row[0]] = float(row[1])

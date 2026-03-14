@@ -1,6 +1,6 @@
 """State DTOs for REST + internal use."""
 
-from typing import Any, Dict, List, Optional
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -15,11 +15,6 @@ class PersistExecutionStateRequest(BaseModel):
 
 class PersistExecutionStateResponse(BaseModel):
     success: bool
-
-
-class GetExecutionStateRequest(BaseModel):
-    group_id: str = "default"
-    workflow_id: str = "default"
 
 
 class GetExecutionStateResponse(BaseModel):
@@ -43,21 +38,9 @@ class UpdateToolStatsResponse(BaseModel):
     success: bool
 
 
-class GetToolStatsRequest(BaseModel):
-    group_id: str = "default"
-    workflow_id: str = "default"
-    tool_names: List[str] = []
-
-
 class GetToolStatsResponse(BaseModel):
     formatted_stats: str = ""
     raw_stats_json: str = "{}"
-
-
-class GetMemoryContextRequest(BaseModel):
-    group_id: str = "default"
-    workflow_id: str = "default"
-    event_limit: int = 5
 
 
 class GetMemoryContextResponse(BaseModel):

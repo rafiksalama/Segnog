@@ -3,6 +3,9 @@ Entity Extraction — DSPy-powered entity mining from conversation text.
 
 Extracts named entities (people, places, organizations, etc.) for
 entity-aware memory retrieval and cross-conversation linking.
+
+Now uses Schema.org class names (via SchemaOrgOntology) for entity_type,
+replacing the old ad-hoc vocabulary (person, place, organization, …).
 """
 
 import logging
@@ -16,55 +19,79 @@ from ..dspy_signatures.entity_signature import EntityExtractionSignature
 logger = logging.getLogger(__name__)
 
 
+def _get_ontology():
+    from ..schema_org import get_shared_ontology
+    return get_shared_ontology()
+
+
 async def extract_entities(
     content: str,
     model: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Extract named entities from conversation text using DSPy.
+    Extract named entities from text using DSPy + full Schema.org reference.
 
     Args:
         content: Text to extract entities from.
-        model: Flash model identifier.
+        model: Flash model identifier (defaults to configured flash model).
 
     Returns:
-        List of entity dicts with name and entity_type.
+        List of entity dicts with 'name' and 'schema_type' (Schema.org class name).
     """
     if not content or len(content.strip()) < 10:
         return []
 
-    # Cap input to avoid token overflow
-    MAX_INPUT = 8000
+    MAX_INPUT = 16000
     if len(content) > MAX_INPUT:
         content = content[:MAX_INPUT]
 
+    onto = _get_ontology()
+
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.1, max_tokens=2048)
+        lm = configure_dspy_lm(model=model, temperature=0.1, max_tokens=4096)
         predictor = dspy.Predict(EntityExtractionSignature)
 
         with dspy.context(lm=lm, adapter=adapter):
-            result = predictor(conversation_text=content)
+            result = predictor(
+                schema_reference=onto.prompt_reference,
+                conversation_text=content,
+            )
 
         extraction = result.extraction
         entities = []
         seen_names = set()
         for entry in extraction.entities:
-            name = str(entry.name).strip()
-            if not name or len(name) < 2:
-                continue
-            # Deduplicate by lowercase name
-            name_lower = name.lower()
-            if name_lower in seen_names:
-                continue
-            seen_names.add(name_lower)
-            entities.append({
-                "name": name,
-                "entity_type": entry.entity_type,
-            })
+            try:
+                # Both fields are Optional in the model — guard against None
+                if not entry.name:
+                    continue
+                name = str(entry.name).strip()
+                if not name or len(name) < 2:
+                    continue
+                # Skip long-name image descriptions (> 4 words)
+                if len(name.split()) > 4:
+                    logger.debug("Entity extractor: skipping long-name entity '%s'", name)
+                    continue
+                name_lower = name.lower()
+                if name_lower in seen_names:
+                    continue
+                seen_names.add(name_lower)
 
-        logger.info(f"Extracted {len(entities)} entities via DSPy")
+                # Normalize the schema_type against the full Schema.org
+                canonical_type = onto.normalize_class(
+                    str(entry.schema_type) if entry.schema_type else "Thing"
+                )
+
+                entities.append({
+                    "name": name,
+                    "schema_type": canonical_type,
+                })
+            except Exception as item_err:
+                logger.debug("Entity extractor: skipping malformed entry: %s", item_err)
+
+        logger.info("Extracted %d entities via DSPy (Schema.org)", len(entities))
         return entities
 
     except Exception as e:
-        logger.error(f"Entity extraction failed: {e}")
+        logger.error("Entity extraction failed: %s", e)
         return []

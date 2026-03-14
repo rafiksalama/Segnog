@@ -82,11 +82,13 @@ class CurationWorker:
         min_episodes: int = 3,
         max_wait_seconds: float = 30.0,
         max_concurrent: int = 2,
+        ontology_store=None,
     ):
         self._nats = nats_client
         self._handler = handler
         self._episode_store = episode_store
         self._publisher = publisher
+        self._ontology_store = ontology_store
         self._accumulator = GroupAccumulator(min_episodes, max_wait_seconds)
         self._max_wait = max_wait_seconds
         self._running = False
@@ -208,6 +210,23 @@ class CurationWorker:
                     "mission_data_json": mission_data,
                     "source_episode_uuids": source_uuids,
                 })
+
+                # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
+                if self._ontology_store is not None:
+                    try:
+                        from ..smart.ontology_pipeline import update_group_ontology
+                        episodes_with_uuid = [
+                            {"uuid": uuid, "content": episode_contents.get(uuid, "")}
+                            for uuid in source_uuids
+                        ]
+                        await update_group_ontology(
+                            ontology_store=self._ontology_store,
+                            group_id=group_id,
+                            episodes=episodes_with_uuid,
+                            combined_text=combined,
+                        )
+                    except Exception as e:
+                        logger.error("Ontology update failed for '%s': %s", group_id, e, exc_info=True)
 
                 # Mark episodes consolidated
                 consolidated = await self._episode_store.mark_episodes_consolidated(

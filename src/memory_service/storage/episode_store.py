@@ -568,7 +568,7 @@ class EpisodeStore(BaseStore):
 
         Args:
             episode_uuid: UUID of the episode to link entities to.
-            entities: List of dicts with name and entity_type.
+            entities: List of dicts with name and schema_type (or legacy entity_type).
 
         Returns:
             Number of entities linked.
@@ -580,7 +580,7 @@ class EpisodeStore(BaseStore):
         linked = 0
         for entity in entities:
             name = entity.get("name", "").strip()
-            entity_type = entity.get("entity_type", "unknown")
+            entity_type = entity.get("schema_type", entity.get("entity_type", "unknown"))
             if not name:
                 continue
 

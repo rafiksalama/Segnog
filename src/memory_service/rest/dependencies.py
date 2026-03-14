@@ -15,6 +15,7 @@ from ..storage.short_term import ShortTermMemory
 from ..storage.episode_store import EpisodeStore
 from ..storage.knowledge_store import KnowledgeStore
 from ..storage.artifact_store import ArtifactStore
+from ..storage.ontology_store import OntologyStore
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def setup_backends(app: FastAPI) -> None:
     app.state.episode_store = backends["episode_store"]
     app.state.knowledge_store = backends["knowledge_store"]
     app.state.artifact_store = backends["artifact_store"]
+    app.state.ontology_store = backends["ontology_store"]
     app.state.openai_client = backends["openai_client"]
     app.state.nats_client = backends.get("nats_client")
 
@@ -63,3 +65,7 @@ def get_knowledge_store(request: Request) -> KnowledgeStore:
 
 def get_artifact_store(request: Request) -> ArtifactStore:
     return request.app.state.artifact_store
+
+
+def get_ontology_store(request: Request) -> OntologyStore:
+    return request.app.state.ontology_store

@@ -5,12 +5,16 @@ Shared functionality for all FalkorDB-backed stores (EpisodeStore, KnowledgeStor
 Provides embedding generation, result parsing, and name normalization.
 """
 
+import asyncio
 import json
 import logging
 import re
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+_EMBED_MAX_RETRIES = 3
+_EMBED_RETRY_BASE_DELAY = 1.0  # seconds, doubled on each retry
 
 
 def normalize_name(raw: str) -> str:
@@ -49,24 +53,52 @@ class BaseStore:
         self._group_id = group_id
 
     async def _embed(self, text: str) -> List[float]:
-        """Generate embedding via OpenAI-compatible API."""
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text,
-            encoding_format="float",
-        )
-        return response.data[0].embedding
+        """Generate embedding via OpenAI-compatible API with exponential-backoff retry."""
+        delay = _EMBED_RETRY_BASE_DELAY
+        last_err: Exception = RuntimeError("embedding failed")
+        for attempt in range(_EMBED_MAX_RETRIES):
+            try:
+                response = await self._client.embeddings.create(
+                    model=self._model,
+                    input=text,
+                    encoding_format="float",
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                last_err = e
+                if attempt < _EMBED_MAX_RETRIES - 1:
+                    logger.warning(
+                        "_embed attempt %d/%d failed (%s); retrying in %.1fs",
+                        attempt + 1, _EMBED_MAX_RETRIES, e, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+        raise last_err
 
     async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Batch embedding for multiple entries."""
+        """Batch embedding for multiple entries with exponential-backoff retry."""
         if not texts:
             return []
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-            encoding_format="float",
-        )
-        return [item.embedding for item in response.data]
+        delay = _EMBED_RETRY_BASE_DELAY
+        last_err: Exception = RuntimeError("batch embedding failed")
+        for attempt in range(_EMBED_MAX_RETRIES):
+            try:
+                response = await self._client.embeddings.create(
+                    model=self._model,
+                    input=texts,
+                    encoding_format="float",
+                )
+                return [item.embedding for item in response.data]
+            except Exception as e:
+                last_err = e
+                if attempt < _EMBED_MAX_RETRIES - 1:
+                    logger.warning(
+                        "_embed_batch attempt %d/%d failed (%s); retrying in %.1fs",
+                        attempt + 1, _EMBED_MAX_RETRIES, e, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+        raise last_err
 
     def _parse_results(
         self, result, json_columns: tuple = ("labels",),

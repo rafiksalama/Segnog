@@ -61,12 +61,14 @@ class REMSweepWorker:
         episode_store,
         batch_size: int = 5,
         min_episodes: int = 1,
+        ontology_store=None,
     ):
         self._nats = nats_client
         self._handler = handler
         self._episode_store = episode_store
         self._batch_size = batch_size
         self._min_episodes = min_episodes
+        self._ontology_store = ontology_store
         self._running = False
 
     async def run(self) -> None:
@@ -111,6 +113,7 @@ class REMSweepWorker:
             interval_seconds=0,
             batch_size=self._batch_size,
             min_episodes=self._min_episodes,
+            ontology_store=self._ontology_store,
         )
         await temp_worker._run_cycle()
         logger.info("REM sweep completed")

@@ -1,5 +1,6 @@
 """Knowledge router — store and search knowledge in FalkorDB."""
 
+import json
 from fastapi import APIRouter, Request
 
 from ...dto.knowledge import (
@@ -60,7 +61,6 @@ async def search_by_labels(body: SearchByLabelsRequest, request: Request):
 def _to_record(r: dict) -> KnowledgeRecord:
     labels = r.get("labels", [])
     if isinstance(labels, str):
-        import json
         try:
             labels = json.loads(labels)
         except Exception:

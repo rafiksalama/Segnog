@@ -75,6 +75,7 @@ async def main():
         episode_store=backends["episode_store"],
         knowledge_store=backends["knowledge_store"],
         artifact_store=backends["artifact_store"],
+        ontology_store=backends.get("ontology_store"),
     )
 
     grpc_port = get_grpc_port()
@@ -106,6 +107,7 @@ async def main():
             min_episodes=get_nats_curation_min_episodes(),
             max_wait_seconds=get_nats_curation_max_wait(),
             max_concurrent=get_nats_curation_max_concurrent(),
+            ontology_store=backends.get("ontology_store"),
         )
         tasks.append(curation_worker.run())
 
@@ -119,6 +121,7 @@ async def main():
             episode_store=backends["episode_store"],
             batch_size=get_background_batch_size(),
             min_episodes=1,
+            ontology_store=backends.get("ontology_store"),
         )
         tasks.append(sweep_publisher.run())
         tasks.append(sweep_worker.run())
@@ -134,6 +137,7 @@ async def main():
             interval_seconds=get_background_interval(),
             batch_size=get_background_batch_size(),
             min_episodes=get_background_min_episodes(),
+            ontology_store=backends.get("ontology_store"),
         )
         tasks.append(rem_worker.run())
         logger.info("REM background worker enabled (polling mode)")

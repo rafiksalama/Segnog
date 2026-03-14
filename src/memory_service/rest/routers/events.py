@@ -1,7 +1,6 @@
 """Events router — log and retrieve events from DragonflyDB streams."""
 
-import json
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from ...dto.events import (
     LogEventRequest,

@@ -190,6 +190,35 @@ async def _hydrate_knowledge(
     return hydrated
 
 
+async def _hydrate_ontology_nodes(
+    episode_store, dragonfly, session_id: str,
+    onto_nodes: List[Dict[str, Any]],
+    max_items: int = 5,
+) -> int:
+    """Write OntologyNode summaries to DragonflyDB session, deduplicating."""
+    hydrated = 0
+    for node in onto_nodes[:max_items]:
+        node_uuid = node.get("uuid", "")
+        summary = node.get("summary", "")
+        if not node_uuid or not summary:
+            continue
+        key = f"onto_{node_uuid}"
+        if await dragonfly.session_has(session_id, key):
+            continue
+        display = node.get("display_name") or node.get("name", "")
+        content = f"{display}: {summary}" if display else summary
+        try:
+            emb = await episode_store._embed(content)
+            await dragonfly.session_add(
+                session_id, key, content, emb, {},
+                source_type="ontology_node",
+            )
+            hydrated += 1
+        except Exception:
+            pass
+    return hydrated
+
+
 async def _search_falkordb(
     episode_store, knowledge_store, query: str,
     embedding: List[float], episode_uuid: str,
@@ -271,6 +300,8 @@ async def background_hydrate(
     metadata: dict, episode_uuid: str,
     prefill_episodes: List[Dict[str, Any]] = None,
     prefill_knowledge: List[Dict[str, Any]] = None,
+    ontology_store=None,
+    ontology_top_k: int = 5,
 ):
     """Background: store in FalkorDB, hydrate (warm), Hebbian reinforce, judge."""
     try:
@@ -298,9 +329,23 @@ async def background_hydrate(
             kn_count = await _hydrate_knowledge(
                 episode_store, dragonfly, session_id, knowledge,
             )
+            onto_count = 0
+            if ontology_store is not None:
+                try:
+                    onto_nodes = await ontology_store.search_nodes(
+                        embedding=embedding,
+                        top_k=ontology_top_k,
+                        group_id=session_id,
+                        min_score=0.3,
+                    )
+                    onto_count = await _hydrate_ontology_nodes(
+                        episode_store, dragonfly, session_id, onto_nodes,
+                    )
+                except Exception as e:
+                    logger.warning(f"Background ontology hydration failed: {e}")
             logger.info(
-                f"Hydration done: {ep_count + kn_count} entries added to "
-                f"session {session_id[:8]}"
+                f"Hydration done: {ep_count + kn_count + onto_count} entries added to "
+                f"session {session_id[:8]} (ep={ep_count}, kn={kn_count}, onto={onto_count})"
             )
 
         # 3. Hebbian reinforcement
@@ -335,6 +380,8 @@ async def observe_core(
     top_k: int = 10,
     knowledge_top_k: int = 10,
     minimal: bool = False,
+    ontology_store=None,
+    ontology_top_k: int = 5,
 ) -> dict:
     """Core observe logic — store, summarize, return context.
 
@@ -352,8 +399,14 @@ async def observe_core(
     knowledge_store._group_id = session_id
 
     if minimal:
-        # Fast path: knowledge + 1 most relevant episode, no DragonflyDB at all
-        knowledge_results, relevant_episodes = await asyncio.gather(
+        # Fast path: knowledge + ontology nodes + 1 most relevant episode, no DragonflyDB
+        try:
+            embedding = await episode_store._embed(content)
+        except Exception as e:
+            logger.warning(f"Embedding failed in minimal observe: {e}")
+            embedding = None
+
+        search_coros = [
             knowledge_store.search_hybrid(
                 query=content,
                 top_k=knowledge_top_k,
@@ -365,7 +418,27 @@ async def observe_core(
                 episode_type="raw",
                 min_score=0.0,
             ),
-        )
+        ]
+        # Add ontology search if store is available and embedding succeeded
+        if ontology_store is not None and embedding is not None:
+            search_coros.append(
+                ontology_store.search_nodes(
+                    embedding=embedding,
+                    top_k=ontology_top_k,
+                    group_id=session_id,
+                    min_score=0.3,
+                )
+            )
+            include_ontology = True
+        else:
+            include_ontology = False
+
+        if include_ontology:
+            knowledge_results, relevant_episodes, ontology_results = await asyncio.gather(*search_coros)
+        else:
+            knowledge_results, relevant_episodes = await asyncio.gather(*search_coros)
+            ontology_results = []
+
         entries: Dict[str, Any] = {}
         for kn in knowledge_results:
             kn_uuid = kn.get("uuid", "")
@@ -374,6 +447,16 @@ async def observe_core(
                 "source_type": "hydrated_knowledge",
                 "created_at": 0,
             }
+        for node in (ontology_results or []):
+            node_uuid = node.get("uuid", "")
+            summary = node.get("summary", "")
+            if node_uuid and summary:
+                display = node.get("display_name") or node.get("name", "")
+                entries[f"onto_{node_uuid}"] = {
+                    "content": f"{display}: {summary}" if display else summary,
+                    "source_type": "ontology_node",
+                    "created_at": 0,
+                }
         for ep in relevant_episodes:
             ep_uuid = ep.get("uuid", "")
             entries[f"ep_{ep_uuid}"] = {
@@ -385,6 +468,7 @@ async def observe_core(
         context = _format_entries(entries) if entries else ""
         logger.info(
             f"minimal observe: {len(knowledge_results)} knowledge + "
+            f"{len(ontology_results or [])} ontology nodes + "
             f"{len(relevant_episodes)} relevant episode → {len(context)} chars"
         )
         return {
@@ -408,6 +492,7 @@ async def observe_core(
     is_cold = False
     falkor_episodes = None
     falkor_knowledge = None
+    embedding = None
 
     if not read_only:
         # Step 1: Embed + store in DragonflyDB
@@ -467,12 +552,26 @@ async def observe_core(
             kn_count = await _hydrate_knowledge(
                 episode_store, dragonfly, session_id, falkor_knowledge,
             )
-            logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge")
+            onto_count = 0
+            if ontology_store is not None:
+                try:
+                    onto_nodes = await ontology_store.search_nodes(
+                        embedding=search_embedding,
+                        top_k=ontology_top_k,
+                        group_id=session_id,
+                        min_score=0.3,
+                    )
+                    onto_count = await _hydrate_ontology_nodes(
+                        episode_store, dragonfly, session_id, onto_nodes,
+                    )
+                except Exception as e:
+                    logger.warning(f"Cold start ontology hydration failed: {e}")
+            logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge, {onto_count} ontology")
 
     # Step 3: Get session entries — use 3D scoring (semantic + temporal + Hebbian)
     # instead of recency cap so the most relevant entries survive, not the most recent.
     # read_only: embed here (cheap; LLM summarization is already skipped by default).
-    if read_only and not locals().get("embedding"):
+    if read_only and embedding is None:
         try:
             embedding = await episode_store._embed(content)
         except Exception as e:
@@ -497,6 +596,31 @@ async def observe_core(
             half_life=get_episode_half_life(),
         )
         entries = {r["uuid"]: r for r in search_results}
+
+        # Standard warm path: augment with OntologyNode summaries from FalkorDB.
+        # These are not in DragonflyDB unless hydrated at cold start, so search fresh.
+        if not read_only and ontology_store is not None:
+            try:
+                onto_results = await ontology_store.search_nodes(
+                    embedding=embedding,
+                    top_k=ontology_top_k,
+                    group_id=session_id,
+                    min_score=0.3,
+                )
+                for node in onto_results:
+                    node_uuid = node.get("uuid", "")
+                    summary = node.get("summary", "")
+                    if node_uuid and summary:
+                        key = f"onto_{node_uuid}"
+                        if key not in entries:
+                            display = node.get("display_name") or node.get("name", "")
+                            entries[key] = {
+                                "content": f"{display}: {summary}" if display else summary,
+                                "source_type": "ontology_node",
+                                "created_at": 0,
+                            }
+            except Exception as e:
+                logger.warning(f"OntologyNode warm-path search failed: {e}")
     else:
         # Fallback: recency cap (no embedding available)
         entries = await dragonfly.session_get_all(session_id)
@@ -506,16 +630,54 @@ async def observe_core(
             sorted_items = sorted(entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True)
             entries = dict(sorted_items[:top_k])
 
-    # read_only: augment with a fresh synchronous knowledge search from FalkorDB.
-    # The warm session only has knowledge cached from ingest time; this brings in
-    # knowledge specifically relevant to the current question.
-    if read_only:
-        try:
-            kn_results = await knowledge_store.search_hybrid(
-                query=content,
-                top_k=knowledge_top_k,
-                min_score=KNOWLEDGE_PARAMS["min_score"],
+    # read_only: augment with a fresh synchronous search from FalkorDB covering
+    # episodes, knowledge, and ontology nodes. Episodes are the most critical —
+    # without them the session (which is empty for benchmarks not using observe-mode
+    # ingest) has no raw conversation evidence to answer factual questions.
+    if read_only and embedding is not None:
+        onto_coro = (
+            ontology_store.search_nodes(
+                embedding=embedding,
+                top_k=ontology_top_k,
+                group_id=session_id,
+                min_score=0.3,
             )
+            if ontology_store is not None
+            else asyncio.sleep(0)
+        )
+        try:
+            kn_results, ep_results, onto_results = await asyncio.gather(
+                knowledge_store.search_hybrid(
+                    query=content,
+                    top_k=knowledge_top_k,
+                    min_score=KNOWLEDGE_PARAMS["min_score"],
+                ),
+                episode_store._search_with_embedding(
+                    embedding=embedding,
+                    top_k=RETRIEVAL_PARAMS["top_k"],
+                    min_score=RETRIEVAL_PARAMS["min_score"],
+                    expand_adjacent=True,
+                    expansion_hops=1,
+                    include_embedding=False,
+                ),
+                onto_coro,
+                return_exceptions=True,
+            )
+            if isinstance(kn_results, Exception):
+                kn_results = []
+            if isinstance(ep_results, Exception):
+                ep_results = []
+            if isinstance(onto_results, Exception) or not isinstance(onto_results, list):
+                onto_results = []
+
+            for ep in ep_results:
+                ep_uuid = ep.get("uuid", "")
+                if ep_uuid and f"ep_{ep_uuid}" not in entries and ep_uuid not in entries:
+                    entries[f"ep_{ep_uuid}"] = {
+                        "content": ep.get("content", ""),
+                        "source_type": "hydrated",
+                        "created_at": ep.get("created_at", 0),
+                    }
             for kn in kn_results:
                 kn_uuid = kn.get("uuid", "")
                 key = f"kn_{kn_uuid}"
@@ -525,8 +687,24 @@ async def observe_core(
                         "source_type": "hydrated_knowledge",
                         "created_at": 0,
                     }
+            for node in onto_results:
+                node_uuid = node.get("uuid", "")
+                summary = node.get("summary", "")
+                if node_uuid and summary:
+                    key = f"onto_{node_uuid}"
+                    if key not in entries:
+                        display = node.get("display_name") or node.get("name", "")
+                        entries[key] = {
+                            "content": f"{display}: {summary}" if display else summary,
+                            "source_type": "ontology_node",
+                            "created_at": 0,
+                        }
+            logger.info(
+                f"read_only augment: {len(ep_results)} episodes + "
+                f"{len(kn_results)} knowledge + {len(onto_results)} ontology nodes"
+            )
         except Exception as e:
-            logger.warning(f"read_only knowledge search failed: {e}")
+            logger.warning(f"read_only search failed: {e}")
 
     context = ""
     if entries:
@@ -547,6 +725,8 @@ async def observe_core(
             session_id, content, embedding, metadata, episode_uuid,
             prefill_episodes=falkor_episodes if is_cold else None,
             prefill_knowledge=falkor_knowledge if is_cold else None,
+            ontology_store=ontology_store,
+            ontology_top_k=ontology_top_k,
         ))
 
     logger.info(

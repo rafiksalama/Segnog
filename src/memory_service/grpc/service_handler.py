@@ -28,12 +28,14 @@ class MemoryServiceHandler:
         episode_store,   # EpisodeStore
         knowledge_store, # KnowledgeStore
         artifact_store,  # ArtifactStore
+        ontology_store=None,  # OntologyStore (optional)
     ):
         self._dragonfly = dragonfly
         self._short_term = short_term
         self._episode_store = episode_store
         self._knowledge_store = knowledge_store
         self._artifact_store = artifact_store
+        self._ontology_store = ontology_store
 
     def _apply_scope(self, req: dict, *stores) -> tuple:
         """Extract scope from request and apply to dragonfly + stores.
@@ -242,7 +244,6 @@ class MemoryServiceHandler:
         }
 
     async def update_tool_stats(self, req: dict) -> dict:
-        scope = req.get("scope", {})
         tool_name = req.get("tool_name", "")
         success = req.get("success", True)
         duration_ms = req.get("duration_ms", 0)
@@ -383,7 +384,7 @@ class MemoryServiceHandler:
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
-        result = await generate_reflection(mission_data)
+        result = await generate_reflection(mission_data, model=req.get("model"))
         return {"reflection": result}
 
     async def extract_knowledge_op(self, req: dict) -> dict:
@@ -440,6 +441,7 @@ class MemoryServiceHandler:
             episode_store=self._episode_store,
             knowledge_store=self._knowledge_store,
             dragonfly=self._dragonfly,
+            ontology_store=self._ontology_store,
             session_id=req.get("session_id", "default"),
             content=req.get("content", ""),
             timestamp=req.get("timestamp"),
@@ -700,21 +702,10 @@ class MemoryServiceHandler:
                 except Exception:
                     pass
 
-        # Step 2c: Extract and link entities
-        try:
-            from ..smart.extract_entities import extract_entities
-            mission_content = f"{task}\n\n{reflection}"
-            entities = await extract_entities(content=mission_content, model=model)
-            if entities:
-                # Link to reflection episode
-                if reflection_uuid:
-                    await self._episode_store.link_entities(reflection_uuid, entities)
-                # Link to source raw episodes
-                for src_uuid in source_uuids:
-                    await self._episode_store.link_entities(src_uuid, entities)
-                logger.info(f"Linked {len(entities)} entities to episodes")
-        except Exception as e:
-            logger.warning(f"Entity extraction failed (non-critical): {e}")
+        # Step 2c: Entity linking via legacy Entity nodes is disabled.
+        # OntologyNode (Step 8 of REM) is the authoritative entity store.
+        # The old link_entities() creates bare :Entity nodes with no embeddings
+        # and non-Schema.org types — superseded by the Ontology pipeline.
 
         # Step 3: Extract knowledge entries
         knowledge_entries = []

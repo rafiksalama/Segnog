@@ -16,6 +16,8 @@ _SOURCE_LABELS = {
     "local": "Observation",
     "hydrated": "Related Memory",
     "hydrated_knowledge": "Knowledge",
+    "ontology_node": "Entity Profile",
+    "relevant_episode": "Related Memory",
 }
 
 

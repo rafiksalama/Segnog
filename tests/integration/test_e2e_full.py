@@ -34,10 +34,6 @@ def client():
         yield c
 
 
-@pytest.fixture(scope="module")
-def async_client():
-    return httpx.AsyncClient(base_url=API, timeout=TIMEOUT)
-
 
 def _scope(group="e2e-test", workflow="test-wf-001"):
     return {"group_id": group, "workflow_id": workflow}
