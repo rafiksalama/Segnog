@@ -187,6 +187,7 @@ class OntologyStore(BaseStore):
         top_k: int = 5,
         group_id: Optional[str] = None,
         min_score: float = 0.5,
+        include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Cosine similarity search against OntologyNode summary embeddings.
@@ -194,9 +195,10 @@ class OntologyStore(BaseStore):
         Returns list of dicts sorted by score descending. Never traverses graph edges.
         """
         gid = group_id or self._group_id
+        embedding_return = ",\n                n.embedding AS embedding" if include_embedding else ""
 
         result = await self._graph.ro_query(
-            """
+            f"""
             MATCH (n:OntologyNode)
             WHERE n.group_id = $group_id
             WITH n,
@@ -210,7 +212,7 @@ class OntologyStore(BaseStore):
                 n.summary      AS summary,
                 n.source_count AS source_count,
                 n.updated_at   AS updated_at,
-                score
+                score{embedding_return}
             ORDER BY score DESC
             LIMIT $top_k
             """,

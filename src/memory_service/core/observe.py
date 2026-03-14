@@ -165,23 +165,40 @@ async def _hydrate_knowledge(
     knowledge: List[Dict[str, Any]],
     max_items: int = 10,
 ) -> int:
-    """Write knowledge entries to DragonflyDB session."""
-    hydrated = 0
+    """Write knowledge entries to DragonflyDB session, reusing stored embeddings."""
+    # Filter to items needing hydration
+    to_hydrate = []
     for kn in knowledge[:max_items]:
         kn_uuid = kn.get("uuid", "")
-        if not kn_uuid:
+        if not kn_uuid or not kn.get("content", ""):
             continue
         kn_id = f"kn_{kn_uuid}"
-        if await dragonfly.session_has(session_id, kn_id):
-            continue
-        kn_content = kn.get("content", "")
-        if not kn_content:
+        if not await dragonfly.session_has(session_id, kn_id):
+            to_hydrate.append((kn_id, kn))
+
+    if not to_hydrate:
+        return 0
+
+    # Embed only entries missing stored embeddings — in parallel
+    needs_embed = [(kid, kn) for kid, kn in to_hydrate if not kn.get("embedding")]
+    if needs_embed:
+        embs = await asyncio.gather(
+            *[episode_store._embed(kn["content"]) for _, kn in needs_embed],
+            return_exceptions=True,
+        )
+        for (kid, kn), emb in zip(needs_embed, embs):
+            if not isinstance(emb, Exception):
+                kn["embedding"] = emb
+
+    hydrated = 0
+    for kn_id, kn in to_hydrate:
+        emb = kn.get("embedding")
+        if not emb:
             continue
         try:
-            kn_emb = await episode_store._embed(kn_content)
             await dragonfly.session_add(
-                session_id, kn_id, kn_content,
-                kn_emb, {"knowledge_type": kn.get("type", "")},
+                session_id, kn_id, kn["content"],
+                emb, {"knowledge_type": kn.get("type", kn.get("knowledge_type", ""))},
                 source_type="hydrated_knowledge",
             )
             hydrated += 1
@@ -195,8 +212,9 @@ async def _hydrate_ontology_nodes(
     onto_nodes: List[Dict[str, Any]],
     max_items: int = 5,
 ) -> int:
-    """Write OntologyNode summaries to DragonflyDB session, deduplicating."""
-    hydrated = 0
+    """Write OntologyNode summaries to DragonflyDB session, reusing stored embeddings."""
+    # Filter to items needing hydration and build content strings
+    to_hydrate = []
     for node in onto_nodes[:max_items]:
         node_uuid = node.get("uuid", "")
         summary = node.get("summary", "")
@@ -207,8 +225,28 @@ async def _hydrate_ontology_nodes(
             continue
         display = node.get("display_name") or node.get("name", "")
         content = f"{display}: {summary}" if display else summary
+        to_hydrate.append((key, content, node.get("embedding")))
+
+    if not to_hydrate:
+        return 0
+
+    # Embed only entries missing stored embeddings — in parallel
+    needs_embed = [(i, key, content) for i, (key, content, emb) in enumerate(to_hydrate) if not emb]
+    if needs_embed:
+        embs = await asyncio.gather(
+            *[episode_store._embed(content) for _, _, content in needs_embed],
+            return_exceptions=True,
+        )
+        to_hydrate = list(to_hydrate)
+        for (i, key, content), emb in zip(needs_embed, embs):
+            if not isinstance(emb, Exception):
+                to_hydrate[i] = (key, content, emb)
+
+    hydrated = 0
+    for key, content, emb in to_hydrate:
+        if not emb:
+            continue
         try:
-            emb = await episode_store._embed(content)
             await dragonfly.session_add(
                 session_id, key, content, emb, {},
                 source_type="ontology_node",
@@ -249,7 +287,7 @@ async def _search_falkordb(
             expansion_hops=1,
             include_embedding=True,
         ),
-        knowledge_store.search_hybrid(**kn_kwargs),
+        knowledge_store.search_hybrid(**kn_kwargs, include_embedding=True),
     )
 
     episodes = await _enrich_with_entities(
@@ -381,6 +419,7 @@ async def background_hydrate(
                         top_k=ontology_top_k,
                         group_id=session_id,
                         min_score=0.3,
+                        include_embedding=True,
                     )
                     onto_count = await _hydrate_ontology_nodes(
                         episode_store, dragonfly, session_id, onto_nodes,
@@ -604,6 +643,7 @@ async def observe_core(
                         top_k=ontology_top_k,
                         group_id=session_id,
                         min_score=0.3,
+                        include_embedding=True,
                     )
                     onto_count = await _hydrate_ontology_nodes(
                         episode_store, dragonfly, session_id, onto_nodes,

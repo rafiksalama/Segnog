@@ -63,7 +63,7 @@ async def extract_relationships(
         with dspy.context(lm=lm, adapter=adapter):
             result = predictor(
                 schema_reference=onto.prompt_reference,
-                conversation_text=content,
+                source_text=content,
             )
 
         extraction = result.result

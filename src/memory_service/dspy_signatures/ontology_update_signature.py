@@ -36,7 +36,7 @@ class OntologyNodeUpdateSignature(dspy.Signature):
     1. PRESERVE every fact in the existing summary — never remove, contradict, or weaken them
     2. ADD every fact from the episode text that mentions or relates to this entity
     3. RESOLVE relative time references using session header dates in the episode text
-       (e.g., session dated "9 June 2023" + "last week" → "week of 2-8 June 2023")
+       (e.g., session dated "15 March 2024" + "last week" → "week of 8-14 March 2024")
     4. NEVER invent or hallucinate facts not present in either the existing summary or episode text
     5. Write in neutral, factual third-person style. Present tense for states, past tense for events
     6. Be SPECIFIC: use full names, exact dates, job titles, locations — not vague descriptions
@@ -45,24 +45,31 @@ class OntologyNodeUpdateSignature(dspy.Signature):
     9. Output ONLY the updated summary text — no explanations, headers, or bullet points
 
     Example output for a Person:
-    "Caroline is a Swedish woman in her early 30s living in Stockholm, Sweden.
-    She works at Spotify as a music curator. Her mother is Julia Horrocks, an NHS
-    nurse in London who has worked there for approximately 10 years. Caroline's best
-    friend is Melanie, whom she met at university. In June 2023, she attended Emma's
-    wedding in Gothenburg."
+    "Marco Bellini is an Italian documentary filmmaker based in Barcelona. He works
+    for Lighthouse Films and directed the documentary 'The Silence of Glaciers', which
+    won the Sundance Documentary Prize. His sister is Dr. Priya Nair, a cardiologist
+    at Riverside Medical Center in Chicago. In March 2024, Marco premiered his film at
+    the North Star Film Festival."
 
     Example output for an Organization:
-    "The NHS (National Health Service) is the public healthcare system of the United
-    Kingdom. Julia Horrocks has worked there as a nurse for approximately 10 years,
-    based in London."
+    "Riverside Medical Center is a hospital located in Chicago, Illinois. It employs
+    Dr. Priya Nair as a cardiologist. The center specializes in cardiac care and has
+    been a teaching affiliate of Westbrook University since 2018."
+
+    Example output for a CreativeWork:
+    "'The Silence of Glaciers' is a documentary film directed by Marco Bellini and
+    produced by Lighthouse Films. It premiered at the North Star Film Festival in
+    March 2024 and won the Sundance Documentary Prize."
     """
 
     entity_name: str = dspy.InputField(
-        desc="The display name of the entity being summarized (e.g., 'Caroline', 'Spotify')"
+        desc="The display name of the entity being summarized "
+             "(e.g., 'Marco Bellini', 'Riverside Medical Center', 'The Silence of Glaciers')"
     )
 
     schema_type: str = dspy.InputField(
-        desc="Schema.org class of the entity (e.g., 'Person', 'Organization', 'Place', 'Animal')"
+        desc="Most specific Schema.org class of the entity "
+             "(e.g., 'Person', 'Hospital', 'Corporation', 'Movie', 'Festival', 'MusicGroup', 'City')"
     )
 
     existing_summary: str = dspy.InputField(

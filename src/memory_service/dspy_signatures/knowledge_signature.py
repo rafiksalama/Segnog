@@ -26,9 +26,9 @@ class KnowledgeEntryModel(BaseModel):
                     "CRITICAL: if the source uses relative time ('last week', 'yesterday', "
                     "'last month'), resolve it using the session header date and write the "
                     "resolved date explicitly in this field. "
-                    "Example: session date is 9 June 2023, source says 'we met up last week' "
-                    "→ write 'Caroline met up with friends the week before 9 June 2023 "
-                    "(approximately 2–8 June 2023)'."
+                    "Example: session date is 15 March 2024, source says 'we met up last week' "
+                    "→ write 'the team met up the week before 15 March 2024 "
+                    "(approximately 8–14 March 2024)'."
     )
     knowledge_type: str = Field(
         description="One of: "
@@ -47,12 +47,17 @@ class KnowledgeEntryModel(BaseModel):
                     "'temporal_fact' (recurring fact with no single date, e.g. 'yoga every Tuesday')"
     )
     labels: List[str] = Field(
-        description="5-15 semantic labels for retrieval. Lowercase, hyphenated. "
-                    "Include: domain terms ('itin-processing'), tool names ('web-search'), "
-                    "entity names ('caroline', 'dr-smith'), "
-                    "methodologies ('parallel-research'), topics ('tax-filing'), "
-                    "temporal markers ('weekly', 'summer-2023', 'june-2023'). "
-                    "Be specific: 'python-asyncio' not 'programming'. "
+        description="5-15 semantic labels for retrieval. Lowercase, hyphenated. Include:\n"
+                    "- Domain terms: 'cardiology', 'documentary-film', 'software-engineering', "
+                    "'tax-filing', 'neuroscience', 'restaurant-industry'\n"
+                    "- Entity names: 'alex-rivera', 'helix-systems', 'riverside-medical', "
+                    "'marco-bellini', 'lighthouse-films', 'westbrook-university'\n"
+                    "- Tool names: 'web-search', 'scholar-search', 'code-execution'\n"
+                    "- Methodologies: 'parallel-research', 'sequential-workflow'\n"
+                    "- Topics: 'pricing', 'diagnosis', 'film-production', 'how-to', 'health'\n"
+                    "- Temporal markers: 'weekly', 'spring-2024', 'march-2024', 'deadline'\n"
+                    "Be specific: 'python-asyncio' not 'programming', "
+                    "'cardiac-surgery' not 'medicine'. "
                     "More labels means better retrieval — be generous."
     )
     confidence: float = Field(
@@ -64,12 +69,12 @@ class KnowledgeEntryModel(BaseModel):
         default=None,
         description="ISO 8601 date (YYYY-MM-DD) when the fact/event occurred or will occur. "
                     "ALWAYS populate this for 'event' entries — never leave it null for events. "
-                    "Each session starts with a header like 'Session N — 7:55 pm on 9 June, 2023' — "
+                    "Each session starts with a header like 'Session N — 7:55 pm on 15 March, 2024' — "
                     "use that date as the anchor to resolve relative references: "
-                    "'last week' from a 9 June 2023 session → 2023-06-02; "
-                    "'yesterday' from a 9 June 2023 session → 2023-06-08; "
-                    "'last month' from a 9 June 2023 session → 2023-05-01; "
-                    "'3 years ago' from a 9 June 2023 session → 2020-06-09. "
+                    "'last week' from a 15 March 2024 session → 2024-03-08; "
+                    "'yesterday' from a 15 March 2024 session → 2024-03-14; "
+                    "'last month' from a 15 March 2024 session → 2024-02-01; "
+                    "'3 years ago' from a 15 March 2024 session → 2021-03-15. "
                     "If the event has no specific date at all, use the session header date itself. "
                     "Use null ONLY for 'pattern', 'preference', 'relationship', 'identity', "
                     "'conclusion', and 'temporal_fact' types where no date applies."
@@ -114,12 +119,12 @@ class KnowledgeExtractionSignature(dspy.Signature):
     - "they are planning a trip next summer" → event
 
     RULE 2 — RELATIVE DATE RESOLUTION (critical for temporal accuracy):
-    Each session starts with a header like "Session N — 7:55 pm on 9 June, 2023".
+    Each session starts with a header like "Session N — 7:55 pm on 15 March, 2024".
     Use that session date to resolve ALL relative time references in that session:
-    - "last week" from 9 June → week of 2–8 June 2023; use event_date 2023-06-02
-    - "yesterday" from 9 June → 2023-06-08
-    - "last month" from 9 June → May 2023; use event_date 2023-05-01
-    - "next week" from 9 June → week of 12–18 June 2023; use event_date 2023-06-12
+    - "last week" from 15 March → week of 8–14 March 2024; use event_date 2024-03-08
+    - "yesterday" from 15 March → 2024-03-14
+    - "last month" from 15 March → February 2024; use event_date 2024-02-01
+    - "next week" from 15 March → week of 18–24 March 2024; use event_date 2024-03-18
     Write the resolved date explicitly in the content field — never leave "last week" unresolved.
 
     RULE 3 — 'pattern' type only for confirmed recurring behaviors:
@@ -133,19 +138,23 @@ class KnowledgeExtractionSignature(dspy.Signature):
     - tool_insight: Tool effectiveness, limitations, best practices
     - experience: Lessons learned from a completed activity
     - conclusion: High-level synthesized takeaways
-    - preference: Stated like/dislike ("prefers dark mode", "vegetarian")
-    - relationship: Static connections between people ("Caroline is Julia's daughter")
-    - identity: Who someone is ("Dr. Smith is a cardiologist at Mayo Clinic")
-    - temporal_fact: Recurring facts with no single date ("yoga every Tuesday at 6pm")
+    - preference: Stated like/dislike ("prefers dark mode", "vegetarian", "dislikes cold calls")
+    - relationship: Static connection between entities ("Dr. Priya Nair is Marco Bellini's sister";
+      "Kenji Tanaka founded Tanaka's Kitchen")
+    - identity: Who someone or something is ("Alex Rivera is a senior engineer at Helix Systems";
+      "The Velvet Circuit is a jazz trio based in Portland")
+    - temporal_fact: Recurring facts with no single date ("yoga every Tuesday at 6pm";
+      "Lena Voss teaches neuroscience every fall semester")
 
     Label guidelines:
-    - Use specific domain terms: "itin-processing" not "taxes"
-    - Include entity names: "caroline", "dr-smith", "mayo-clinic"
-    - Include tool names when relevant: "web-search", "scholar-search"
+    - Use specific domain terms: "cardiac-surgery" not "medicine", "documentary-film" not "art"
+    - Include entity names: "alex-rivera", "helix-systems", "riverside-medical",
+      "marco-bellini", "lighthouse-films", "kenji-tanaka", "westbrook-university"
+    - Include tool/software names: "web-search", "scholar-search", "novamind"
     - Include methodology labels: "parallel-research", "sequential-workflow"
-    - Include topic labels: "pricing", "comparison", "how-to", "health"
-    - Include temporal markers: "weekly", "summer-2023", "june-2023", "deadline"
-    - Each label should be a single concept, lowercase, hyphenated
+    - Include topic labels: "film-production", "cardiology", "restaurant-ops", "neuroscience"
+    - Include temporal markers: "weekly", "spring-2024", "march-2024", "deadline"
+    - Each label: single concept, lowercase, hyphenated
     - Aim for 5-15 labels per entry — more labels means better retrieval
     """
 

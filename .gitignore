@@ -12,3 +12,4 @@ build/
 data/
 benchmarks/
 scripts/
+src/memory_service/data/class_embeddings_*.json

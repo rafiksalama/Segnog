@@ -241,6 +241,7 @@ class KnowledgeStore(BaseStore):
         top_k: int = 10,
         knowledge_type: Optional[str] = None,
         min_score: float = 0.55,
+        include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
         """Vector similarity search on Knowledge embeddings."""
         query_embedding = await self._embed(query)
@@ -248,6 +249,7 @@ class KnowledgeStore(BaseStore):
         type_filter = (
             "AND k.knowledge_type = $knowledge_type" if knowledge_type else ""
         )
+        embedding_return = ",\n                k.embedding AS embedding" if include_embedding else ""
 
         cypher = f"""
             MATCH (k:Knowledge)
@@ -264,7 +266,7 @@ class KnowledgeStore(BaseStore):
                 k.created_at AS created_at,
                 COALESCE(k.event_date, '') AS event_date,
                 score,
-                COALESCE(k.activation_count, 0) AS activation_count
+                COALESCE(k.activation_count, 0) AS activation_count{embedding_return}
             ORDER BY score DESC
             LIMIT $top_k
         """
@@ -394,6 +396,7 @@ class KnowledgeStore(BaseStore):
         label_boost: float = 0.15,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: vector similarity + label match boosting.
@@ -404,7 +407,7 @@ class KnowledgeStore(BaseStore):
         4. Re-rank by final_score, return top_k
         """
         candidates = await self.search_by_vector(
-            query, top_k=top_k * 2, min_score=min_score
+            query, top_k=top_k * 2, min_score=min_score, include_embedding=include_embedding
         )
 
         if not candidates:

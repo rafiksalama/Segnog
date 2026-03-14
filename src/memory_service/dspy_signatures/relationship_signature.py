@@ -20,16 +20,42 @@ class RelationshipEntryModel(BaseModel):
     """
     subject: Optional[str] = Field(
         default=None,
-        description="The subject entity name (complete form, e.g., 'Caroline', 'Julia Horrocks')"
+        description="The subject entity name (complete form, e.g., 'Alex Rivera', 'Riverside Medical Center', "
+                    "'The Silence of Glaciers')"
     )
     subject_type: Optional[str] = Field(
         default="Thing",
-        description="Schema.org class name of the subject entity (e.g., 'Person', 'Organization')"
+        description="Most specific Schema.org class of the subject entity "
+                    "(e.g., 'Person', 'Hospital', 'Movie', 'MusicGroup', 'SportsTeam', "
+                    "'Festival', 'ConferenceEvent', 'PodcastSeries', 'WebSite', 'Dataset'). "
+                    "Note: 'Animal', 'Award', 'Podcast' are NOT Schema.org classes — "
+                    "use 'Taxon', 'Intangible', 'PodcastSeries' respectively."
     )
     predicate: Optional[str] = Field(
         default=None,
-        description="Schema.org property name in camelCase (e.g., 'worksFor', 'parent', "
-                    "'homeLocation', 'knows', 'memberOf', 'alumniOf'). "
+        description="Schema.org property name in camelCase. Common predicates by domain:\n"
+                    "Person → *: 'worksFor', 'homeLocation', 'birthPlace', 'birthDate', "
+                    "'parent', 'children', 'sibling', 'spouse', 'knows', 'colleague', "
+                    "'alumniOf', 'memberOf', 'founder', 'nationality', 'jobTitle', "
+                    "'hasCredential', 'owns', 'affiliation', 'performerIn', 'knowsLanguage'.\n"
+                    "CreativeWork → *: 'director', 'author', 'byArtist', 'publisher', "
+                    "'award' (value=Text, not entity), 'datePublished', 'dateCreated', "
+                    "'about', 'genre', 'inLanguage', 'isPartOf', 'recordedAt', "
+                    "'mentions', 'locationCreated'.\n"
+                    "Organization → *: 'location', 'founder', 'foundingDate', 'employee', "
+                    "'member', 'subOrganization', 'parentOrganization', 'areaServed', "
+                    "'legalName', 'department'.\n"
+                    "Event → *: 'location', 'eventVenue', 'organizer', 'performer', "
+                    "'startDate', 'endDate', 'superEvent', 'subEvent', 'attendee'.\n"
+                    "Place → *: 'containedIn', 'containsPlace', 'address'.\n"
+                    "MedicalCondition → *: 'cause', 'signOrSymptom', 'possibleTreatment', "
+                    "'riskFactor', 'drug', 'associatedAnatomy'.\n"
+                    "MedicalProcedure/MedicalTherapy → *: 'drug', 'bodyLocation', 'followup'.\n"
+                    "Physician/Hospital/MedicalClinic → *: 'hospitalAffiliation', 'medicalSpecialty'.\n"
+                    "Patient → *: 'diagnosis', 'drug'.\n"
+                    "Note: 'award', 'startDate', 'endDate', 'datePublished', 'dateCreated', "
+                    "'foundingDate', 'birthDate' have Date/Text range — their object is a "
+                    "literal value, not a named entity node.\n"
                     "Use the exact property name from the Schema.org reference."
     )
     object: Optional[str] = Field(
@@ -38,7 +64,8 @@ class RelationshipEntryModel(BaseModel):
     )
     object_type: Optional[str] = Field(
         default="Thing",
-        description="Schema.org class name of the object entity"
+        description="Most specific Schema.org class of the object entity. "
+                    "Same rules as subject_type — use the most specific real Schema.org class."
     )
     confidence: Optional[float] = Field(
         default=1.0,
@@ -62,24 +89,33 @@ class RelationshipExtractionSignature(dspy.Signature):
     Schema.org property names as predicates.
 
     Guidelines:
-    - Extract EVERY stated relationship: family, professional, locational, social, ownership
+    - Extract EVERY stated relationship: family, professional, locational, creative, social, ownership
     - Use the exact Schema.org property name (camelCase) from the reference
     - Subject and object must be named entities (not pronouns)
-    - subject_type and object_type must be Schema.org class names from the reference
+    - subject_type and object_type must be the most specific Schema.org class from the reference
     - Confidence: 1.0 for explicitly stated facts, lower for inferences
     - Do NOT invent relationships not stated in the text
-    - Prefer specific predicates: use 'parent' not 'relatedTo', 'worksFor' not 'knows'
+    - Prefer specific predicates: 'parent' not 'relatedTo', 'worksFor' not 'knows',
+      'director' not 'creator', 'byArtist' not 'creator' for music
+
+    Symmetric predicates (extract only once, the system infers the reverse):
+    - sibling, spouse, knows, colleague
 
     Examples:
-      "Caroline's mum Julia is a nurse at the NHS"
-        → subject=Caroline, predicate=parent, object=Julia Horrocks
-        → subject=Julia Horrocks, predicate=worksFor, object=NHS
+      "Marco Bellini, Dr. Priya Nair's brother, directed The Silence of Glaciers for Lighthouse Films"
+        → subject=Marco Bellini (Person), predicate=sibling, object=Dr. Priya Nair (Person)
+        → subject=Marco Bellini (Person), predicate=director, object=The Silence of Glaciers (Movie)
+        → subject=Marco Bellini (Person), predicate=worksFor, object=Lighthouse Films (Corporation)
 
-      "Melanie works at Spotify"
-        → subject=Melanie, predicate=worksFor, object=Spotify
+      "Alex Rivera joined Helix Systems as a senior engineer"
+        → subject=Alex Rivera (Person), predicate=worksFor, object=Helix Systems (Corporation)
 
-      "Caroline lives in Stockholm"
-        → subject=Caroline, predicate=homeLocation, object=Stockholm
+      "Riverside Medical Center is located in Chicago"
+        → subject=Riverside Medical Center (Hospital), predicate=location, object=Chicago (City)
+
+      "The Silence of Glaciers won the Sundance Documentary Prize"
+        → subject=The Silence of Glaciers (Movie), predicate=award, object="Sundance Documentary Prize"
+          (NOTE: 'award' has Text range — the object is the award name as a literal, NOT a node)
     """
 
     schema_reference: str = dspy.InputField(
@@ -87,7 +123,7 @@ class RelationshipExtractionSignature(dspy.Signature):
              "Use the exact property names and class names listed here."
     )
 
-    conversation_text: str = dspy.InputField(
+    source_text: str = dspy.InputField(
         desc="The text to extract relationships from"
     )
 

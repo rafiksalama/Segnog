@@ -186,6 +186,8 @@ class SchemaOrgOntology:
         if not path.exists():
             raise FileNotFoundError(f"Schema.org JSON-LD not found: {path}")
 
+        self._jsonld_path = path  # kept for disk-cache path derivation
+
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
@@ -195,6 +197,8 @@ class SchemaOrgOntology:
         self._classes: Dict[str, ClassInfo] = {}
         self._properties: Dict[str, PropertyInfo] = {}
         self._inverses: Dict[str, str] = dict(_MANUAL_INVERSES)
+        # Populated lazily by embed_classes(); None until first call
+        self._class_embeddings: Optional[Dict[str, List[float]]] = None
 
         for entry in graph:
             entry_id = entry.get("@id", "")
@@ -519,6 +523,83 @@ class SchemaOrgOntology:
             if v not in both:
                 both[v] = k
         return both
+
+    async def embed_classes(self, embed_fn) -> Dict[str, List[float]]:
+        """
+        Return embeddings for all indexable Schema.org class descriptions.
+
+        Load order:
+          1. In-process cache (self._class_embeddings) — instant
+          2. Disk cache next to the JSON-LD file — fast (no API calls)
+          3. Compute via embed_fn, then save to disk — one-time cost
+
+        Action and Enumeration subtypes are excluded (not extractable entities).
+
+        Args:
+            embed_fn: async callable (text: str) -> List[float]
+        """
+        if self._class_embeddings is not None:
+            return self._class_embeddings
+
+        import asyncio
+        from .smart.class_retriever import _cache_path, _is_excluded
+
+        cache_file = _cache_path(self._jsonld_path)
+
+        # --- Try disk cache first ---
+        if cache_file.exists():
+            try:
+                with open(cache_file, encoding="utf-8") as f:
+                    self._class_embeddings = json.load(f)
+                logger.info(
+                    "SchemaOrgOntology: loaded %d class embeddings from disk cache",
+                    len(self._class_embeddings),
+                )
+                return self._class_embeddings
+            except Exception as e:
+                logger.warning("SchemaOrgOntology: disk cache load failed (%s), recomputing", e)
+
+        # --- Compute embeddings ---
+        indexable = {
+            name: (
+                f"{name}"
+                + (f" ({','.join(info.parents)})" if info.parents else "")
+                + (f": {info.comment}" if info.comment else "")
+            )
+            for name, info in self._classes.items()
+            if not _is_excluded(name, self)
+        }
+
+        logger.info(
+            "SchemaOrgOntology: computing embeddings for %d indexable classes (of %d total)…",
+            len(indexable), len(self._classes),
+        )
+
+        # Sequential batches, each batch runs concurrently (throttled by semaphore in embed_fn)
+        items = list(indexable.items())
+        batch_size = 20
+        embeddings: Dict[str, List[float]] = {}
+        for i in range(0, len(items), batch_size):
+            batch = items[i : i + batch_size]
+            vectors = await asyncio.gather(*[embed_fn(text) for _, text in batch])
+            for (name, _), vec in zip(batch, vectors):
+                embeddings[name] = vec
+            logger.debug(
+                "SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items)
+            )
+
+        # --- Save to disk cache ---
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(embeddings, f)
+            logger.info(
+                "SchemaOrgOntology: saved %d class embeddings to %s", len(embeddings), cache_file
+            )
+        except Exception as e:
+            logger.warning("SchemaOrgOntology: could not save disk cache: %s", e)
+
+        self._class_embeddings = embeddings
+        return self._class_embeddings
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import dspy
 
 from ..llm.dspy_adapter import configure_dspy_lm, adapter
 from ..dspy_signatures.entity_signature import EntityExtractionSignature
+from .class_retriever import retrieve_relevant_classes
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +49,17 @@ async def extract_entities(
     onto = _get_ontology()
 
     try:
+        # Retrieve top-60 Schema.org classes most relevant to this text via embedding
+        relevant_classes = await retrieve_relevant_classes(content, onto, top_k=60)
+
         lm = configure_dspy_lm(model=model, temperature=0.1, max_tokens=4096)
         predictor = dspy.Predict(EntityExtractionSignature)
 
         with dspy.context(lm=lm, adapter=adapter):
             result = predictor(
+                relevant_classes=relevant_classes,
                 schema_reference=onto.prompt_reference,
-                conversation_text=content,
+                source_text=content,
             )
 
         extraction = result.extraction

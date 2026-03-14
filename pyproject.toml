@@ -48,7 +48,7 @@ dev = [
 where = ["src", "client"]
 
 [tool.setuptools.package-data]
-memory_service = ["data/*.jsonld"]
+memory_service = ["data/*.jsonld", "data/*.json"]
 
 [tool.ruff]
 line-length = 100
