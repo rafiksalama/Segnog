@@ -302,8 +302,9 @@ async def background_hydrate(
     prefill_knowledge: List[Dict[str, Any]] = None,
     ontology_store=None,
     ontology_top_k: int = 5,
+    extract_knowledge_enabled: bool = True,
 ):
-    """Background: store in FalkorDB, hydrate (warm), Hebbian reinforce, judge."""
+    """Background: store in FalkorDB, extract knowledge, hydrate (warm), Hebbian reinforce, judge."""
     try:
         # 1. Store in FalkorDB
         try:
@@ -313,6 +314,49 @@ async def background_hydrate(
             )
         except Exception as e:
             logger.warning(f"FalkorDB store failed: {e}")
+
+        # 1b. Extract and store knowledge from this observation
+        if extract_knowledge_enabled:
+            try:
+                from ..smart.extract_knowledge import extract_knowledge as _extract_knowledge
+                mission_data = {
+                    "task": metadata.get("source", "observe"),
+                    "status": "completed",
+                    "output": content,
+                    "context": content,
+                    "data_source_type": "conversation",
+                    "iterations": 1,
+                    "state": {
+                        "state_description": content[:2000],
+                        "outputs": [{"iteration": 1, "output": content[:4000]}],
+                    },
+                }
+                knowledge_entries = await _extract_knowledge(
+                    mission_data=mission_data,
+                    reflection="",
+                    data_source_type="conversation",
+                )
+                if knowledge_entries:
+                    await knowledge_store.store_knowledge(
+                        entries=knowledge_entries,
+                        source_mission=metadata.get("source", "observe"),
+                        mission_status="completed",
+                        source_episode_uuid=episode_uuid,
+                    )
+                    logger.info(
+                        f"Knowledge extracted: {len(knowledge_entries)} entries "
+                        f"from observe {episode_uuid[:8]}"
+                    )
+                    # Mark episode so CurationWorker skips re-extraction
+                    try:
+                        await episode_store._graph.query(
+                            "MATCH (e:Episode {uuid: $uuid}) SET e.knowledge_extracted = true",
+                            params={"uuid": episode_uuid},
+                        )
+                    except Exception as fe:
+                        logger.warning(f"Failed to set knowledge_extracted flag: {fe}")
+            except Exception as e:
+                logger.warning(f"Knowledge extraction in observe failed: {e}")
 
         # 2. Get episodes + knowledge (cold: reuse pre-fill, warm: search + hydrate)
         if prefill_episodes is not None:

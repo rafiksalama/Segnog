@@ -177,17 +177,21 @@ class CurationWorker:
             try:
                 source_uuids = [e["episode_uuid"] for e in events]
 
-                # Fetch content from FalkorDB
+                # Fetch content + knowledge_extracted flag from FalkorDB
                 result = await self._episode_store._graph.query(
                     """MATCH (e:Episode)
                     WHERE e.uuid IN $uuids AND e.episode_type = 'raw'
-                    RETURN e.uuid AS uuid, e.content AS content
+                    RETURN e.uuid AS uuid, e.content AS content,
+                           coalesce(e.knowledge_extracted, false) AS knowledge_extracted
                     ORDER BY e.created_at ASC""",
                     params={"uuids": source_uuids},
                 )
                 episode_contents = {
                     row[0]: row[1] for row in result.result_set if row[0]
                 }
+                all_knowledge_extracted = all(
+                    row[2] for row in result.result_set if row[0]
+                )
                 combined = "\n---\n".join(
                     episode_contents.get(uuid, "") for uuid in source_uuids
                 )
@@ -205,11 +209,22 @@ class CurationWorker:
                     },
                 }
 
-                curation_result = await self._handler.run_curation({
-                    "scope": {"group_id": group_id, "workflow_id": "nats_curation"},
-                    "mission_data_json": mission_data,
-                    "source_episode_uuids": source_uuids,
-                })
+                if all_knowledge_extracted:
+                    logger.info(
+                        f"Skipping knowledge extraction for '{group_id}': "
+                        f"all {len(source_uuids)} episodes already extracted"
+                    )
+                    curation_result = {
+                        "knowledge_count": 0,
+                        "artifact_count": 0,
+                        "reflection_uuid": "",
+                    }
+                else:
+                    curation_result = await self._handler.run_curation({
+                        "scope": {"group_id": group_id, "workflow_id": "nats_curation"},
+                        "mission_data_json": mission_data,
+                        "source_episode_uuids": source_uuids,
+                    })
 
                 # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
                 if self._ontology_store is not None:
