@@ -179,16 +179,17 @@ async def _hydrate_knowledge(
     if not to_hydrate:
         return 0
 
-    # Embed only entries missing stored embeddings — in parallel
+    # Embed only entries missing stored embeddings — in one batch call
     needs_embed = [(kid, kn) for kid, kn in to_hydrate if not kn.get("embedding")]
     if needs_embed:
-        embs = await asyncio.gather(
-            *[episode_store._embed(kn["content"]) for _, kn in needs_embed],
-            return_exceptions=True,
-        )
-        for (kid, kn), emb in zip(needs_embed, embs):
-            if not isinstance(emb, Exception):
+        try:
+            batch_embs = await episode_store._embed_batch(
+                [kn["content"] for _, kn in needs_embed]
+            )
+            for (kid, kn), emb in zip(needs_embed, batch_embs):
                 kn["embedding"] = emb
+        except Exception:
+            pass  # entries without embeddings will be skipped below
 
     hydrated = 0
     for kn_id, kn in to_hydrate:
@@ -230,17 +231,18 @@ async def _hydrate_ontology_nodes(
     if not to_hydrate:
         return 0
 
-    # Embed only entries missing stored embeddings — in parallel
+    # Embed only entries missing stored embeddings — in one batch call
     needs_embed = [(i, key, content) for i, (key, content, emb) in enumerate(to_hydrate) if not emb]
     if needs_embed:
-        embs = await asyncio.gather(
-            *[episode_store._embed(content) for _, _, content in needs_embed],
-            return_exceptions=True,
-        )
-        to_hydrate = list(to_hydrate)
-        for (i, key, content), emb in zip(needs_embed, embs):
-            if not isinstance(emb, Exception):
+        try:
+            batch_embs = await episode_store._embed_batch(
+                [content for _, _, content in needs_embed]
+            )
+            to_hydrate = list(to_hydrate)
+            for (i, key, content), emb in zip(needs_embed, batch_embs):
                 to_hydrate[i] = (key, content, emb)
+        except Exception:
+            pass  # entries without embeddings will be skipped below
 
     hydrated = 0
     for key, content, emb in to_hydrate:
@@ -607,50 +609,55 @@ async def observe_core(
         if is_cold:
             logger.info(f"Cold start for session {session_id[:8]}")
 
-            # Reinterpret content for optimized search
-            try:
-                from ..smart.reinterpret import reinterpret_task
-                reinterpretation = await reinterpret_task(task=content)
-                search_labels = reinterpretation.get("search_labels", [])
-                search_query = reinterpretation.get("search_query", content)
-            except Exception as e:
-                logger.warning(f"Reinterpret failed: {e}")
-
-            # Embed optimized query
-            if search_query != content:
-                search_embedding = await episode_store._embed(search_query)
-
-            # Search FalkorDB + score + enrich
-            falkor_episodes, falkor_knowledge = await _search_falkordb(
-                episode_store, knowledge_store, search_query,
-                search_embedding, episode_uuid, labels=search_labels,
-                entity_content=content,
-            )
-
-            # Pre-fill DragonflyDB
-            ep_count = await _hydrate_episodes(
-                episode_store, dragonfly, session_id,
-                falkor_episodes, episode_uuid,
-            )
-            kn_count = await _hydrate_knowledge(
-                episode_store, dragonfly, session_id, falkor_knowledge,
-            )
-            onto_count = 0
-            if ontology_store is not None:
+            # Skip reinterpret + FalkorDB pre-fill when no prior context exists
+            # (session_entry_count == 0 means first observation — nothing to search)
+            if session_entry_count > 0:
+                # Reinterpret content for optimized search
                 try:
-                    onto_nodes = await ontology_store.search_nodes(
-                        embedding=search_embedding,
-                        top_k=ontology_top_k,
-                        group_id=session_id,
-                        min_score=0.3,
-                        include_embedding=True,
-                    )
-                    onto_count = await _hydrate_ontology_nodes(
-                        episode_store, dragonfly, session_id, onto_nodes,
-                    )
+                    from ..smart.reinterpret import reinterpret_task
+                    reinterpretation = await reinterpret_task(task=content)
+                    search_labels = reinterpretation.get("search_labels", [])
+                    search_query = reinterpretation.get("search_query", content)
                 except Exception as e:
-                    logger.warning(f"Cold start ontology hydration failed: {e}")
-            logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge, {onto_count} ontology")
+                    logger.warning(f"Reinterpret failed: {e}")
+
+                # Embed optimized query
+                if search_query != content:
+                    search_embedding = await episode_store._embed(search_query)
+
+                # Search FalkorDB + score + enrich
+                falkor_episodes, falkor_knowledge = await _search_falkordb(
+                    episode_store, knowledge_store, search_query,
+                    search_embedding, episode_uuid, labels=search_labels,
+                    entity_content=content,
+                )
+
+                # Pre-fill DragonflyDB
+                ep_count = await _hydrate_episodes(
+                    episode_store, dragonfly, session_id,
+                    falkor_episodes, episode_uuid,
+                )
+                kn_count = await _hydrate_knowledge(
+                    episode_store, dragonfly, session_id, falkor_knowledge,
+                )
+                onto_count = 0
+                if ontology_store is not None:
+                    try:
+                        onto_nodes = await ontology_store.search_nodes(
+                            embedding=search_embedding,
+                            top_k=ontology_top_k,
+                            group_id=session_id,
+                            min_score=0.3,
+                            include_embedding=True,
+                        )
+                        onto_count = await _hydrate_ontology_nodes(
+                            episode_store, dragonfly, session_id, onto_nodes,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Cold start ontology hydration failed: {e}")
+                logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge, {onto_count} ontology")
+            else:
+                logger.info(f"First observation for session {session_id[:8]}, skipping pre-fill")
 
     # Step 3: Get session entries — use 3D scoring (semantic + temporal + Hebbian)
     # instead of recency cap so the most relevant entries survive, not the most recent.

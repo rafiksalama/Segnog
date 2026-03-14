@@ -11,8 +11,9 @@ For each batch of consolidated episodes:
   d) Link episodes to OntologyNodes via ABOUT edges
 """
 
+import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,27 +68,24 @@ async def update_group_ontology(
     logger.info("Ontology Step 8a: extracted %d entities for group '%s'", len(entities), group_id)
 
     # ----------------------------------------------------------------
-    # 8b. Upsert OntologyNodes with updated summaries
+    # 8b. Upsert OntologyNodes with updated summaries (parallel)
     # ----------------------------------------------------------------
-    entity_norms: List[str] = []
 
-    for entity in entities:
+    async def _process_entity(entity) -> Optional[str]:
         display_name = entity["name"]
         schema_type = entity.get("schema_type", "Thing")
         name_norm = normalize_name(display_name)
 
         if not name_norm:
-            continue
+            return None
 
         # Skip image-description pseudo-entities
         if schema_type in _IMAGE_TYPES:
             logger.debug("Ontology 8b: skipping image-type entity '%s' (%s)", display_name, schema_type)
-            continue
+            return None
         if len(display_name.split()) > _MAX_NAME_WORDS:
             logger.debug("Ontology 8b: skipping long-name entity '%s' (%d words)", display_name, len(display_name.split()))
-            continue
-
-        entity_norms.append(name_norm)
+            return None
 
         try:
             existing_node = await ontology_store.get_node(name_norm, group_id)
@@ -110,9 +108,14 @@ async def update_group_ontology(
 
             logger.debug("Ontology 8b: upserted '%s' (%s) for group '%s'",
                          display_name, schema_type, group_id)
+            return name_norm
 
         except Exception as e:
             logger.warning("Ontology 8b: upsert failed for entity '%s': %s", display_name, e)
+            return None
+
+    results = await asyncio.gather(*[_process_entity(e) for e in entities])
+    entity_norms: List[str] = [r for r in results if r is not None]
 
     # ----------------------------------------------------------------
     # 8c. Extract relationships → RELATES edges (with inference)
