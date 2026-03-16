@@ -81,8 +81,10 @@ async def extract_artifacts(
         for item in items:
             s = item.get("status", "pending")
             icon = {
-                "completed": "+", "in_progress": ">",
-                "blocked": "!", "skipped": "-",
+                "completed": "+",
+                "in_progress": ">",
+                "blocked": "!",
+                "skipped": "-",
             }.get(s, " ")
             desc = item.get("description", "")
             plan_lines.append(f"  [{icon}] {desc}")
@@ -109,13 +111,15 @@ async def extract_artifacts(
         extraction = result.extraction
         valid = []
         for entry in extraction.entries:
-            valid.append({
-                "name": str(entry.name)[:200],
-                "artifact_type": entry.artifact_type,
-                "path": str(entry.path)[:500],
-                "description": str(entry.description)[:500],
-                "labels": list(entry.labels)[:7],
-            })
+            valid.append(
+                {
+                    "name": str(entry.name)[:200],
+                    "artifact_type": entry.artifact_type,
+                    "path": str(entry.path)[:500],
+                    "description": str(entry.description)[:500],
+                    "labels": list(entry.labels)[:7],
+                }
+            )
 
         logger.info(f"Extracted {len(valid)} artifact entries via DSPy")
         return valid

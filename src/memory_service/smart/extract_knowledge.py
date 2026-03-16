@@ -86,8 +86,10 @@ async def extract_knowledge(
         for item in items:
             s = item.get("status", "pending")
             icon = {
-                "completed": "+", "in_progress": ">",
-                "blocked": "!", "skipped": "-",
+                "completed": "+",
+                "in_progress": ">",
+                "blocked": "!",
+                "skipped": "-",
             }.get(s, " ")
             desc = item.get("description", "")
             plan_lines.append(f"  [{icon}] {desc}")
@@ -103,10 +105,15 @@ async def extract_knowledge(
     def _validate_entries(raw_entries: list) -> list:
         """Validate and normalise a list of raw entry dicts."""
         from datetime import date as _date
+
         valid = []
         for entry in raw_entries:
             validated_date = None
-            ev = entry.get("event_date") if isinstance(entry, dict) else getattr(entry, "event_date", None)
+            ev = (
+                entry.get("event_date")
+                if isinstance(entry, dict)
+                else getattr(entry, "event_date", None)
+            )
             if ev:
                 try:
                     _date.fromisoformat(str(ev))
@@ -125,13 +132,15 @@ async def extract_knowledge(
                 labels = getattr(entry, "labels", [])
                 confidence = getattr(entry, "confidence", 0.8)
 
-            valid.append({
-                "content": str(content)[:500],
-                "knowledge_type": ktype,
-                "labels": list(labels)[:15],
-                "confidence": min(1.0, max(0.0, float(confidence))),
-                "event_date": validated_date,
-            })
+            valid.append(
+                {
+                    "content": str(content)[:500],
+                    "knowledge_type": ktype,
+                    "labels": list(labels)[:15],
+                    "confidence": min(1.0, max(0.0, float(confidence))),
+                    "event_date": validated_date,
+                }
+            )
         return valid
 
     try:
@@ -155,6 +164,7 @@ async def extract_knowledge(
             # instead of {"extraction": {"entries": [...]}}. Fall back to lm.history.
             logger.warning(f"DSPy parse failed ({parse_err}), trying raw LM history fallback")
             import json
+
             raw_entries = []
             try:
                 history = lm.history or []

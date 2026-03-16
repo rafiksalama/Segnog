@@ -81,6 +81,7 @@ async def init_backends(session_ttl: int = 3600) -> dict:
 
     # Schema.org Ontology (loaded once, shared singleton)
     from ..schema_org import get_shared_ontology
+
     schema_ontology = get_shared_ontology()
 
     # Initialize stores

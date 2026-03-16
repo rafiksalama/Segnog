@@ -89,15 +89,11 @@ async def reinforce_co_activations(
             reinforced += 1
         except Exception as e:
             logger.debug(
-                f"Hebbian: co-activation failed for "
-                f"{trigger_uuid[:8]}->{result_uuid[:8]}: {e}"
+                f"Hebbian: co-activation failed for {trigger_uuid[:8]}->{result_uuid[:8]}: {e}"
             )
 
     if reinforced:
-        logger.info(
-            f"Hebbian: trigger={trigger_uuid[:8]}, "
-            f"co-activated={reinforced} episodes"
-        )
+        logger.info(f"Hebbian: trigger={trigger_uuid[:8]}, co-activated={reinforced} episodes")
 
 
 async def reinforce_knowledge_activations(

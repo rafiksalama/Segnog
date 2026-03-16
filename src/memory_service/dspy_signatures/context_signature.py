@@ -12,15 +12,16 @@ import dspy
 
 class ContextSummaryResult(BaseModel):
     """Comprehensive context relevant to the current observation."""
+
     summary: str = Field(
         description="Thorough summary of ALL session context relevant to the current "
-                    "observation. PRESERVE every specific detail: exact dates "
-                    "(e.g. '7 May 2023', not 'recently'), full names, numbers, "
-                    "book/movie titles, locations, events, preferences, and relationships. "
-                    "Organize by topic or chronologically. Use as many sentences as needed "
-                    "to capture all relevant information — do not compress or generalize. "
-                    "If nothing is relevant, say so briefly. "
-                    "Do NOT repeat the current observation itself."
+        "observation. PRESERVE every specific detail: exact dates "
+        "(e.g. '7 May 2023', not 'recently'), full names, numbers, "
+        "book/movie titles, locations, events, preferences, and relationships. "
+        "Organize by topic or chronologically. Use as many sentences as needed "
+        "to capture all relevant information — do not compress or generalize. "
+        "If nothing is relevant, say so briefly. "
+        "Do NOT repeat the current observation itself."
     )
 
 
@@ -47,12 +48,10 @@ class ContextSummarizationSignature(dspy.Signature):
     - Do NOT repeat the current observation itself
     """
 
-    current_observation: str = dspy.InputField(
-        desc="The raw observation text just received"
-    )
+    current_observation: str = dspy.InputField(desc="The raw observation text just received")
     session_context: str = dspy.InputField(
         desc="Formatted session entries (observations, memories, knowledge) "
-             "sorted chronologically with source labels"
+        "sorted chronologically with source labels"
     )
 
     result: ContextSummaryResult = dspy.OutputField(

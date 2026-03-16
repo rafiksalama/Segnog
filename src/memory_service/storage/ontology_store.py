@@ -124,14 +124,14 @@ class OntologyStore(BaseStore):
             RETURN n.uuid AS uuid
             """,
             params={
-                "name":         norm,
-                "group_id":     gid,
-                "uuid":         new_uuid,
-                "schema_type":  canonical_type,
+                "name": norm,
+                "group_id": gid,
+                "uuid": new_uuid,
+                "schema_type": canonical_type,
                 "display_name": display_name,
-                "summary":      summary,
-                "embedding":    embedding,
-                "now":          now,
+                "summary": summary,
+                "embedding": embedding,
+                "now": now,
             },
         )
 
@@ -195,7 +195,9 @@ class OntologyStore(BaseStore):
         Returns list of dicts sorted by score descending. Never traverses graph edges.
         """
         gid = group_id or self._group_id
-        embedding_return = ",\n                n.embedding AS embedding" if include_embedding else ""
+        embedding_return = (
+            ",\n                n.embedding AS embedding" if include_embedding else ""
+        )
 
         result = await self._graph.ro_query(
             f"""
@@ -217,10 +219,10 @@ class OntologyStore(BaseStore):
             LIMIT $top_k
             """,
             params={
-                "group_id":  gid,
+                "group_id": gid,
                 "query_vec": embedding,
                 "min_score": min_score,
-                "top_k":     top_k,
+                "top_k": top_k,
             },
         )
 
@@ -255,13 +257,17 @@ class OntologyStore(BaseStore):
         now = time.time()
 
         # Merge forward edge — only proceed with inference if this succeeded
-        stored = await self._merge_relates_edge(subject_norm, canonical_pred, object_norm, gid, confidence, now)
+        stored = await self._merge_relates_edge(
+            subject_norm, canonical_pred, object_norm, gid, confidence, now
+        )
         if not stored:
             return False
 
         # Symmetric inference
         if self._ontology.is_symmetric(canonical_pred):
-            await self._merge_relates_edge(object_norm, canonical_pred, subject_norm, gid, confidence, now)
+            await self._merge_relates_edge(
+                object_norm, canonical_pred, subject_norm, gid, confidence, now
+            )
 
         # Inverse inference
         inverse = self._ontology.get_inverse(canonical_pred)
@@ -297,12 +303,12 @@ class OntologyStore(BaseStore):
                 RETURN count(r) AS n
                 """,
                 params={
-                    "subject":    subject_norm,
-                    "object":     object_norm,
-                    "group_id":   group_id,
-                    "predicate":  predicate,
+                    "subject": subject_norm,
+                    "object": object_norm,
+                    "group_id": group_id,
+                    "predicate": predicate,
                     "confidence": confidence,
-                    "now":        now,
+                    "now": now,
                 },
             )
             # If MATCH found no nodes, result_set is empty (returns 0 rows)
@@ -310,13 +316,19 @@ class OntologyStore(BaseStore):
                 return True
             logger.debug(
                 "store_relates: no nodes found for (%s -[%s]-> %s) in group '%s'",
-                subject_norm, predicate, object_norm, group_id,
+                subject_norm,
+                predicate,
+                object_norm,
+                group_id,
             )
             return False
         except Exception as e:
             logger.warning(
                 "store_relates edge failed (%s -[%s]-> %s): %s",
-                subject_norm, predicate, object_norm, e,
+                subject_norm,
+                predicate,
+                object_norm,
+                e,
             )
             return False
 
@@ -347,9 +359,9 @@ class OntologyStore(BaseStore):
                 MERGE (e)-[:ABOUT]->(n)
                 """,
                 params={
-                    "ep_uuid":     episode_uuid,
+                    "ep_uuid": episode_uuid,
                     "entity_name": norm,
-                    "group_id":    gid,
+                    "group_id": gid,
                 },
             )
         except Exception as exc:

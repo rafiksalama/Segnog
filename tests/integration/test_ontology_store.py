@@ -33,6 +33,7 @@ _ONTO = SchemaOrgOntology(JSONLD_PATH)
 # Fixtures — function-scoped to avoid event loop cross-contamination
 # ---------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture
 async def store() -> OntologyStore:
     """Create a fresh OntologyStore for each test."""
@@ -73,6 +74,7 @@ async def store() -> OntologyStore:
 # T1.1 — upsert creates node
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_upsert_creates(store):
     uuid = await store.upsert_node(
@@ -95,10 +97,13 @@ async def test_upsert_creates(store):
 # T1.2 — upsert merges (no duplicate)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_upsert_merges_no_duplicate(store):
     await store.upsert_node("Caroline", "Person", "Caroline", "Summary v1.", TEST_GROUP)
-    await store.upsert_node("Caroline", "Person", "Caroline", "Summary v2 with more info.", TEST_GROUP)
+    await store.upsert_node(
+        "Caroline", "Person", "Caroline", "Summary v2 with more info.", TEST_GROUP
+    )
 
     result = await store._graph.ro_query(
         "MATCH (n:OntologyNode {name: 'caroline', group_id: $gid}) RETURN count(n) AS cnt",
@@ -116,6 +121,7 @@ async def test_upsert_merges_no_duplicate(store):
 # T1.3 — schema_type normalized via full Schema.org
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_upsert_normalizes_schema_type(store):
     await store.upsert_node("Acme Corp", "company", "Acme Corp", "A corporation.", TEST_GROUP)
@@ -127,6 +133,7 @@ async def test_upsert_normalizes_schema_type(store):
 # ---------------------------------------------------------------------------
 # T1.4 — symmetric inference: knows
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_symmetric_knows(store):
@@ -155,6 +162,7 @@ async def test_symmetric_knows(store):
 # T1.5 — inverse inference: parent ↔ children
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_inverse_parent_children(store):
     await store.upsert_node("Caroline", "Person", "Caroline", "...", TEST_GROUP)
@@ -182,6 +190,7 @@ async def test_inverse_parent_children(store):
 # T1.6 — memberOf → member (declared inverseOf in Schema.org JSON-LD)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_inverse_member_of(store):
     await store.upsert_node("Caroline", "Person", "Caroline", "...", TEST_GROUP)
@@ -201,6 +210,7 @@ async def test_inverse_member_of(store):
 # T1.7 — predicate normalization in store_relates
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_store_relates_normalizes_predicate(store):
     await store.upsert_node("Caroline", "Person", "Caroline", "...", TEST_GROUP)
@@ -213,22 +223,29 @@ async def test_store_relates_normalizes_predicate(store):
         "(b:OntologyNode {name:'stockholm', group_id:$gid}) RETURN r.predicate",
         params={"gid": TEST_GROUP},
     )
-    assert len(result.result_set) == 1, "Legacy predicate 'lives-in' not normalized to 'homeLocation'"
+    assert len(result.result_set) == 1, (
+        "Legacy predicate 'lives-in' not normalized to 'homeLocation'"
+    )
 
 
 # ---------------------------------------------------------------------------
 # T1.8 — embedding search returns correct entity
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_search_nodes(store):
     await store.upsert_node(
-        "Caroline", "Person", "Caroline",
+        "Caroline",
+        "Person",
+        "Caroline",
         "Caroline works at Spotify in Stockholm, Sweden as a music curator.",
         TEST_GROUP,
     )
     await store.upsert_node(
-        "Spotify", "Organization", "Spotify",
+        "Spotify",
+        "Organization",
+        "Spotify",
         "Spotify is a music streaming service headquartered in Stockholm.",
         TEST_GROUP,
     )
@@ -246,6 +263,7 @@ async def test_search_nodes(store):
 # ---------------------------------------------------------------------------
 # T1.9 — ABOUT edge: episode → ontology node
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_link_about(store):
@@ -266,12 +284,15 @@ async def test_link_about(store):
     )
     assert len(result.result_set) == 1, "Missing ABOUT edge"
 
-    await store._graph.query("MATCH (e:Episode {uuid:$uuid}) DETACH DELETE e", params={"uuid": ep_uuid})
+    await store._graph.query(
+        "MATCH (e:Episode {uuid:$uuid}) DETACH DELETE e", params={"uuid": ep_uuid}
+    )
 
 
 # ---------------------------------------------------------------------------
 # T1.10 — list_nodes
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_list_nodes(store):

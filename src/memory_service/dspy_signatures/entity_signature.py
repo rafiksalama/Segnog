@@ -18,29 +18,31 @@ class EntityEntryModel(BaseModel):
     Both fields are Optional so partial LLM responses don't hard-fail.
     The extractor filters incomplete entries before storage.
     """
+
     name: Optional[str] = Field(
         default=None,
         description="The entity name as it appears in text. "
-                    "Use the most complete proper name mentioned (e.g., 'Dr. Priya Nair' not 'Priya'). "
-                    "Must be a proper noun — names of specific people, places, organizations, events."
+        "Use the most complete proper name mentioned (e.g., 'Dr. Priya Nair' not 'Priya'). "
+        "Must be a proper noun — names of specific people, places, organizations, events.",
     )
     schema_type: Optional[str] = Field(
         default="Thing",
         description="The most specific Schema.org class name for this entity. "
-                    "Always prefer a subclass over its parent: "
-                    "'Hospital' over 'Organization', 'Restaurant' over 'LocalBusiness', "
-                    "'Movie' over 'CreativeWork', 'Festival' over 'Event'. "
-                    "Use 'Thing' only as a last resort."
+        "Always prefer a subclass over its parent: "
+        "'Hospital' over 'Organization', 'Restaurant' over 'LocalBusiness', "
+        "'Movie' over 'CreativeWork', 'Festival' over 'Event'. "
+        "Use 'Thing' only as a last resort.",
     )
 
 
 class EntityExtractionResult(BaseModel):
     """Structured result from entity extraction."""
+
     entities: List[EntityEntryModel] = Field(
         default_factory=list,
         description="All named entities found in the text mapped to Schema.org class names. "
-                    "Include people, organizations, places, events, and significant named objects. "
-                    "Be thorough — extract every entity that could be useful for retrieval."
+        "Include people, organizations, places, events, and significant named objects. "
+        "Be thorough — extract every entity that could be useful for retrieval.",
     )
 
 
@@ -254,21 +256,19 @@ class EntityExtractionSignature(dspy.Signature):
 
     relevant_classes: str = dspy.InputField(
         desc="Schema.org classes most likely to appear in this text, retrieved via semantic "
-             "similarity. Prioritize these when classifying entities. "
-             "Format: ClassName(ParentClass) — description"
+        "similarity. Prioritize these when classifying entities. "
+        "Format: ClassName(ParentClass) — description"
     )
 
     schema_reference: str = dspy.InputField(
         desc="Full Schema.org class and property reference. Use as fallback for any class "
-             "not listed in relevant_classes. Use the exact class names listed here."
+        "not listed in relevant_classes. Use the exact class names listed here."
     )
 
-    source_text: str = dspy.InputField(
-        desc="The text to extract entities from"
-    )
+    source_text: str = dspy.InputField(desc="The text to extract entities from")
 
     extraction: EntityExtractionResult = dspy.OutputField(
         desc="All named entities with their most specific Schema.org class names. "
-             "Only include proper nouns with at most 4 words in the name. "
-             "Always prefer subclasses over parent classes."
+        "Only include proper nouns with at most 4 words in the name. "
+        "Always prefer subclasses over parent classes."
     )

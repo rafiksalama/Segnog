@@ -19,10 +19,17 @@ logger = logging.getLogger(__name__)
 
 # Schema.org types that are not real-world entities — typically image captions
 # extracted by vision models embedded in the conversation text.
-_IMAGE_TYPES: frozenset = frozenset({
-    "Photograph", "ImageObject", "VisualArtwork", "Painting", "Drawing",
-    "Sculpture", "CreativeWork",
-})
+_IMAGE_TYPES: frozenset = frozenset(
+    {
+        "Photograph",
+        "ImageObject",
+        "VisualArtwork",
+        "Painting",
+        "Drawing",
+        "Sculpture",
+        "CreativeWork",
+    }
+)
 
 # Maximum number of words in a normalized entity display name.
 # Longer names are almost always image descriptions, not entities.
@@ -81,10 +88,16 @@ async def update_group_ontology(
 
         # Skip image-description pseudo-entities
         if schema_type in _IMAGE_TYPES:
-            logger.debug("Ontology 8b: skipping image-type entity '%s' (%s)", display_name, schema_type)
+            logger.debug(
+                "Ontology 8b: skipping image-type entity '%s' (%s)", display_name, schema_type
+            )
             return None
         if len(display_name.split()) > _MAX_NAME_WORDS:
-            logger.debug("Ontology 8b: skipping long-name entity '%s' (%d words)", display_name, len(display_name.split()))
+            logger.debug(
+                "Ontology 8b: skipping long-name entity '%s' (%d words)",
+                display_name,
+                len(display_name.split()),
+            )
             return None
 
         try:
@@ -106,8 +119,12 @@ async def update_group_ontology(
                 group_id=group_id,
             )
 
-            logger.debug("Ontology 8b: upserted '%s' (%s) for group '%s'",
-                         display_name, schema_type, group_id)
+            logger.debug(
+                "Ontology 8b: upserted '%s' (%s) for group '%s'",
+                display_name,
+                schema_type,
+                group_id,
+            )
             return name_norm
 
         except Exception as e:
@@ -135,15 +152,26 @@ async def update_group_ontology(
                 if ok:
                     stored_rels += 1
                 else:
-                    logger.debug("Ontology 8c: nodes not found for (%s→%s), edge skipped",
-                                 rel.get("subject_norm"), rel.get("object_norm"))
+                    logger.debug(
+                        "Ontology 8c: nodes not found for (%s→%s), edge skipped",
+                        rel.get("subject_norm"),
+                        rel.get("object_norm"),
+                    )
             except Exception as e:
-                logger.debug("Ontology 8c: store_relates failed (%s→%s): %s",
-                             rel.get("subject_norm"), rel.get("object_norm"), e)
+                logger.debug(
+                    "Ontology 8c: store_relates failed (%s→%s): %s",
+                    rel.get("subject_norm"),
+                    rel.get("object_norm"),
+                    e,
+                )
 
         if relationships:
-            logger.info("Ontology 8c: stored %d/%d relationships for group '%s'",
-                        stored_rels, len(relationships), group_id)
+            logger.info(
+                "Ontology 8c: stored %d/%d relationships for group '%s'",
+                stored_rels,
+                len(relationships),
+                group_id,
+            )
 
     except Exception as e:
         logger.warning("Ontology 8c: relationship extraction failed for '%s': %s", group_id, e)
@@ -161,8 +189,12 @@ async def update_group_ontology(
                 await ontology_store.link_about(ep_uuid, name_norm, group_id)
                 about_count += 1
             except Exception as e:
-                logger.debug("Ontology 8d: link_about failed (ep=%s, entity=%s): %s",
-                             ep_uuid[:8], name_norm, e)
+                logger.debug(
+                    "Ontology 8d: link_about failed (ep=%s, entity=%s): %s",
+                    ep_uuid[:8],
+                    name_norm,
+                    e,
+                )
 
     if about_count:
         logger.info("Ontology 8d: created %d ABOUT edge(s) for group '%s'", about_count, group_id)

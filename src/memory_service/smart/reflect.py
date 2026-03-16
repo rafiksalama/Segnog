@@ -55,7 +55,9 @@ async def generate_reflection(
     judge_round = state.get("judge_eval_round", 0) if isinstance(state, dict) else 0
     judge_feedback = state.get("judge_previous_feedback", "") if isinstance(state, dict) else ""
     if judge_round > 0:
-        judge_section = f"\n## Judge Evaluation\nRounds: {judge_round}\nLast feedback: {judge_feedback[:300]}"
+        judge_section = (
+            f"\n## Judge Evaluation\nRounds: {judge_round}\nLast feedback: {judge_feedback[:300]}"
+        )
 
     prompt = f"""Review this completed mission and produce a structured reflection.
 

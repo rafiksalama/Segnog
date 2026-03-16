@@ -61,8 +61,14 @@ async def judge_observation(
 
         # Validate observation_type
         valid_types = {
-            "chat", "tool_call", "tool_result", "knowledge",
-            "artifact", "action", "error", "state_update",
+            "chat",
+            "tool_call",
+            "tool_result",
+            "knowledge",
+            "artifact",
+            "action",
+            "error",
+            "state_update",
         }
         obs_type = str(analysis.observation_type).lower()
         if obs_type not in valid_types:

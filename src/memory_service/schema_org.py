@@ -25,21 +25,22 @@ logger = logging.getLogger(__name__)
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ClassInfo:
-    name: str                           # "Person"
-    uri: str                            # "schema:Person"
-    parents: List[str] = field(default_factory=list)   # ["Thing"]
+    name: str  # "Person"
+    uri: str  # "schema:Person"
+    parents: List[str] = field(default_factory=list)  # ["Thing"]
     comment: str = ""
 
 
 @dataclass
 class PropertyInfo:
-    name: str                           # "worksFor"
-    uri: str                            # "schema:worksFor"
-    domain: List[str] = field(default_factory=list)    # ["Person"]
-    range: List[str] = field(default_factory=list)     # ["Organization"]
-    inverse_of: Optional[str] = None    # "employees"
+    name: str  # "worksFor"
+    uri: str  # "schema:worksFor"
+    domain: List[str] = field(default_factory=list)  # ["Person"]
+    range: List[str] = field(default_factory=list)  # ["Organization"]
+    inverse_of: Optional[str] = None  # "employees"
     comment: str = ""
 
 
@@ -51,108 +52,108 @@ class PropertyInfo:
 _CLASS_ALIASES: Dict[str, str] = {
     # case / spacing variants handled by normalize_class() first,
     # so these are semantic aliases only
-    "company":          "Organization",
-    "corporation":      "Corporation",
-    "firm":             "Organization",
-    "business":         "LocalBusiness",
-    "store":            "Store",
-    "shop":             "Store",
-    "hospital":         "Hospital",
-    "school":           "School",
-    "university":       "CollegeOrUniversity",
-    "college":          "CollegeOrUniversity",
-    "location":         "Place",
-    "city":             "City",
-    "country":          "Country",
-    "region":           "AdministrativeArea",
-    "address":          "PostalAddress",
-    "human":            "Person",
-    "individual":       "Person",
-    "character":        "Person",
-    "movie":            "Movie",
-    "film":             "Movie",
-    "book":             "Book",
-    "song":             "MusicRecording",
-    "album":            "MusicAlbum",
-    "article":          "Article",
-    "website":          "WebSite",
-    "webpage":          "WebPage",
-    "job":              "JobPosting",
-    "disease":          "MedicalCondition",
-    "drug":             "Drug",
-    "award":            "Award",
-    "course":           "Course",
-    "recipe":           "Recipe",
-    "vehicle":          "Vehicle",
-    "car":              "Car",
-    "language":         "Language",
+    "company": "Organization",
+    "corporation": "Corporation",
+    "firm": "Organization",
+    "business": "LocalBusiness",
+    "store": "Store",
+    "shop": "Store",
+    "hospital": "Hospital",
+    "school": "School",
+    "university": "CollegeOrUniversity",
+    "college": "CollegeOrUniversity",
+    "location": "Place",
+    "city": "City",
+    "country": "Country",
+    "region": "AdministrativeArea",
+    "address": "PostalAddress",
+    "human": "Person",
+    "individual": "Person",
+    "character": "Person",
+    "movie": "Movie",
+    "film": "Movie",
+    "book": "Book",
+    "song": "MusicRecording",
+    "album": "MusicAlbum",
+    "article": "Article",
+    "website": "WebSite",
+    "webpage": "WebPage",
+    "job": "JobPosting",
+    "disease": "MedicalCondition",
+    "drug": "Drug",
+    "award": "Award",
+    "course": "Course",
+    "recipe": "Recipe",
+    "vehicle": "Vehicle",
+    "car": "Car",
+    "language": "Language",
     # Animals / Pets
-    "animal":           "Animal",
-    "pet":              "Animal",
-    "dog":              "Animal",
-    "cat":              "Animal",
-    "bird":             "Animal",
-    "horse":            "Animal",
-    "rabbit":           "Animal",
-    "fish":             "Animal",
+    "animal": "Animal",
+    "pet": "Animal",
+    "dog": "Animal",
+    "cat": "Animal",
+    "bird": "Animal",
+    "horse": "Animal",
+    "rabbit": "Animal",
+    "fish": "Animal",
 }
 
 _PREDICATE_ALIASES: Dict[str, str] = {
     # legacy hyphenated forms
-    "is-friend-of":         "knows",
-    "friend-of":            "knows",
-    "friends-with":         "knows",
-    "knows-person":         "knows",
-    "works-at":             "worksFor",
-    "works-for":            "worksFor",
-    "employed-at":          "worksFor",
-    "employed-by":          "worksFor",
-    "is-employed-at":       "worksFor",
-    "is-employed-by":       "worksFor",
-    "works-with":           "colleague",
-    "is-colleague-of":      "colleague",
-    "is-mother-of":         "children",
-    "is-father-of":         "children",
-    "is-parent-of":         "children",
-    "has-child":            "children",
-    "has-daughter":         "children",
-    "has-son":              "children",
-    "is-daughter-of":       "parent",
-    "is-son-of":            "parent",
-    "is-child-of":          "parent",
-    "mother-of":            "children",
-    "father-of":            "children",
-    "daughter-of":          "parent",
-    "son-of":               "parent",
-    "child-of":             "parent",
-    "married-to":           "spouse",
-    "is-married-to":        "spouse",
-    "is-sibling-of":        "sibling",
-    "sibling-of":           "sibling",
-    "is-related-to":        "relatedTo",
-    "related-to":           "relatedTo",
-    "lives-in":             "homeLocation",
-    "located-in":           "homeLocation",
-    "based-in":             "homeLocation",
-    "resides-in":           "homeLocation",
-    "born-in":              "birthPlace",
-    "from":                 "birthPlace",
-    "nationality":          "nationality",
-    "is-from":              "birthPlace",
-    "member-of":            "memberOf",
-    "belongs-to":           "memberOf",
-    "part-of":              "memberOf",
-    "graduated-from":       "alumniOf",
-    "attended":             "alumniOf",
-    "studied-at":           "alumniOf",
-    "founded":              "founder",
-    "founded-by":           "founder",
-    "owns":                 "owns",
-    "owned-by":             "owner",
-    "has-affiliation":      "affiliation",
-    "affiliated-with":      "affiliation",
-    "located-at":           "location",
-    "has-location":         "location",
+    "is-friend-of": "knows",
+    "friend-of": "knows",
+    "friends-with": "knows",
+    "knows-person": "knows",
+    "works-at": "worksFor",
+    "works-for": "worksFor",
+    "employed-at": "worksFor",
+    "employed-by": "worksFor",
+    "is-employed-at": "worksFor",
+    "is-employed-by": "worksFor",
+    "works-with": "colleague",
+    "is-colleague-of": "colleague",
+    "is-mother-of": "children",
+    "is-father-of": "children",
+    "is-parent-of": "children",
+    "has-child": "children",
+    "has-daughter": "children",
+    "has-son": "children",
+    "is-daughter-of": "parent",
+    "is-son-of": "parent",
+    "is-child-of": "parent",
+    "mother-of": "children",
+    "father-of": "children",
+    "daughter-of": "parent",
+    "son-of": "parent",
+    "child-of": "parent",
+    "married-to": "spouse",
+    "is-married-to": "spouse",
+    "is-sibling-of": "sibling",
+    "sibling-of": "sibling",
+    "is-related-to": "relatedTo",
+    "related-to": "relatedTo",
+    "lives-in": "homeLocation",
+    "located-in": "homeLocation",
+    "based-in": "homeLocation",
+    "resides-in": "homeLocation",
+    "born-in": "birthPlace",
+    "from": "birthPlace",
+    "nationality": "nationality",
+    "is-from": "birthPlace",
+    "member-of": "memberOf",
+    "belongs-to": "memberOf",
+    "part-of": "memberOf",
+    "graduated-from": "alumniOf",
+    "attended": "alumniOf",
+    "studied-at": "alumniOf",
+    "founded": "founder",
+    "founded-by": "founder",
+    "owns": "owns",
+    "owned-by": "owner",
+    "has-affiliation": "affiliation",
+    "affiliated-with": "affiliation",
+    "located-at": "location",
+    "has-location": "location",
 }
 
 # Predicates that are symmetric by convention (not always declared via inverseOf in Schema.org)
@@ -166,7 +167,7 @@ _SYMMETRIC_PREDICATES: Set[str] = {
 
 # Manually-defined inverse pairs (where Schema.org JSON-LD doesn't declare inverseOf)
 _MANUAL_INVERSES: Dict[str, str] = {
-    "parent":   "children",
+    "parent": "children",
     "children": "parent",
 }
 
@@ -174,6 +175,7 @@ _MANUAL_INVERSES: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
+
 
 class SchemaOrgOntology:
     """
@@ -209,12 +211,12 @@ class SchemaOrgOntology:
             if isinstance(types, str):
                 types = [types]
 
-            name = entry_id[len("schema:"):]
+            name = entry_id[len("schema:") :]
 
             if "rdfs:Class" in types:
                 parents = self._extract_ids(entry.get("rdfs:subClassOf", []))
                 # keep only schema: parents
-                parents = [p[len("schema:"):] for p in parents if p.startswith("schema:")]
+                parents = [p[len("schema:") :] for p in parents if p.startswith("schema:")]
                 self._classes[name] = ClassInfo(
                     name=name,
                     uri=entry_id,
@@ -224,21 +226,23 @@ class SchemaOrgOntology:
 
             elif "rdf:Property" in types:
                 domain = [
-                    d[len("schema:"):]
+                    d[len("schema:") :]
                     for d in self._extract_ids(entry.get("schema:domainIncludes", []))
                     if d.startswith("schema:")
                 ]
                 range_ = [
-                    r[len("schema:"):]
+                    r[len("schema:") :]
                     for r in self._extract_ids(entry.get("schema:rangeIncludes", []))
                     if r.startswith("schema:")
                 ]
                 inverse_raw = entry.get("schema:inverseOf")
                 inverse_name: Optional[str] = None
                 if inverse_raw:
-                    inv_id = (inverse_raw.get("@id") if isinstance(inverse_raw, dict) else None) or ""
+                    inv_id = (
+                        inverse_raw.get("@id") if isinstance(inverse_raw, dict) else None
+                    ) or ""
                     if inv_id.startswith("schema:"):
-                        inverse_name = inv_id[len("schema:"):]
+                        inverse_name = inv_id[len("schema:") :]
 
                 self._properties[name] = PropertyInfo(
                     name=name,
@@ -258,7 +262,9 @@ class SchemaOrgOntology:
 
         logger.info(
             "SchemaOrgOntology loaded: %d classes, %d properties, %d inverse pairs",
-            len(self._classes), len(self._properties), len(self._inverses),
+            len(self._classes),
+            len(self._properties),
+            len(self._inverses),
         )
 
     # ------------------------------------------------------------------
@@ -572,7 +578,8 @@ class SchemaOrgOntology:
 
         logger.info(
             "SchemaOrgOntology: computing embeddings for %d indexable classes (of %d total)…",
-            len(indexable), len(self._classes),
+            len(indexable),
+            len(self._classes),
         )
 
         # Sequential batches, each batch runs concurrently (throttled by semaphore in embed_fn)
@@ -584,9 +591,7 @@ class SchemaOrgOntology:
             vectors = await asyncio.gather(*[embed_fn(text) for _, text in batch])
             for (name, _), vec in zip(batch, vectors):
                 embeddings[name] = vec
-            logger.debug(
-                "SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items)
-            )
+            logger.debug("SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items))
 
         # --- Save to disk cache ---
         try:
@@ -623,6 +628,7 @@ def _find_jsonld() -> "Path":
     # 2. Bundled inside the installed package (importlib.resources, Python 3.9+)
     try:
         import importlib.resources as _pkg
+
         ref = _pkg.files("memory_service.data") / "schemaorg-current-https.jsonld"
         p = _Path(str(ref))
         if p.exists():
@@ -651,6 +657,7 @@ def get_shared_ontology(jsonld_path: Optional[str] = None) -> "SchemaOrgOntology
     global _shared_instance
     if _shared_instance is None:
         from pathlib import Path as _Path
+
         path = _Path(jsonld_path) if jsonld_path else _find_jsonld()
         _shared_instance = SchemaOrgOntology(path)
     return _shared_instance

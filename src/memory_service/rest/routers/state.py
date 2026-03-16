@@ -117,8 +117,10 @@ async def get_tool_stats(request: Request):
                         continue
                 if tool_name not in tool_stats:
                     tool_stats[tool_name] = {
-                        "attempts": 0, "successes": 0,
-                        "failures": 0, "total_duration_ms": 0,
+                        "attempts": 0,
+                        "successes": 0,
+                        "failures": 0,
+                        "total_duration_ms": 0,
                     }
                 for field in ("attempts", "successes", "failures", "total_duration_ms"):
                     tool_stats[tool_name][field] += stat_data.get(field, 0)
@@ -154,7 +156,9 @@ async def get_memory_context(
     for e in reversed(events):  # Oldest first for context
         etype = e.get("type", "")
         data = e.get("data", {})
-        content = data.get("content", str(data)[:200]) if isinstance(data, dict) else str(data)[:200]
+        content = (
+            data.get("content", str(data)[:200]) if isinstance(data, dict) else str(data)[:200]
+        )
         lines.append(f"[{etype}] {content}")
 
     formatted = "\n".join(lines) if lines else "No recent events."

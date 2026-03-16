@@ -10,9 +10,13 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from ..config import (
-    get_episode_alpha, get_episode_half_life,
-    get_hebbian_activation_cap, get_hebbian_beta_episode,
-    get_hebbian_enabled, get_hebbian_learning_rate, get_hebbian_max_pairs,
+    get_episode_alpha,
+    get_episode_half_life,
+    get_hebbian_activation_cap,
+    get_hebbian_beta_episode,
+    get_hebbian_enabled,
+    get_hebbian_learning_rate,
+    get_hebbian_max_pairs,
 )
 from ..smart.judge_observation import judge_observation
 
@@ -23,10 +27,39 @@ RETRIEVAL_PARAMS = {"top_k": 25, "min_score": 0.40}
 KNOWLEDGE_PARAMS = {"top_k": 10, "min_score": 0.40}
 
 _PROPER_NOUN_SKIP = {
-    "What", "When", "Where", "Who", "How", "Why", "Which", "Does", "Did",
-    "Has", "Have", "Had", "Was", "Were", "Are", "Is", "Can", "Could",
-    "Would", "Should", "Will", "The", "This", "That", "These", "Those",
-    "And", "But", "For", "Not", "Yes", "No", "According",
+    "What",
+    "When",
+    "Where",
+    "Who",
+    "How",
+    "Why",
+    "Which",
+    "Does",
+    "Did",
+    "Has",
+    "Have",
+    "Had",
+    "Was",
+    "Were",
+    "Are",
+    "Is",
+    "Can",
+    "Could",
+    "Would",
+    "Should",
+    "Will",
+    "The",
+    "This",
+    "That",
+    "These",
+    "Those",
+    "And",
+    "But",
+    "For",
+    "Not",
+    "Yes",
+    "No",
+    "According",
 }
 
 
@@ -45,13 +78,15 @@ async def _get_recent_episodes(episode_store, n: int = 1) -> List[Dict[str, Any]
         result = await episode_store._graph.query(cypher, params={"gid": episode_store._group_id})
         episodes = []
         for row in result.result_set:
-            episodes.append({
-                "uuid": row[0] or "",
-                "content": row[1] or "",
-                "created_at": row[2] or 0,
-                "created_at_iso": row[3] or "",
-                "source_type": "recent_episode",
-            })
+            episodes.append(
+                {
+                    "uuid": row[0] or "",
+                    "content": row[1] or "",
+                    "created_at": row[2] or 0,
+                    "created_at_iso": row[3] or "",
+                    "source_type": "recent_episode",
+                }
+            )
         return episodes
     except Exception as e:
         logger.warning(f"_get_recent_episodes failed: {e}")
@@ -59,12 +94,14 @@ async def _get_recent_episodes(episode_store, n: int = 1) -> List[Dict[str, Any]
 
 
 def _extract_proper_nouns(text: str) -> List[str]:
-    words = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
+    words = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", text)
     return [w for w in words if w not in _PROPER_NOUN_SKIP and len(w) > 1]
 
 
 async def _enrich_with_entities(
-    episode_store, content: str, episodes: List[Dict[str, Any]],
+    episode_store,
+    content: str,
+    episodes: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """Merge entity search results into episode list."""
     proper_nouns = _extract_proper_nouns(content)
@@ -72,7 +109,8 @@ async def _enrich_with_entities(
         return episodes
     try:
         entity_eps = await episode_store.search_by_entities(
-            entity_names=proper_nouns, top_k=10,
+            entity_names=proper_nouns,
+            top_k=10,
         )
         existing = {ep.get("uuid"): ep for ep in episodes}
         for ent_ep in entity_eps:
@@ -89,8 +127,11 @@ async def _enrich_with_entities(
 
 
 async def _score_3dim(
-    episode_store, episodes: List[Dict[str, Any]], episode_uuid: str,
-    alpha: float, half_life: float,
+    episode_store,
+    episodes: List[Dict[str, Any]],
+    episode_uuid: str,
+    alpha: float,
+    half_life: float,
 ) -> List[Dict[str, Any]]:
     """Apply scoring: 3-dim (semantic + temporal + Hebbian) or 2-dim fallback."""
     if not episodes:
@@ -100,7 +141,9 @@ async def _score_3dim(
 
     if not get_hebbian_enabled():
         return apply_temporal_score(
-            results=episodes, alpha=alpha, half_life_hours=half_life,
+            results=episodes,
+            alpha=alpha,
+            half_life_hours=half_life,
         )
 
     from .hebbian import get_co_activation_weights
@@ -123,8 +166,11 @@ async def _score_3dim(
 
 
 async def _hydrate_episodes(
-    episode_store, dragonfly, session_id: str,
-    episodes: List[Dict[str, Any]], episode_uuid: str,
+    episode_store,
+    dragonfly,
+    session_id: str,
+    episodes: List[Dict[str, Any]],
+    episode_uuid: str,
     max_items: int = 15,
 ) -> int:
     """Write episodes to DragonflyDB session, deduplicating."""
@@ -150,8 +196,11 @@ async def _hydrate_episodes(
             if ep.get("episode_type"):
                 ep_meta["episode_type"] = ep["episode_type"]
             await dragonfly.session_add(
-                session_id, ep_uuid, ep["content"],
-                ep_emb, ep_meta,
+                session_id,
+                ep_uuid,
+                ep["content"],
+                ep_emb,
+                ep_meta,
                 source_type="hydrated",
             )
             hydrated += 1
@@ -161,7 +210,9 @@ async def _hydrate_episodes(
 
 
 async def _hydrate_knowledge(
-    episode_store, dragonfly, session_id: str,
+    episode_store,
+    dragonfly,
+    session_id: str,
     knowledge: List[Dict[str, Any]],
     max_items: int = 10,
 ) -> int:
@@ -183,9 +234,7 @@ async def _hydrate_knowledge(
     needs_embed = [(kid, kn) for kid, kn in to_hydrate if not kn.get("embedding")]
     if needs_embed:
         try:
-            batch_embs = await episode_store._embed_batch(
-                [kn["content"] for _, kn in needs_embed]
-            )
+            batch_embs = await episode_store._embed_batch([kn["content"] for _, kn in needs_embed])
             for (kid, kn), emb in zip(needs_embed, batch_embs):
                 kn["embedding"] = emb
         except Exception:
@@ -198,8 +247,11 @@ async def _hydrate_knowledge(
             continue
         try:
             await dragonfly.session_add(
-                session_id, kn_id, kn["content"],
-                emb, {"knowledge_type": kn.get("type", kn.get("knowledge_type", ""))},
+                session_id,
+                kn_id,
+                kn["content"],
+                emb,
+                {"knowledge_type": kn.get("type", kn.get("knowledge_type", ""))},
                 source_type="hydrated_knowledge",
             )
             hydrated += 1
@@ -209,7 +261,9 @@ async def _hydrate_knowledge(
 
 
 async def _hydrate_ontology_nodes(
-    episode_store, dragonfly, session_id: str,
+    episode_store,
+    dragonfly,
+    session_id: str,
     onto_nodes: List[Dict[str, Any]],
     max_items: int = 5,
 ) -> int:
@@ -250,7 +304,11 @@ async def _hydrate_ontology_nodes(
             continue
         try:
             await dragonfly.session_add(
-                session_id, key, content, emb, {},
+                session_id,
+                key,
+                content,
+                emb,
+                {},
                 source_type="ontology_node",
             )
             hydrated += 1
@@ -260,8 +318,11 @@ async def _hydrate_ontology_nodes(
 
 
 async def _search_falkordb(
-    episode_store, knowledge_store, query: str,
-    embedding: List[float], episode_uuid: str,
+    episode_store,
+    knowledge_store,
+    query: str,
+    embedding: List[float],
+    episode_uuid: str,
     labels: Optional[List[str]] = None,
     entity_content: Optional[str] = None,
 ) -> tuple:
@@ -293,10 +354,14 @@ async def _search_falkordb(
     )
 
     episodes = await _enrich_with_entities(
-        episode_store, entity_content or query, episodes,
+        episode_store,
+        entity_content or query,
+        episodes,
     )
     episodes = await _score_3dim(
-        episode_store, episodes, episode_uuid,
+        episode_store,
+        episodes,
+        episode_uuid,
         alpha=get_episode_alpha(),
         half_life=get_episode_half_life(),
     )
@@ -313,31 +378,40 @@ async def _reinforce_hebbian(episode_store, episode_uuid: str, episodes, knowled
 
     ep_uuids = [r["uuid"] for r in episodes if r.get("uuid") and r["uuid"] != episode_uuid]
     if ep_uuids:
-        asyncio.create_task(reinforce_co_activations(
-            graph=episode_store._graph,
-            trigger_uuid=episode_uuid,
-            result_uuids=ep_uuids,
-            learning_rate=get_hebbian_learning_rate(),
-            max_pairs=get_hebbian_max_pairs(),
-            activation_cap=get_hebbian_activation_cap(),
-        ))
+        asyncio.create_task(
+            reinforce_co_activations(
+                graph=episode_store._graph,
+                trigger_uuid=episode_uuid,
+                result_uuids=ep_uuids,
+                learning_rate=get_hebbian_learning_rate(),
+                max_pairs=get_hebbian_max_pairs(),
+                activation_cap=get_hebbian_activation_cap(),
+            )
+        )
 
     kn_uuids = [r["uuid"] for r in knowledge if r.get("uuid")]
     if kn_uuids:
-        asyncio.create_task(reinforce_knowledge_activations(
-            graph=episode_store._graph,
-            result_uuids=kn_uuids,
-            activation_cap=get_hebbian_activation_cap(),
-        ))
+        asyncio.create_task(
+            reinforce_knowledge_activations(
+                graph=episode_store._graph,
+                result_uuids=kn_uuids,
+                activation_cap=get_hebbian_activation_cap(),
+            )
+        )
 
 
 # ── Background ───────────────────────────────────────────────────────
 
 
 async def background_hydrate(
-    episode_store, knowledge_store, dragonfly,
-    session_id: str, content: str, embedding: List[float],
-    metadata: dict, episode_uuid: str,
+    episode_store,
+    knowledge_store,
+    dragonfly,
+    session_id: str,
+    content: str,
+    embedding: List[float],
+    metadata: dict,
+    episode_uuid: str,
     prefill_episodes: List[Dict[str, Any]] = None,
     prefill_knowledge: List[Dict[str, Any]] = None,
     ontology_store=None,
@@ -349,8 +423,12 @@ async def background_hydrate(
         # 1. Store in FalkorDB
         try:
             await episode_store._store_with_embedding(
-                content=content, embedding=embedding, metadata=metadata,
-                episode_type="raw", auto_link=True, episode_uuid=episode_uuid,
+                content=content,
+                embedding=embedding,
+                metadata=metadata,
+                episode_type="raw",
+                auto_link=True,
+                episode_uuid=episode_uuid,
             )
         except Exception as e:
             logger.warning(f"FalkorDB store failed: {e}")
@@ -359,6 +437,7 @@ async def background_hydrate(
         if extract_knowledge_enabled:
             try:
                 from ..smart.extract_knowledge import extract_knowledge as _extract_knowledge
+
                 mission_data = {
                     "task": metadata.get("source", "observe"),
                     "status": "completed",
@@ -404,14 +483,24 @@ async def background_hydrate(
             knowledge = prefill_knowledge or []
         else:
             episodes, knowledge = await _search_falkordb(
-                episode_store, knowledge_store, content,
-                embedding, episode_uuid,
+                episode_store,
+                knowledge_store,
+                content,
+                embedding,
+                episode_uuid,
             )
             ep_count = await _hydrate_episodes(
-                episode_store, dragonfly, session_id, episodes, episode_uuid,
+                episode_store,
+                dragonfly,
+                session_id,
+                episodes,
+                episode_uuid,
             )
             kn_count = await _hydrate_knowledge(
-                episode_store, dragonfly, session_id, knowledge,
+                episode_store,
+                dragonfly,
+                session_id,
+                knowledge,
             )
             onto_count = 0
             if ontology_store is not None:
@@ -424,7 +513,10 @@ async def background_hydrate(
                         include_embedding=True,
                     )
                     onto_count = await _hydrate_ontology_nodes(
-                        episode_store, dragonfly, session_id, onto_nodes,
+                        episode_store,
+                        dragonfly,
+                        session_id,
+                        onto_nodes,
                     )
                 except Exception as e:
                     logger.warning(f"Background ontology hydration failed: {e}")
@@ -439,7 +531,8 @@ async def background_hydrate(
         # 4. Judge
         try:
             judge_result = await judge_observation(
-                content=content, source=metadata.get("source", ""),
+                content=content,
+                source=metadata.get("source", ""),
             )
             logger.info(
                 f"Judge: uuid={episode_uuid[:8]}, "
@@ -457,9 +550,14 @@ async def background_hydrate(
 
 
 async def observe_core(
-    episode_store, knowledge_store, dragonfly,
-    session_id: str, content: str,
-    timestamp: str = None, source: str = None, metadata: dict = None,
+    episode_store,
+    knowledge_store,
+    dragonfly,
+    session_id: str,
+    content: str,
+    timestamp: str = None,
+    source: str = None,
+    metadata: dict = None,
     read_only: bool = False,
     summarize: bool = False,
     top_k: int = 10,
@@ -519,7 +617,9 @@ async def observe_core(
             include_ontology = False
 
         if include_ontology:
-            knowledge_results, relevant_episodes, ontology_results = await asyncio.gather(*search_coros)
+            knowledge_results, relevant_episodes, ontology_results = await asyncio.gather(
+                *search_coros
+            )
         else:
             knowledge_results, relevant_episodes = await asyncio.gather(*search_coros)
             ontology_results = []
@@ -532,7 +632,7 @@ async def observe_core(
                 "source_type": "hydrated_knowledge",
                 "created_at": 0,
             }
-        for node in (ontology_results or []):
+        for node in ontology_results or []:
             node_uuid = node.get("uuid", "")
             summary = node.get("summary", "")
             if node_uuid and summary:
@@ -550,6 +650,7 @@ async def observe_core(
                 "created_at": ep.get("created_at", 0),
             }
         from ..smart.summarize_context import _format_entries
+
         context = _format_entries(entries) if entries else ""
         logger.info(
             f"minimal observe: {len(knowledge_results)} knowledge + "
@@ -596,9 +697,12 @@ async def observe_core(
         episode_uuid = str(uuid4())
 
         await dragonfly.session_add(
-            session_id=session_id, entry_uuid=episode_uuid,
-            content=content, embedding=embedding,
-            metadata=metadata, source_type="local",
+            session_id=session_id,
+            entry_uuid=episode_uuid,
+            content=content,
+            embedding=embedding,
+            metadata=metadata,
+            source_type="local",
         )
 
         # Step 2: Cold start pre-fill
@@ -615,6 +719,7 @@ async def observe_core(
                 # Reinterpret content for optimized search
                 try:
                     from ..smart.reinterpret import reinterpret_task
+
                     reinterpretation = await reinterpret_task(task=content)
                     search_labels = reinterpretation.get("search_labels", [])
                     search_query = reinterpretation.get("search_query", content)
@@ -627,18 +732,28 @@ async def observe_core(
 
                 # Search FalkorDB + score + enrich
                 falkor_episodes, falkor_knowledge = await _search_falkordb(
-                    episode_store, knowledge_store, search_query,
-                    search_embedding, episode_uuid, labels=search_labels,
+                    episode_store,
+                    knowledge_store,
+                    search_query,
+                    search_embedding,
+                    episode_uuid,
+                    labels=search_labels,
                     entity_content=content,
                 )
 
                 # Pre-fill DragonflyDB
                 ep_count = await _hydrate_episodes(
-                    episode_store, dragonfly, session_id,
-                    falkor_episodes, episode_uuid,
+                    episode_store,
+                    dragonfly,
+                    session_id,
+                    falkor_episodes,
+                    episode_uuid,
                 )
                 kn_count = await _hydrate_knowledge(
-                    episode_store, dragonfly, session_id, falkor_knowledge,
+                    episode_store,
+                    dragonfly,
+                    session_id,
+                    falkor_knowledge,
                 )
                 onto_count = 0
                 if ontology_store is not None:
@@ -651,11 +766,16 @@ async def observe_core(
                             include_embedding=True,
                         )
                         onto_count = await _hydrate_ontology_nodes(
-                            episode_store, dragonfly, session_id, onto_nodes,
+                            episode_store,
+                            dragonfly,
+                            session_id,
+                            onto_nodes,
                         )
                     except Exception as e:
                         logger.warning(f"Cold start ontology hydration failed: {e}")
-                logger.info(f"Pre-filled: {ep_count} episodes, {kn_count} knowledge, {onto_count} ontology")
+                logger.info(
+                    f"Pre-filled: {ep_count} episodes, {kn_count} knowledge, {onto_count} ontology"
+                )
             else:
                 logger.info(f"First observation for session {session_id[:8]}, skipping pre-fill")
 
@@ -682,7 +802,9 @@ async def observe_core(
 
         # Apply 3D scoring: semantic + temporal + Hebbian
         search_results = await _score_3dim(
-            episode_store, search_results, episode_uuid,
+            episode_store,
+            search_results,
+            episode_uuid,
             alpha=get_episode_alpha(),
             half_life=get_episode_half_life(),
         )
@@ -718,7 +840,9 @@ async def observe_core(
         if episode_uuid:
             entries.pop(episode_uuid, None)
         if len(entries) > top_k:
-            sorted_items = sorted(entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True)
+            sorted_items = sorted(
+                entries.items(), key=lambda x: x[1].get("created_at", 0), reverse=True
+            )
             entries = dict(sorted_items[:top_k])
 
     # read_only: augment with a fresh synchronous search from FalkorDB covering
@@ -801,24 +925,34 @@ async def observe_core(
     if entries:
         if summarize:
             from ..smart.summarize_context import summarize_context
+
             context = await summarize_context(
                 current_observation=content,
                 session_entries=entries,
             )
         else:
             from ..smart.summarize_context import _format_entries
+
             context = _format_entries(entries)
 
     if not read_only:
         # Step 4: Fire background
-        asyncio.create_task(background_hydrate(
-            episode_store, knowledge_store, dragonfly,
-            session_id, content, embedding, metadata, episode_uuid,
-            prefill_episodes=falkor_episodes if is_cold else None,
-            prefill_knowledge=falkor_knowledge if is_cold else None,
-            ontology_store=ontology_store,
-            ontology_top_k=ontology_top_k,
-        ))
+        asyncio.create_task(
+            background_hydrate(
+                episode_store,
+                knowledge_store,
+                dragonfly,
+                session_id,
+                content,
+                embedding,
+                metadata,
+                episode_uuid,
+                prefill_episodes=falkor_episodes if is_cold else None,
+                prefill_knowledge=falkor_knowledge if is_cold else None,
+                ontology_store=ontology_store,
+                ontology_top_k=ontology_top_k,
+            )
+        )
 
     logger.info(
         f"Observe done: session={session_id[:8]}, "

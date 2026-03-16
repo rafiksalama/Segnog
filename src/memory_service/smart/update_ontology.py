@@ -63,7 +63,9 @@ async def update_ontology_summary(
 
         logger.info(
             "Updated OntologyNode summary for '%s' (%s): %d chars",
-            entity_name, schema_type, len(updated),
+            entity_name,
+            schema_type,
+            len(updated),
         )
         return updated
 

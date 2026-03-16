@@ -5,7 +5,10 @@ from fastapi import APIRouter, Request
 from ...dto.episodes import ObserveRequest, ObserveResponse
 from ...core.observe import observe_core
 from ..dependencies import (
-    get_dragonfly, get_episode_store, get_knowledge_store, get_ontology_store,
+    get_dragonfly,
+    get_episode_store,
+    get_knowledge_store,
+    get_ontology_store,
 )
 
 router = APIRouter()

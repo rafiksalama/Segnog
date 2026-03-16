@@ -62,7 +62,9 @@ class REMWorker:
         groups = await self._find_pending_groups()
 
         if groups:
-            logger.info(f"REM cycle: {len(groups)} group(s) to consolidate (since_ts={self._last_sweep_ts:.0f})")
+            logger.info(
+                f"REM cycle: {len(groups)} group(s) to consolidate (since_ts={self._last_sweep_ts:.0f})"
+            )
             for group_info in groups:
                 gid = group_info["group_id"]
                 try:
@@ -123,14 +125,16 @@ class REMWorker:
                 continue
             age_hours = (now - (oldest_ts or now)) / 3600
             score = (raw_count * 0.5) + (age_hours * 0.5)
-            groups.append({
-                "group_id": gid,
-                "raw_count": raw_count,
-                "score": score,
-            })
+            groups.append(
+                {
+                    "group_id": gid,
+                    "raw_count": raw_count,
+                    "score": score,
+                }
+            )
 
         groups.sort(key=lambda x: x["score"], reverse=True)
-        return groups[:self._batch_size]
+        return groups[: self._batch_size]
 
     async def _consolidate_group(self, group_info: dict) -> dict:
         """
@@ -155,9 +159,7 @@ class REMWorker:
             ORDER BY e.created_at ASC
             LIMIT 20
         """
-        result = await self._episode_store._graph.query(
-            cypher, params={"group_id": group_id}
-        )
+        result = await self._episode_store._graph.query(cypher, params={"group_id": group_id})
         episodes = [
             {"uuid": row[0], "content": row[1], "created_at": row[2], "embedding": row[3]}
             for row in result.result_set
@@ -174,15 +176,15 @@ class REMWorker:
         for ep in episodes:
             embedding = ep.get("embedding")
             if embedding:
-                similar = await self._find_similar_consolidated(
-                    group_id, embedding, threshold=0.90
-                )
+                similar = await self._find_similar_consolidated(group_id, embedding, threshold=0.90)
                 if similar:
                     duplicate_uuids.append(ep["uuid"])
                     await self._link_duplicate_episode(ep["uuid"], similar["uuid"])
                     logger.debug(
                         "REM dedup: episode %s is duplicate of %s (score=%.3f)",
-                        ep["uuid"][:8], similar["uuid"][:8], similar["score"],
+                        ep["uuid"][:8],
+                        similar["uuid"][:8],
+                        similar["score"],
                     )
                     continue
             unique_episodes.append(ep)
@@ -201,9 +203,10 @@ class REMWorker:
 
         # --- Curation on unique episodes only ---
         source_uuids = [ep["uuid"] for ep in unique_episodes]
-        combined_content = "\n---\n".join(
-            ep["content"] for ep in unique_episodes[:10] if ep.get("content")
-        ) or "(no content available)"
+        combined_content = (
+            "\n---\n".join(ep["content"] for ep in unique_episodes[:10] if ep.get("content"))
+            or "(no content available)"
+        )
 
         mission_data = {
             "task": f"Background consolidation for group '{group_id}'",
@@ -212,22 +215,24 @@ class REMWorker:
             "state": {"state_description": combined_content[:2000]},
         }
 
-        curation_result = await self._handler.run_curation({
-            "scope": {"group_id": group_id, "workflow_id": "rem_worker"},
-            "mission_data_json": mission_data,
-            "source_episode_uuids": source_uuids,
-        })
+        curation_result = await self._handler.run_curation(
+            {
+                "scope": {"group_id": group_id, "workflow_id": "rem_worker"},
+                "mission_data_json": mission_data,
+                "source_episode_uuids": source_uuids,
+            }
+        )
 
         # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
         if self._ontology_store is not None:
             try:
                 await self._update_ontology(group_id, unique_episodes, combined_content)
             except Exception as e:
-                logger.error("REM Step 8 (ontology update) failed for '%s': %s", group_id, e, exc_info=True)
+                logger.error(
+                    "REM Step 8 (ontology update) failed for '%s': %s", group_id, e, exc_info=True
+                )
 
-        consolidated_count = await self._episode_store.mark_episodes_consolidated(
-            source_uuids
-        )
+        consolidated_count = await self._episode_store.mark_episodes_consolidated(source_uuids)
 
         compressed_uuid = ""
         if len(unique_episodes) >= 2:
@@ -251,6 +256,7 @@ class REMWorker:
     ) -> None:
         """Step 8: Update OntologyStore from consolidated episode text."""
         from ..smart.ontology_pipeline import update_group_ontology
+
         await update_group_ontology(
             ontology_store=self._ontology_store,
             group_id=group_id,
@@ -321,7 +327,8 @@ class REMWorker:
         is older than decay_interval_hours. Prunes edges with weight < 0.01.
         """
         from ..config import (
-            get_hebbian_enabled, get_hebbian_decay_rate,
+            get_hebbian_enabled,
+            get_hebbian_decay_rate,
             get_hebbian_decay_interval_hours,
         )
 

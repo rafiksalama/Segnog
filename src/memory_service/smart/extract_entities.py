@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _get_ontology():
     from ..schema_org import get_shared_ontology
+
     return get_shared_ontology()
 
 
@@ -87,10 +88,12 @@ async def extract_entities(
                     str(entry.schema_type) if entry.schema_type else "Thing"
                 )
 
-                entities.append({
-                    "name": name,
-                    "schema_type": canonical_type,
-                })
+                entities.append(
+                    {
+                        "name": name,
+                        "schema_type": canonical_type,
+                    }
+                )
             except Exception as item_err:
                 logger.debug("Entity extractor: skipping malformed entry: %s", item_err)
 

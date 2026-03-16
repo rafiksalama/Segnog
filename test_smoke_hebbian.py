@@ -47,7 +47,9 @@ print(json.dumps(out))
 """
     result = subprocess.run(
         ["docker", "exec", CONTAINER, "python3", "-c", script],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     if result.returncode != 0:
         raise RuntimeError(f"falkor_query failed: {result.stderr.strip()}")
@@ -63,7 +65,9 @@ r.execute_command('GRAPH.QUERY', 'episode_store', '''{cypher}''')
 """
     result = subprocess.run(
         ["docker", "exec", CONTAINER, "python3", "-c", script],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     if result.returncode != 0:
         raise RuntimeError(f"falkor_write failed: {result.stderr.strip()}")
@@ -83,7 +87,9 @@ async def test_observe_cold_and_warm(client, session_id):
 
     await asyncio.sleep(2)
 
-    r2 = await observe(client, session_id, "NumPy and Pandas are essential Python data science libraries.")
+    r2 = await observe(
+        client, session_id, "NumPy and Pandas are essential Python data science libraries."
+    )
     uuid2 = r2["episode_uuid"]
     ctx_uuids = [e["uuid"] for e in r2["context"]["episodes"]]
     assert uuid1 in ctx_uuids, f"Warm session should retrieve episode 1, got {ctx_uuids}"
@@ -99,7 +105,8 @@ async def test_temporal_scoring(client, session_id, uuid1):
     await asyncio.sleep(2)
 
     r3 = await observe(
-        client, session_id,
+        client,
+        session_id,
         "Scikit-learn provides machine learning algorithms for Python data science.",
     )
     uuid3 = r3["episode_uuid"]
@@ -174,7 +181,8 @@ async def test_repeated_co_activation(client, session_id, uuid1):
 
     # Fire another observe that should retrieve uuid1 again
     await observe(
-        client, session_id,
+        client,
+        session_id,
         "Python's data science ecosystem includes Matplotlib for visualization.",
     )
     await asyncio.sleep(4)
@@ -226,15 +234,17 @@ async def test_scoring_module():
     # Temporal scoring
     results = [
         {"score": 0.9, "created_at": now - 7200},  # 2h old, high semantic
-        {"score": 0.8, "created_at": now - 60},     # 1min old, lower semantic
+        {"score": 0.8, "created_at": now - 60},  # 1min old, lower semantic
     ]
     scored = apply_temporal_score(results, alpha=0.3, half_life_hours=1.0, now=now)
     # The recent one (0.8 sem) should get boosted by freshness
     recent = next(r for r in scored if r["_semantic_score"] == 0.8)
     old = next(r for r in scored if r["_semantic_score"] == 0.9)
     assert recent["_freshness"] > old["_freshness"], "Recent should have higher freshness"
-    print(f"    temporal: recent={recent['score']:.3f} (f={recent['_freshness']:.3f}), "
-          f"old={old['score']:.3f} (f={old['_freshness']:.3f})")
+    print(
+        f"    temporal: recent={recent['score']:.3f} (f={recent['_freshness']:.3f}), "
+        f"old={old['score']:.3f} (f={old['_freshness']:.3f})"
+    )
 
     # Activation strength
     s0 = compute_activation_strength(0)
@@ -259,17 +269,27 @@ async def test_scoring_module():
         {"score": 0.85, "created_at": now - 60, "activation_count": 0, "uuid": "b"},
     ]
     scored_3d = apply_hebbian_score(
-        results_3d, beta=0.1, alpha=0.2, half_life_hours=1.0, now=now,
+        results_3d,
+        beta=0.1,
+        alpha=0.2,
+        half_life_hours=1.0,
+        now=now,
     )
     assert all("_hebbian_boost" in r for r in scored_3d)
     for r in scored_3d:
-        print(f"    3D: uuid={r['uuid']} score={r['score']:.3f} "
-              f"sem={r['_semantic_score']:.3f} fresh={r['_freshness']:.3f} hebb={r['_hebbian_boost']:.3f}")
+        print(
+            f"    3D: uuid={r['uuid']} score={r['score']:.3f} "
+            f"sem={r['_semantic_score']:.3f} fresh={r['_freshness']:.3f} hebb={r['_hebbian_boost']:.3f}"
+        )
 
     # Alpha + beta clamping (0.5 + 0.8 > 1.0 → beta clamped to 0.5)
     results_clamp = [{"score": 0.9, "created_at": now, "activation_count": 5, "uuid": "x"}]
     scored_clamp = apply_hebbian_score(
-        results_clamp, beta=0.8, alpha=0.5, half_life_hours=1.0, now=now,
+        results_clamp,
+        beta=0.8,
+        alpha=0.5,
+        half_life_hours=1.0,
+        now=now,
     )
     assert scored_clamp[0]["score"] > 0
     print("    alpha+beta clamping ok")
@@ -330,9 +350,7 @@ async def test_rem_decay():
         "MATCH (a:Episode {uuid: \\'decay-test-a\\'})-[r:CO_ACTIVATED]->"
         "(b:Episode {uuid: \\'decay-test-b\\'}) SET r.weight = 0.005"
     )
-    falkor_write(
-        "MATCH ()-[r:CO_ACTIVATED]->() WHERE r.weight < 0.01 DELETE r"
-    )
+    falkor_write("MATCH ()-[r:CO_ACTIVATED]->() WHERE r.weight < 0.01 DELETE r")
     rows = falkor_query(
         "MATCH (a:Episode {uuid: \\'decay-test-a\\'})-[r:CO_ACTIVATED]->"
         "(b:Episode {uuid: \\'decay-test-b\\'}) RETURN r.weight"
@@ -342,8 +360,7 @@ async def test_rem_decay():
 
     # Cleanup
     falkor_write(
-        "MATCH (e:Episode) WHERE e.uuid IN "
-        "[\\'decay-test-a\\', \\'decay-test-b\\'] DELETE e"
+        "MATCH (e:Episode) WHERE e.uuid IN [\\'decay-test-a\\', \\'decay-test-b\\'] DELETE e"
     )
     print("    REM decay ok")
 
@@ -421,10 +438,10 @@ async def main():
             print(f"    FAIL: {e}")
             failed += 1
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     status = "PASS" if failed == 0 else "FAIL"
     print(f"[{status}] {passed}/{passed + failed} tests passed")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
     if failed > 0:
         exit(1)

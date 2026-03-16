@@ -36,14 +36,16 @@ async def startup_pipeline(body: dict, request: Request):
     → filter → tool stats → infer state → synthesize background
     """
     handler = _build_handler(request)
-    return await handler.startup_pipeline({
-        "scope": {
-            "group_id": body.get("group_id", "default"),
-            "workflow_id": body.get("workflow_id", "default"),
-        },
-        "task": body.get("task", ""),
-        "model": body.get("model"),
-    })
+    return await handler.startup_pipeline(
+        {
+            "scope": {
+                "group_id": body.get("group_id", "default"),
+                "workflow_id": body.get("workflow_id", "default"),
+            },
+            "task": body.get("task", ""),
+            "model": body.get("model"),
+        }
+    )
 
 
 @router.post("/pipelines/curation")
@@ -55,11 +57,13 @@ async def run_curation(body: dict, request: Request):
     → extract artifacts → store artifacts → compress events
     """
     handler = _build_handler(request)
-    return await handler.run_curation({
-        "scope": {
-            "group_id": body.get("group_id", "default"),
-            "workflow_id": body.get("workflow_id", "default"),
-        },
-        "mission_data_json": body.get("mission_data_json", "{}"),
-        "model": body.get("model"),
-    })
+    return await handler.run_curation(
+        {
+            "scope": {
+                "group_id": body.get("group_id", "default"),
+                "workflow_id": body.get("workflow_id", "default"),
+            },
+            "mission_data_json": body.get("mission_data_json", "{}"),
+            "model": body.get("model"),
+        }
+    )

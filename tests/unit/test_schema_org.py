@@ -27,6 +27,7 @@ def onto() -> SchemaOrgOntology:
 # T0.0 — startup performance
 # ---------------------------------------------------------------------------
 
+
 def test_parse_performance():
     """JSON-LD must parse in < 5 seconds."""
     start = time.time()
@@ -40,6 +41,7 @@ def test_parse_performance():
 # ---------------------------------------------------------------------------
 # T0.1 — class hierarchy
 # ---------------------------------------------------------------------------
+
 
 def test_class_hierarchy_basic(onto):
     assert onto.is_subclass_of("Person", "Thing")
@@ -78,6 +80,7 @@ def test_ancestors_hospital(onto):
 # T0.2 — class normalization
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_class_exact(onto):
     assert onto.normalize_class("Person") == "Person"
     assert onto.normalize_class("Organization") == "Organization"
@@ -106,6 +109,7 @@ def test_normalize_class_fallback(onto):
 # ---------------------------------------------------------------------------
 # T0.3 — predicate normalization
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_predicate_exact(onto):
     assert onto.normalize_predicate("worksFor") == "worksFor"
@@ -140,6 +144,7 @@ def test_normalize_predicate_fallback(onto):
 # T0.4 — inverse properties
 # ---------------------------------------------------------------------------
 
+
 def test_inverse_declared_in_jsonld(onto):
     # memberOf inverseOf member (declared in JSON-LD)
     inv = onto.get_inverse("memberOf")
@@ -171,6 +176,7 @@ def test_inverse_bidirectional(onto):
 # T0.5 — symmetric detection
 # ---------------------------------------------------------------------------
 
+
 def test_symmetric_true(onto):
     assert onto.is_symmetric("knows") is True
     assert onto.is_symmetric("spouse") is True
@@ -189,6 +195,7 @@ def test_symmetric_false(onto):
 # ---------------------------------------------------------------------------
 # T0.6 — domain/range validation
 # ---------------------------------------------------------------------------
+
 
 def test_validate_triple_valid(onto):
     assert onto.validate_triple("Person", "worksFor", "Organization") is True
@@ -219,6 +226,7 @@ def test_validate_triple_unknown_predicate(onto):
 # ---------------------------------------------------------------------------
 # T0.7 — prompt reference
 # ---------------------------------------------------------------------------
+
 
 def test_prompt_reference_non_empty(onto):
     ref = onto.prompt_reference

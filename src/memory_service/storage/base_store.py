@@ -42,8 +42,8 @@ class BaseStore:
 
     def __init__(
         self,
-        graph,           # falkordb.asyncio.AsyncGraph
-        openai_client,   # openai.AsyncOpenAI
+        graph,  # falkordb.asyncio.AsyncGraph
+        openai_client,  # openai.AsyncOpenAI
         embedding_model: str,
         group_id: str = "default",
     ):
@@ -69,7 +69,10 @@ class BaseStore:
                 if attempt < _EMBED_MAX_RETRIES - 1:
                     logger.warning(
                         "_embed attempt %d/%d failed (%s); retrying in %.1fs",
-                        attempt + 1, _EMBED_MAX_RETRIES, e, delay,
+                        attempt + 1,
+                        _EMBED_MAX_RETRIES,
+                        e,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     delay *= 2
@@ -94,14 +97,19 @@ class BaseStore:
                 if attempt < _EMBED_MAX_RETRIES - 1:
                     logger.warning(
                         "_embed_batch attempt %d/%d failed (%s); retrying in %.1fs",
-                        attempt + 1, _EMBED_MAX_RETRIES, e, delay,
+                        attempt + 1,
+                        _EMBED_MAX_RETRIES,
+                        e,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     delay *= 2
         raise last_err
 
     def _parse_results(
-        self, result, json_columns: tuple = ("labels",),
+        self,
+        result,
+        json_columns: tuple = ("labels",),
     ) -> List[Dict[str, Any]]:
         """Parse FalkorDB QueryResult into list of dicts.
 
@@ -112,9 +120,7 @@ class BaseStore:
         if not result.result_set:
             return []
 
-        columns = [
-            h[1] if isinstance(h, (list, tuple)) else h for h in result.header
-        ]
+        columns = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
         rows = []
         for row in result.result_set:
             record = {}

@@ -25,33 +25,25 @@ class RestTransport:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def get(
-        self, path: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    async def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self._prefix}{path}"
         response = await self._client.get(url, params=params)
         response.raise_for_status()
         return response.json()
 
-    async def post(
-        self, path: str, body: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self._prefix}{path}"
         response = await self._client.post(url, json=body)
         response.raise_for_status()
         return response.json()
 
-    async def put(
-        self, path: str, body: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def put(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self._prefix}{path}"
         response = await self._client.put(url, json=body)
         response.raise_for_status()
         return response.json()
 
-    async def delete(
-        self, path: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    async def delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self._prefix}{path}"
         response = await self._client.delete(url, params=params)
         response.raise_for_status()

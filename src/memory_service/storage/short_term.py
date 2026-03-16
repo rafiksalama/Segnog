@@ -110,12 +110,17 @@ class ShortTermMemory:
         else:
             serialized = str(value)
 
-        await self._dragonfly.hset("state", {
-            key: json.dumps({
-                "value": serialized,
-                "updated_at": time.time(),
-            })
-        })
+        await self._dragonfly.hset(
+            "state",
+            {
+                key: json.dumps(
+                    {
+                        "value": serialized,
+                        "updated_at": time.time(),
+                    }
+                )
+            },
+        )
         logger.debug(f"Saved state: {key}")
 
     async def _get_state(self, key: str) -> Optional[Any]:
@@ -156,7 +161,8 @@ class ShortTermMemory:
             "content": data.get("content", data.get("data", data)),
             "timestamp": data.get("timestamp"),
             "metadata": {
-                k: v for k, v in data.items()
+                k: v
+                for k, v in data.items()
                 if k not in ("event_id", "type", "content", "timestamp", "data")
             },
         }

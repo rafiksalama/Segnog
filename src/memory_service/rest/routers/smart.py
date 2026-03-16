@@ -142,12 +142,12 @@ async def extract_relationships_endpoint(body: dict):
     return {
         "relationships": [
             {
-                "subject":      r["subject"],
+                "subject": r["subject"],
                 "subject_type": r["subject_type"],
-                "predicate":    r["predicate"],
-                "object":       r["object"],
-                "object_type":  r["object_type"],
-                "confidence":   r["confidence"],
+                "predicate": r["predicate"],
+                "object": r["object"],
+                "object_type": r["object_type"],
+                "confidence": r["confidence"],
             }
             for r in rels
         ]

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _get_ontology():
     from ..schema_org import get_shared_ontology
+
     return get_shared_ontology()
 
 
@@ -95,23 +96,29 @@ async def extract_relationships(
                 if not onto.validate_triple(subj_type, predicate, obj_type):
                     logger.debug(
                         "Dropping invalid triple: %s(%s) -[%s]-> %s(%s)",
-                        subject, subj_type, predicate, object_, obj_type,
+                        subject,
+                        subj_type,
+                        predicate,
+                        object_,
+                        obj_type,
                     )
                     continue
 
                 confidence = float(rel.confidence) if rel.confidence is not None else 1.0
                 confidence = max(0.0, min(1.0, confidence))
 
-                relationships.append({
-                    "subject":      subject,
-                    "subject_norm": subj_norm,
-                    "subject_type": subj_type,
-                    "predicate":    predicate,
-                    "object":       object_,
-                    "object_norm":  obj_norm,
-                    "object_type":  obj_type,
-                    "confidence":   confidence,
-                })
+                relationships.append(
+                    {
+                        "subject": subject,
+                        "subject_norm": subj_norm,
+                        "subject_type": subj_type,
+                        "predicate": predicate,
+                        "object": object_,
+                        "object_norm": obj_norm,
+                        "object_type": obj_type,
+                        "confidence": confidence,
+                    }
+                )
             except Exception as item_err:
                 logger.debug("Skipping malformed relationship entry: %s", item_err)
 

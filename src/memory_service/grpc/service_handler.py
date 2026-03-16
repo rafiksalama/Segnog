@@ -22,10 +22,10 @@ class MemoryServiceHandler:
 
     def __init__(
         self,
-        dragonfly,       # DragonflyClient
-        short_term,      # ShortTermMemory
-        episode_store,   # EpisodeStore
-        knowledge_store, # KnowledgeStore
+        dragonfly,  # DragonflyClient
+        short_term,  # ShortTermMemory
+        episode_store,  # EpisodeStore
+        knowledge_store,  # KnowledgeStore
         artifact_store,  # ArtifactStore
         ontology_store=None,  # OntologyStore (optional)
     ):
@@ -294,8 +294,10 @@ class MemoryServiceHandler:
                             continue
                     if tool_name not in tool_stats:
                         tool_stats[tool_name] = {
-                            "attempts": 0, "successes": 0,
-                            "failures": 0, "total_duration_ms": 0,
+                            "attempts": 0,
+                            "successes": 0,
+                            "failures": 0,
+                            "total_duration_ms": 0,
                         }
                     for field in ("attempts", "successes", "failures", "total_duration_ms"):
                         tool_stats[tool_name][field] += stat_data.get(field, 0)
@@ -322,7 +324,9 @@ class MemoryServiceHandler:
         for e in reversed(events):
             etype = e.get("type", "")
             data = e.get("data", {})
-            content = data.get("content", str(data)[:200]) if isinstance(data, dict) else str(data)[:200]
+            content = (
+                data.get("content", str(data)[:200]) if isinstance(data, dict) else str(data)[:200]
+            )
             lines.append(f"[{etype}] {content}")
 
         formatted = "\n".join(lines) if lines else "No recent events."
@@ -334,6 +338,7 @@ class MemoryServiceHandler:
 
     async def reinterpret_task(self, req: dict) -> dict:
         from ..smart.reinterpret import reinterpret_task
+
         result = await reinterpret_task(
             task=req.get("task", ""),
             model=req.get("model") or None,
@@ -346,6 +351,7 @@ class MemoryServiceHandler:
 
     async def filter_memory(self, req: dict) -> dict:
         from ..smart.filter import filter_memory_results
+
         result = await filter_memory_results(
             task=req.get("task", ""),
             search_results=req.get("search_results", ""),
@@ -356,6 +362,7 @@ class MemoryServiceHandler:
 
     async def infer_state_op(self, req: dict) -> dict:
         from ..smart.infer_state import infer_state
+
         result = await infer_state(
             task=req.get("task", ""),
             retrieved_memories=req.get("retrieved_memories", ""),
@@ -365,6 +372,7 @@ class MemoryServiceHandler:
 
     async def synthesize_background_op(self, req: dict) -> dict:
         from ..smart.synthesize import synthesize_background
+
         self._apply_scope(req, self._episode_store)
         result = await synthesize_background(
             task=req.get("task", ""),
@@ -380,6 +388,7 @@ class MemoryServiceHandler:
 
     async def generate_reflection_op(self, req: dict) -> dict:
         from ..smart.reflect import generate_reflection
+
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
@@ -388,6 +397,7 @@ class MemoryServiceHandler:
 
     async def extract_knowledge_op(self, req: dict) -> dict:
         from ..smart.extract_knowledge import extract_knowledge
+
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
@@ -402,6 +412,7 @@ class MemoryServiceHandler:
 
     async def extract_artifacts_op(self, req: dict) -> dict:
         from ..smart.extract_artifacts import extract_artifacts
+
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
@@ -413,6 +424,7 @@ class MemoryServiceHandler:
 
     async def compress_events_op(self, req: dict) -> dict:
         from ..smart.compress import compress_events
+
         self._apply_scope(req)
         result = await compress_events(
             short_term_memory=self._short_term,
@@ -468,7 +480,10 @@ class MemoryServiceHandler:
         import asyncio
 
         self._apply_scope(
-            req, self._episode_store, self._knowledge_store, self._artifact_store,
+            req,
+            self._episode_store,
+            self._knowledge_store,
+            self._artifact_store,
         )
         task = req.get("task", "")
         model = req.get("model") or None
@@ -478,6 +493,7 @@ class MemoryServiceHandler:
         search_query = task
         try:
             from ..smart.reinterpret import reinterpret_task
+
             reinterpretation = await reinterpret_task(task=task, model=model)
             search_labels = reinterpretation.get("search_labels", [])
             search_query = reinterpretation.get("search_query", task)
@@ -492,7 +508,9 @@ class MemoryServiceHandler:
         long_term_context = ""
         try:
             results = await self._episode_store.search_episodes(
-                query=search_query, top_k=10, min_score=0.55,
+                query=search_query,
+                top_k=10,
+                min_score=0.55,
             )
             if results:
                 lines = ["## Related Memory (Episode Search)"]
@@ -512,7 +530,10 @@ class MemoryServiceHandler:
         async def _search_knowledge():
             try:
                 results = await self._knowledge_store.search_hybrid(
-                    query=search_query, labels=search_labels, top_k=10, min_score=0.40,
+                    query=search_query,
+                    labels=search_labels,
+                    top_k=10,
+                    min_score=0.40,
                 )
                 if not results:
                     return ""
@@ -541,7 +562,10 @@ class MemoryServiceHandler:
         async def _search_artifacts():
             try:
                 results = await self._artifact_store.search_hybrid(
-                    query=search_query, labels=search_labels, top_k=8, min_score=0.45,
+                    query=search_query,
+                    labels=search_labels,
+                    top_k=8,
+                    min_score=0.45,
                 )
                 if not results:
                     return ""
@@ -572,13 +596,15 @@ class MemoryServiceHandler:
                 return ""
 
         knowledge_context, artifacts_context = await asyncio.gather(
-            _search_knowledge(), _search_artifacts(),
+            _search_knowledge(),
+            _search_artifacts(),
         )
 
         # Step 3: LLM filter on episode results
         if long_term_context:
             try:
                 from ..smart.filter import filter_memory_results
+
                 long_term_context = await filter_memory_results(
                     task=task,
                     search_results=long_term_context,
@@ -601,8 +627,11 @@ class MemoryServiceHandler:
         inferred_state = ""
         try:
             from ..smart.infer_state import infer_state
+
             inferred_state = await infer_state(
-                task=task, retrieved_memories=long_term_context, model=model,
+                task=task,
+                retrieved_memories=long_term_context,
+                model=model,
             )
         except Exception as e:
             logger.warning(f"State inference failed (non-critical): {e}")
@@ -611,6 +640,7 @@ class MemoryServiceHandler:
         background_narrative = ""
         try:
             from ..smart.synthesize import synthesize_background
+
             result = await synthesize_background(
                 task=task,
                 long_term_context=long_term_context,
@@ -651,7 +681,10 @@ class MemoryServiceHandler:
           7. Compress old raw events
         """
         self._apply_scope(
-            req, self._episode_store, self._knowledge_store, self._artifact_store,
+            req,
+            self._episode_store,
+            self._knowledge_store,
+            self._artifact_store,
         )
         model = req.get("model") or None
 
@@ -669,6 +702,7 @@ class MemoryServiceHandler:
         reflection = ""
         try:
             from ..smart.reflect import generate_reflection
+
             reflection = await generate_reflection(mission_data, model=model)
             logger.info(f"Generated reflection: {len(reflection)} chars")
         except Exception as e:
@@ -710,6 +744,7 @@ class MemoryServiceHandler:
         knowledge_entries = []
         try:
             from ..smart.extract_knowledge import extract_knowledge
+
             data_source_type = mission_data.get("data_source_type", "mission")
             knowledge_entries = await extract_knowledge(
                 mission_data=mission_data,
@@ -740,6 +775,7 @@ class MemoryServiceHandler:
         artifact_entries = []
         try:
             from ..smart.extract_artifacts import extract_artifacts
+
             artifact_entries = await extract_artifacts(
                 mission_data=mission_data,
                 model=model,
@@ -767,6 +803,7 @@ class MemoryServiceHandler:
         events_compressed = False
         try:
             from ..smart.compress import compress_events
+
             state = mission_data.get("state", {})
             state_desc = state.get("state_description", "") if isinstance(state, dict) else ""
             result = await compress_events(

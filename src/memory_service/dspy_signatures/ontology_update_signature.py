@@ -16,14 +16,15 @@ import dspy
 
 class OntologyUpdateResult(BaseModel):
     """Updated entity summary."""
+
     updated_summary: Optional[str] = Field(
         default=None,
         description="Complete, updated prose summary of everything known about this entity. "
-                    "MUST integrate all facts from the existing summary AND all new information "
-                    "from the episode text. Never remove facts from the existing summary. "
-                    "Write in third person, present tense for ongoing facts, past tense for events. "
-                    "Be specific: include names, dates, places, roles. 2-8 sentences. "
-                    "ONLY include facts mentioned in the provided texts — do not invent anything."
+        "MUST integrate all facts from the existing summary AND all new information "
+        "from the episode text. Never remove facts from the existing summary. "
+        "Write in third person, present tense for ongoing facts, past tense for events. "
+        "Be specific: include names, dates, places, roles. 2-8 sentences. "
+        "ONLY include facts mentioned in the provided texts — do not invent anything.",
     )
 
 
@@ -64,25 +65,25 @@ class OntologyNodeUpdateSignature(dspy.Signature):
 
     entity_name: str = dspy.InputField(
         desc="The display name of the entity being summarized "
-             "(e.g., 'Marco Bellini', 'Riverside Medical Center', 'The Silence of Glaciers')"
+        "(e.g., 'Marco Bellini', 'Riverside Medical Center', 'The Silence of Glaciers')"
     )
 
     schema_type: str = dspy.InputField(
         desc="Most specific Schema.org class of the entity "
-             "(e.g., 'Person', 'Hospital', 'Corporation', 'Movie', 'Festival', 'MusicGroup', 'City')"
+        "(e.g., 'Person', 'Hospital', 'Corporation', 'Movie', 'Festival', 'MusicGroup', 'City')"
     )
 
     existing_summary: str = dspy.InputField(
         desc="Current prose summary of the entity. Empty string if this is the first update. "
-             "PRESERVE every fact here — never remove or contradict them."
+        "PRESERVE every fact here — never remove or contradict them."
     )
 
     new_episode_text: str = dspy.InputField(
         desc="New episode text. Extract all facts about the entity_name from here and add to the summary. "
-             "If entity_name is not mentioned, return the existing_summary unchanged."
+        "If entity_name is not mentioned, return the existing_summary unchanged."
     )
 
     result: OntologyUpdateResult = dspy.OutputField(
         desc="Updated prose summary integrating all known information about the entity. "
-             "Only facts from existing_summary and new_episode_text. No hallucinations."
+        "Only facts from existing_summary and new_episode_text. No hallucinations."
     )

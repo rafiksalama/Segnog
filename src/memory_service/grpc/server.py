@@ -96,6 +96,7 @@ class GenericServicer(grpc.GenericRpcHandler):
             except Exception as e:
                 logger.error(f"gRPC handler error: {e}", exc_info=True)
                 await context.abort(grpc.StatusCode.INTERNAL, str(e))
+
         return handler
 
 

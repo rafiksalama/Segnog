@@ -151,10 +151,7 @@ class ArtifactStore(BaseStore):
 
             uuids.append(artifact_uuid)
 
-        logger.info(
-            f"Stored {len(uuids)} artifact entries "
-            f"(mission: {source_mission[:40]}...)"
-        )
+        logger.info(f"Stored {len(uuids)} artifact entries (mission: {source_mission[:40]}...)")
         return uuids
 
     async def get_by_uuid(self, artifact_uuid: str) -> Optional[Dict[str, Any]]:
@@ -218,9 +215,7 @@ class ArtifactStore(BaseStore):
         """Vector similarity search on Artifact embeddings."""
         query_embedding = await self._embed(query)
 
-        type_filter = (
-            "AND a.artifact_type = $artifact_type" if artifact_type else ""
-        )
+        type_filter = "AND a.artifact_type = $artifact_type" if artifact_type else ""
 
         cypher = f"""
             MATCH (a:Artifact)
@@ -269,9 +264,7 @@ class ArtifactStore(BaseStore):
         3. final_score = vector_score + (label_boost * label_match_ratio)
         4. Re-rank by final_score, return top_k
         """
-        candidates = await self.search_by_vector(
-            query, top_k=top_k * 2, min_score=min_score
-        )
+        candidates = await self.search_by_vector(query, top_k=top_k * 2, min_score=min_score)
 
         if not candidates:
             return []
@@ -311,4 +304,3 @@ class ArtifactStore(BaseStore):
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
-

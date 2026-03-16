@@ -135,7 +135,9 @@ class KnowledgeStore(BaseStore):
             if similar_uuid and similar_score >= 0.90:
                 logger.debug(
                     "Knowledge dedup: skipping '%s...' (similar=%.3f to %s)",
-                    entry.get("content", "")[:40], similar_score, similar_uuid[:8],
+                    entry.get("content", "")[:40],
+                    similar_score,
+                    similar_uuid[:8],
                 )
                 if source_episode_uuid:
                     try:
@@ -229,10 +231,7 @@ class KnowledgeStore(BaseStore):
 
             uuids.append(knowledge_uuid)
 
-        logger.info(
-            f"Stored {len(uuids)} knowledge entries "
-            f"(mission: {source_mission[:40]}...)"
-        )
+        logger.info(f"Stored {len(uuids)} knowledge entries (mission: {source_mission[:40]}...)")
         return uuids
 
     async def search_by_vector(
@@ -246,10 +245,10 @@ class KnowledgeStore(BaseStore):
         """Vector similarity search on Knowledge embeddings."""
         query_embedding = await self._embed(query)
 
-        type_filter = (
-            "AND k.knowledge_type = $knowledge_type" if knowledge_type else ""
+        type_filter = "AND k.knowledge_type = $knowledge_type" if knowledge_type else ""
+        embedding_return = (
+            ",\n                k.embedding AS embedding" if include_embedding else ""
         )
-        embedding_return = ",\n                k.embedding AS embedding" if include_embedding else ""
 
         cypher = f"""
             MATCH (k:Knowledge)
@@ -286,8 +285,10 @@ class KnowledgeStore(BaseStore):
         # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
         from ..scoring import apply_temporal_score, apply_hebbian_score
         from ..config import (
-            get_knowledge_half_life, get_knowledge_alpha,
-            get_hebbian_enabled, get_hebbian_beta_knowledge,
+            get_knowledge_half_life,
+            get_knowledge_alpha,
+            get_hebbian_enabled,
+            get_hebbian_beta_knowledge,
         )
 
         if get_hebbian_enabled():
@@ -448,6 +449,7 @@ class KnowledgeStore(BaseStore):
 
         # Optional temporal filter (non-temporal knowledge passes through)
         if start_date or end_date:
+
             def _in_date_range(c):
                 ed = c.get("event_date", "")
                 if not ed:
@@ -457,8 +459,8 @@ class KnowledgeStore(BaseStore):
                 if end_date and ed > end_date:
                     return False
                 return True
+
             candidates = [c for c in candidates if _in_date_range(c)]
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
-

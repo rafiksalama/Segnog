@@ -135,7 +135,10 @@ class DragonflyClient:
 
         try:
             entries = await self._client.xrevrange(
-                self.stream_key, "+", "-", count=count,
+                self.stream_key,
+                "+",
+                "-",
+                count=count,
             )
 
             events = []
@@ -232,13 +235,15 @@ class DragonflyClient:
             return
         try:
             key = f"session:{session_id}"
-            value = json.dumps({
-                "content": content,
-                "embedding": embedding,
-                "metadata": metadata,
-                "source_type": source_type,
-                "created_at": time.time(),
-            })
+            value = json.dumps(
+                {
+                    "content": content,
+                    "embedding": embedding,
+                    "metadata": metadata,
+                    "source_type": source_type,
+                    "created_at": time.time(),
+                }
+            )
             await self._client.hset(key, entry_uuid, value)
             await self._client.expire(key, self._session_ttl)
         except Exception as e:
@@ -278,14 +283,16 @@ class DragonflyClient:
                 continue
             score = float(np.dot(query_vec, emb) / (query_norm * emb_norm))
             if score >= min_score:
-                results.append({
-                    "uuid": entry_uuid,
-                    "content": entry["content"],
-                    "metadata": entry.get("metadata", {}),
-                    "source_type": entry.get("source_type", "local"),
-                    "created_at": entry.get("created_at", 0),
-                    "score": score,
-                })
+                results.append(
+                    {
+                        "uuid": entry_uuid,
+                        "content": entry["content"],
+                        "metadata": entry.get("metadata", {}),
+                        "source_type": entry.get("source_type", "local"),
+                        "created_at": entry.get("created_at", 0),
+                        "score": score,
+                    }
+                )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
@@ -338,7 +345,6 @@ class DragonflyClient:
             self.group_id = group_id
         if workflow_id:
             self.workflow_id = workflow_id
-
 
 
 async def create_dragonfly_client(

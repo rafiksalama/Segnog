@@ -13,46 +13,48 @@ import dspy
 
 class ArtifactEntryModel(BaseModel):
     """A single extracted artifact entry."""
+
     name: str = Field(
         description="Filename or short identifier. Examples: 'report.pdf', "
-                    "'search_results.json', 'analysis_output.md'. Keep concise."
+        "'search_results.json', 'analysis_output.md'. Keep concise."
     )
     artifact_type: str = Field(
         description="One of: 'file' (general saved file), 'download' (fetched from web), "
-                    "'report' (generated analysis/report), 'dataset' (extracted/compiled data), "
-                    "'code' (generated code/script)"
+        "'report' (generated analysis/report), 'dataset' (extracted/compiled data), "
+        "'code' (generated code/script)"
     )
     path: str = Field(
         description="File system path or URL where the artifact exists. "
-                    "Extract from tool outputs (write-file paths, download URLs, etc). "
-                    "If no explicit path found, use the best available identifier."
+        "Extract from tool outputs (write-file paths, download URLs, etc). "
+        "If no explicit path found, use the best available identifier."
     )
     description: str = Field(
         description="What this artifact contains and why it was created. "
-                    "1-3 sentences, specific and self-contained. Include key details "
-                    "like data format, row counts, topics covered."
+        "1-3 sentences, specific and self-contained. Include key details "
+        "like data format, row counts, topics covered."
     )
     labels: List[str] = Field(
         description="3-7 semantic labels for retrieval. Lowercase, hyphenated. "
-                    "Include: content topic ('financial-analysis'), format ('pdf', 'csv'), "
-                    "domain ('machine-learning'), tool used ('web-search'), "
-                    "artifact kind ('report', 'dataset'). "
-                    "Be specific: 'stock-price-data' not just 'data'."
+        "Include: content topic ('financial-analysis'), format ('pdf', 'csv'), "
+        "domain ('machine-learning'), tool used ('web-search'), "
+        "artifact kind ('report', 'dataset'). "
+        "Be specific: 'stock-price-data' not just 'data'."
     )
     reasoning: str = Field(
         description="Brief explanation of how this artifact was identified in the "
-                    "mission data. 1 sentence."
+        "mission data. 1 sentence."
     )
 
 
 class ArtifactExtractionResult(BaseModel):
     """Structured result from artifact extraction."""
+
     entries: List[ArtifactEntryModel] = Field(
         description="Extracted artifact entries. Only include TANGIBLE outputs: "
-                    "files saved to disk, content downloaded, reports generated, "
-                    "datasets compiled. Do NOT include ephemeral tool outputs or "
-                    "intermediate reasoning. If no artifacts were produced, return "
-                    "an empty list."
+        "files saved to disk, content downloaded, reports generated, "
+        "datasets compiled. Do NOT include ephemeral tool outputs or "
+        "intermediate reasoning. If no artifacts were produced, return "
+        "an empty list."
     )
 
 
@@ -86,14 +88,10 @@ class ArtifactExtractionSignature(dspy.Signature):
     )
     execution_trace: str = dspy.InputField(
         desc="Complete execution trace: all tool calls with their full outputs, "
-             "file operations, downloads, and any file paths mentioned"
+        "file operations, downloads, and any file paths mentioned"
     )
-    plan_execution: str = dspy.InputField(
-        desc="The execution plan with status of each step"
-    )
-    full_report: str = dspy.InputField(
-        desc="The agent's complete final output/report"
-    )
+    plan_execution: str = dspy.InputField(desc="The execution plan with status of each step")
+    full_report: str = dspy.InputField(desc="The agent's complete final output/report")
 
     extraction: ArtifactExtractionResult = dspy.OutputField(
         desc="List of tangible artifacts produced during the mission"

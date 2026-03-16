@@ -17,87 +17,92 @@ import dspy
 # Pydantic Output Models
 # =========================================================================
 
+
 class KnowledgeEntryModel(BaseModel):
     """A single extracted knowledge entry."""
+
     content: str = Field(
         description="The knowledge statement: specific, actionable, 1-3 sentences. "
-                    "Include concrete details (numbers, names, dates, methods, URLs) — "
-                    "not vague summaries. "
-                    "CRITICAL: if the source uses relative time ('last week', 'yesterday', "
-                    "'last month'), resolve it using the session header date and write the "
-                    "resolved date explicitly in this field. "
-                    "Example: session date is 15 March 2024, source says 'we met up last week' "
-                    "→ write 'the team met up the week before 15 March 2024 "
-                    "(approximately 8–14 March 2024)'."
+        "Include concrete details (numbers, names, dates, methods, URLs) — "
+        "not vague summaries. "
+        "CRITICAL: if the source uses relative time ('last week', 'yesterday', "
+        "'last month'), resolve it using the session header date and write the "
+        "resolved date explicitly in this field. "
+        "Example: session date is 15 March 2024, source says 'we met up last week' "
+        "→ write 'the team met up the week before 15 March 2024 "
+        "(approximately 8–14 March 2024)'."
     )
     knowledge_type: str = Field(
         description="One of: "
-                    "'event' (ANYTHING that happened or will happen at a specific time — "
-                    "use this even for brief single-sentence mentions like 'we met up last week' "
-                    "or 'I went to X yesterday'; do NOT collapse events into pattern or relationship), "
-                    "'fact' (concrete, verifiable personal detail with no specific time), "
-                    "'pattern' (ONLY for behaviors observed recurring across MULTIPLE separate instances), "
-                    "'tool_insight' (tool effectiveness/usage), "
-                    "'experience' (lesson learned from a completed activity), "
-                    "'conclusion' (high-level synthesized takeaway), "
-                    "'preference' (stated like/dislike, e.g. 'prefers dark mode'), "
-                    "'relationship' (connection between people, e.g. 'X is Y\\'s sister'; "
-                    "do NOT use for time-bound events involving people), "
-                    "'identity' (who someone is, their role, characteristics), "
-                    "'temporal_fact' (recurring fact with no single date, e.g. 'yoga every Tuesday')"
+        "'event' (ANYTHING that happened or will happen at a specific time — "
+        "use this even for brief single-sentence mentions like 'we met up last week' "
+        "or 'I went to X yesterday'; do NOT collapse events into pattern or relationship), "
+        "'fact' (concrete, verifiable personal detail with no specific time), "
+        "'pattern' (ONLY for behaviors observed recurring across MULTIPLE separate instances), "
+        "'tool_insight' (tool effectiveness/usage), "
+        "'experience' (lesson learned from a completed activity), "
+        "'conclusion' (high-level synthesized takeaway), "
+        "'preference' (stated like/dislike, e.g. 'prefers dark mode'), "
+        "'relationship' (connection between people, e.g. 'X is Y\\'s sister'; "
+        "do NOT use for time-bound events involving people), "
+        "'identity' (who someone is, their role, characteristics), "
+        "'temporal_fact' (recurring fact with no single date, e.g. 'yoga every Tuesday')"
     )
     labels: List[str] = Field(
         description="5-15 semantic labels for retrieval. Lowercase, hyphenated. Include:\n"
-                    "- Domain terms: 'cardiology', 'documentary-film', 'software-engineering', "
-                    "'tax-filing', 'neuroscience', 'restaurant-industry'\n"
-                    "- Entity names: 'alex-rivera', 'helix-systems', 'riverside-medical', "
-                    "'marco-bellini', 'lighthouse-films', 'westbrook-university'\n"
-                    "- Tool names: 'web-search', 'scholar-search', 'code-execution'\n"
-                    "- Methodologies: 'parallel-research', 'sequential-workflow'\n"
-                    "- Topics: 'pricing', 'diagnosis', 'film-production', 'how-to', 'health'\n"
-                    "- Temporal markers: 'weekly', 'spring-2024', 'march-2024', 'deadline'\n"
-                    "Be specific: 'python-asyncio' not 'programming', "
-                    "'cardiac-surgery' not 'medicine'. "
-                    "More labels means better retrieval — be generous."
+        "- Domain terms: 'cardiology', 'documentary-film', 'software-engineering', "
+        "'tax-filing', 'neuroscience', 'restaurant-industry'\n"
+        "- Entity names: 'alex-rivera', 'helix-systems', 'riverside-medical', "
+        "'marco-bellini', 'lighthouse-films', 'westbrook-university'\n"
+        "- Tool names: 'web-search', 'scholar-search', 'code-execution'\n"
+        "- Methodologies: 'parallel-research', 'sequential-workflow'\n"
+        "- Topics: 'pricing', 'diagnosis', 'film-production', 'how-to', 'health'\n"
+        "- Temporal markers: 'weekly', 'spring-2024', 'march-2024', 'deadline'\n"
+        "Be specific: 'python-asyncio' not 'programming', "
+        "'cardiac-surgery' not 'medicine'. "
+        "More labels means better retrieval — be generous."
     )
     confidence: float = Field(
-        ge=0.0, le=1.0,
+        ge=0.0,
+        le=1.0,
         description="Confidence in this knowledge: 0.0 (speculative) to 1.0 (verified fact). "
-                    "Lower for inferences, higher for directly stated information."
+        "Lower for inferences, higher for directly stated information.",
     )
     event_date: Optional[str] = Field(
         default=None,
         description="ISO 8601 date (YYYY-MM-DD) when the fact/event occurred or will occur. "
-                    "ALWAYS populate this for 'event' entries — never leave it null for events. "
-                    "Each session starts with a header like 'Session N — 7:55 pm on 15 March, 2024' — "
-                    "use that date as the anchor to resolve relative references: "
-                    "'last week' from a 15 March 2024 session → 2024-03-08; "
-                    "'yesterday' from a 15 March 2024 session → 2024-03-14; "
-                    "'last month' from a 15 March 2024 session → 2024-02-01; "
-                    "'3 years ago' from a 15 March 2024 session → 2021-03-15. "
-                    "If the event has no specific date at all, use the session header date itself. "
-                    "Use null ONLY for 'pattern', 'preference', 'relationship', 'identity', "
-                    "'conclusion', and 'temporal_fact' types where no date applies."
+        "ALWAYS populate this for 'event' entries — never leave it null for events. "
+        "Each session starts with a header like 'Session N — 7:55 pm on 15 March, 2024' — "
+        "use that date as the anchor to resolve relative references: "
+        "'last week' from a 15 March 2024 session → 2024-03-08; "
+        "'yesterday' from a 15 March 2024 session → 2024-03-14; "
+        "'last month' from a 15 March 2024 session → 2024-02-01; "
+        "'3 years ago' from a 15 March 2024 session → 2021-03-15. "
+        "If the event has no specific date at all, use the session header date itself. "
+        "Use null ONLY for 'pattern', 'preference', 'relationship', 'identity', "
+        "'conclusion', and 'temporal_fact' types where no date applies.",
     )
     reasoning: str = Field(
         description="Brief explanation of why this knowledge is valuable and how it was "
-                    "derived from the source data. 1-2 sentences."
+        "derived from the source data. 1-2 sentences."
     )
 
 
 class KnowledgeExtractionResult(BaseModel):
     """Structured result from knowledge extraction."""
+
     entries: List[KnowledgeEntryModel] = Field(
         description="Extracted knowledge entries. Extract ALL valuable knowledge — "
-                    "err on the side of more entries rather than fewer. "
-                    "Every event mentioned, every preference stated, every relationship "
-                    "described must appear as its own entry. Do not merge or omit."
+        "err on the side of more entries rather than fewer. "
+        "Every event mentioned, every preference stated, every relationship "
+        "described must appear as its own entry. Do not merge or omit."
     )
 
 
 # =========================================================================
 # DSPy Signature
 # =========================================================================
+
 
 class KnowledgeExtractionSignature(dspy.Signature):
     """You are a knowledge extraction specialist. Your job is to mine source data
@@ -160,31 +165,25 @@ class KnowledgeExtractionSignature(dspy.Signature):
 
     data_source_type: str = dspy.InputField(
         desc="Type of source data: 'mission' (agent task execution with tool calls, "
-             "plans, and execution trace) or 'conversation' (dialogue between people). "
-             "Adjusts extraction focus accordingly."
+        "plans, and execution trace) or 'conversation' (dialogue between people). "
+        "Adjusts extraction focus accordingly."
     )
-    mission_task: str = dspy.InputField(
-        desc="The original task/question or conversation topic"
-    )
+    mission_task: str = dspy.InputField(desc="The original task/question or conversation topic")
     mission_outcome: str = dspy.InputField(
         desc="Outcome summary: mission status + iterations, or conversation summary"
     )
-    full_report: str = dspy.InputField(
-        desc="The complete output/report or full conversation text"
-    )
+    full_report: str = dspy.InputField(desc="The complete output/report or full conversation text")
     execution_trace: str = dspy.InputField(
         desc="Execution trace (tool calls, reasoning steps) or conversation context"
     )
     plan_execution: str = dspy.InputField(
         desc="Plan with step statuses, or 'N/A' for conversations"
     )
-    reflection: str = dspy.InputField(
-        desc="Post-completion reflection or summary analysis"
-    )
+    reflection: str = dspy.InputField(desc="Post-completion reflection or summary analysis")
 
     extraction: KnowledgeExtractionResult = dspy.OutputField(
         desc="Exhaustive list of extracted knowledge entries with semantic labels "
-             "and optional event_date for temporally-anchored knowledge"
+        "and optional event_date for temporally-anchored knowledge"
     )
 
 
@@ -192,34 +191,36 @@ class KnowledgeExtractionSignature(dspy.Signature):
 # Task Reinterpretation (pre-mission knowledge retrieval)
 # =========================================================================
 
+
 class TaskReinterpretationResult(BaseModel):
     """Structured reinterpretation of a user's task for knowledge retrieval."""
+
     reinterpreted_task: str = Field(
         description="Expanded, unambiguous restatement of what the user is asking for. "
-                    "Resolve implicit references, fill in context, make the intent explicit. "
-                    "2-4 sentences."
+        "Resolve implicit references, fill in context, make the intent explicit. "
+        "2-4 sentences."
     )
     search_query: str = Field(
         description="Optimized search query for vector similarity search against "
-                    "a knowledge graph. Should capture the core semantic meaning. "
-                    "1-2 sentences, keyword-rich."
+        "a knowledge graph. Should capture the core semantic meaning. "
+        "1-2 sentences, keyword-rich."
     )
     search_labels: List[str] = Field(
         description="10-25 semantic labels for knowledge graph retrieval. Lowercase, "
-                    "hyphenated. Cast a WIDE net — include:\n"
-                    "- Direct topic labels: the specific subject matter\n"
-                    "- Related domain labels: adjacent or parent topics\n"
-                    "- Methodology labels: likely approaches (web-search, comparison, etc.)\n"
-                    "- Tool labels: tools that might be useful (web-search, fetch-url, etc.)\n"
-                    "- Task-type labels: what kind of task this is (research, how-to, fact-check)\n"
-                    "- Broader category labels: the field or discipline\n"
-                    "Examples: 'france', 'geography', 'capital-cities', 'europe', "
-                    "'country-facts', 'web-search', 'factual-query', 'quick-lookup'"
+        "hyphenated. Cast a WIDE net — include:\n"
+        "- Direct topic labels: the specific subject matter\n"
+        "- Related domain labels: adjacent or parent topics\n"
+        "- Methodology labels: likely approaches (web-search, comparison, etc.)\n"
+        "- Tool labels: tools that might be useful (web-search, fetch-url, etc.)\n"
+        "- Task-type labels: what kind of task this is (research, how-to, fact-check)\n"
+        "- Broader category labels: the field or discipline\n"
+        "Examples: 'france', 'geography', 'capital-cities', 'europe', "
+        "'country-facts', 'web-search', 'factual-query', 'quick-lookup'"
     )
     complexity_assessment: str = Field(
         description="Brief assessment of task complexity: 'trivial' (direct recall), "
-                    "'simple' (1-2 tool calls), 'moderate' (multi-step research), "
-                    "'complex' (multi-agent delegation). One word."
+        "'simple' (1-2 tool calls), 'moderate' (multi-step research), "
+        "'complex' (multi-agent delegation). One word."
     )
 
 
@@ -248,5 +249,5 @@ class TaskReinterpretationSignature(dspy.Signature):
 
     analysis: TaskReinterpretationResult = dspy.OutputField(
         desc="Structured task analysis with reinterpretation, search labels, "
-             "optimized query, and complexity assessment"
+        "optimized query, and complexity assessment"
     )

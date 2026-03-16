@@ -25,11 +25,13 @@ def _format_entries(entries: Dict[str, Any]) -> str:
     """Format session entries as numbered text for the LLM prompt."""
     items = []
     for uuid, entry in entries.items():
-        items.append({
-            "content": entry.get("content", ""),
-            "source_type": entry.get("source_type", "local"),
-            "created_at": entry.get("created_at", 0),
-        })
+        items.append(
+            {
+                "content": entry.get("content", ""),
+                "source_type": entry.get("source_type", "local"),
+                "created_at": entry.get("created_at", 0),
+            }
+        )
 
     items.sort(key=lambda x: x["created_at"])
 
@@ -68,7 +70,9 @@ async def summarize_context(
 
     try:
         lm = configure_dspy_lm(
-            model=model, temperature=0.2, max_tokens=20000,
+            model=model,
+            temperature=0.2,
+            max_tokens=20000,
         )
         predictor = dspy.Predict(ContextSummarizationSignature)
 

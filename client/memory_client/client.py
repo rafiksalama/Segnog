@@ -93,21 +93,27 @@ class MemoryClient:
     ) -> str:
         """Log an event. Returns event_id."""
         if self._is_grpc:
-            resp = await self._transport.call("LogEvent", {
-                "scope": self._scope,
-                "event_type": event_type,
-                "event_data_json": json.dumps(event_data),
-                "context": context or "",
-            })
+            resp = await self._transport.call(
+                "LogEvent",
+                {
+                    "scope": self._scope,
+                    "event_type": event_type,
+                    "event_data_json": json.dumps(event_data),
+                    "context": context or "",
+                },
+            )
             return resp.get("event_id", "")
         else:
-            resp = await self._transport.post("/events", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "event_type": event_type,
-                "event_data": event_data,
-                "context": context,
-            })
+            resp = await self._transport.post(
+                "/events",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "event_type": event_type,
+                    "event_data": event_data,
+                    "context": context,
+                },
+            )
             return resp.get("event_id", "")
 
     async def get_recent_events(
@@ -117,11 +123,14 @@ class MemoryClient:
     ) -> List[Dict[str, Any]]:
         """Get recent events."""
         if self._is_grpc:
-            resp = await self._transport.call("GetRecentEvents", {
-                "scope": self._scope,
-                "count": count,
-                "event_type_filter": event_type or "",
-            })
+            resp = await self._transport.call(
+                "GetRecentEvents",
+                {
+                    "scope": self._scope,
+                    "count": count,
+                    "event_type_filter": event_type or "",
+                },
+            )
             return resp.get("events", [])
         else:
             params = {
@@ -146,20 +155,26 @@ class MemoryClient:
     ) -> str:
         """Store an episode. Returns UUID."""
         if self._is_grpc:
-            resp = await self._transport.call("StoreEpisode", {
-                "scope": self._scope,
-                "content": content,
-                "metadata_json": json.dumps(metadata or {}),
-                "episode_type": episode_type,
-            })
+            resp = await self._transport.call(
+                "StoreEpisode",
+                {
+                    "scope": self._scope,
+                    "content": content,
+                    "metadata_json": json.dumps(metadata or {}),
+                    "episode_type": episode_type,
+                },
+            )
             return resp.get("uuid", "")
         else:
-            resp = await self._transport.post("/episodes", {
-                "group_id": self._group_id,
-                "content": content,
-                "metadata": metadata,
-                "episode_type": episode_type,
-            })
+            resp = await self._transport.post(
+                "/episodes",
+                {
+                    "group_id": self._group_id,
+                    "content": content,
+                    "metadata": metadata,
+                    "episode_type": episode_type,
+                },
+            )
             return resp.get("uuid", "")
 
     async def search_episodes(
@@ -171,22 +186,28 @@ class MemoryClient:
     ) -> List[Dict[str, Any]]:
         """Search episodes by vector similarity."""
         if self._is_grpc:
-            resp = await self._transport.call("SearchEpisodes", {
-                "scope": self._scope,
-                "query": query,
-                "top_k": top_k,
-                "min_score": min_score,
-                "episode_type_filter": episode_type or "",
-            })
+            resp = await self._transport.call(
+                "SearchEpisodes",
+                {
+                    "scope": self._scope,
+                    "query": query,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                    "episode_type_filter": episode_type or "",
+                },
+            )
             return resp.get("episodes", [])
         else:
-            resp = await self._transport.post("/episodes/search", {
-                "group_id": self._group_id,
-                "query": query,
-                "top_k": top_k,
-                "min_score": min_score,
-                "episode_type_filter": episode_type,
-            })
+            resp = await self._transport.post(
+                "/episodes/search",
+                {
+                    "group_id": self._group_id,
+                    "query": query,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                    "episode_type_filter": episode_type,
+                },
+            )
             return resp.get("episodes", [])
 
     # =========================================================================
@@ -202,22 +223,28 @@ class MemoryClient:
     ) -> List[str]:
         """Store knowledge entries. Returns list of UUIDs."""
         if self._is_grpc:
-            resp = await self._transport.call("StoreKnowledge", {
-                "scope": self._scope,
-                "entries": entries,
-                "source_mission": source_mission,
-                "mission_status": mission_status,
-                "source_episode_uuid": source_episode_uuid,
-            })
+            resp = await self._transport.call(
+                "StoreKnowledge",
+                {
+                    "scope": self._scope,
+                    "entries": entries,
+                    "source_mission": source_mission,
+                    "mission_status": mission_status,
+                    "source_episode_uuid": source_episode_uuid,
+                },
+            )
             return resp.get("uuids", [])
         else:
-            resp = await self._transport.post("/knowledge", {
-                "group_id": self._group_id,
-                "entries": entries,
-                "source_mission": source_mission,
-                "mission_status": mission_status,
-                "source_episode_uuid": source_episode_uuid,
-            })
+            resp = await self._transport.post(
+                "/knowledge",
+                {
+                    "group_id": self._group_id,
+                    "entries": entries,
+                    "source_mission": source_mission,
+                    "mission_status": mission_status,
+                    "source_episode_uuid": source_episode_uuid,
+                },
+            )
             return resp.get("uuids", [])
 
     async def search_knowledge(
@@ -229,22 +256,28 @@ class MemoryClient:
     ) -> List[Dict[str, Any]]:
         """Hybrid search: vector + label boosting."""
         if self._is_grpc:
-            resp = await self._transport.call("SearchKnowledge", {
-                "scope": self._scope,
-                "query": query,
-                "labels": labels or [],
-                "top_k": top_k,
-                "min_score": min_score,
-            })
+            resp = await self._transport.call(
+                "SearchKnowledge",
+                {
+                    "scope": self._scope,
+                    "query": query,
+                    "labels": labels or [],
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
             return resp.get("entries", [])
         else:
-            resp = await self._transport.post("/knowledge/search", {
-                "group_id": self._group_id,
-                "query": query,
-                "labels": labels or [],
-                "top_k": top_k,
-                "min_score": min_score,
-            })
+            resp = await self._transport.post(
+                "/knowledge/search",
+                {
+                    "group_id": self._group_id,
+                    "query": query,
+                    "labels": labels or [],
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
             return resp.get("entries", [])
 
     async def search_knowledge_by_labels(
@@ -254,18 +287,24 @@ class MemoryClient:
     ) -> List[Dict[str, Any]]:
         """Label-only search."""
         if self._is_grpc:
-            resp = await self._transport.call("SearchByLabels", {
-                "scope": self._scope,
-                "labels": labels,
-                "top_k": top_k,
-            })
+            resp = await self._transport.call(
+                "SearchByLabels",
+                {
+                    "scope": self._scope,
+                    "labels": labels,
+                    "top_k": top_k,
+                },
+            )
             return resp.get("entries", [])
         else:
-            resp = await self._transport.post("/knowledge/search-labels", {
-                "group_id": self._group_id,
-                "labels": labels,
-                "top_k": top_k,
-            })
+            resp = await self._transport.post(
+                "/knowledge/search-labels",
+                {
+                    "group_id": self._group_id,
+                    "labels": labels,
+                    "top_k": top_k,
+                },
+            )
             return resp.get("entries", [])
 
     # =========================================================================
@@ -281,22 +320,28 @@ class MemoryClient:
     ) -> List[str]:
         """Store artifacts. Returns list of UUIDs."""
         if self._is_grpc:
-            resp = await self._transport.call("StoreArtifacts", {
-                "scope": self._scope,
-                "entries": entries,
-                "source_mission": source_mission,
-                "mission_status": mission_status,
-                "source_episode_uuid": source_episode_uuid,
-            })
+            resp = await self._transport.call(
+                "StoreArtifacts",
+                {
+                    "scope": self._scope,
+                    "entries": entries,
+                    "source_mission": source_mission,
+                    "mission_status": mission_status,
+                    "source_episode_uuid": source_episode_uuid,
+                },
+            )
             return resp.get("uuids", [])
         else:
-            resp = await self._transport.post("/artifacts", {
-                "group_id": self._group_id,
-                "entries": entries,
-                "source_mission": source_mission,
-                "mission_status": mission_status,
-                "source_episode_uuid": source_episode_uuid,
-            })
+            resp = await self._transport.post(
+                "/artifacts",
+                {
+                    "group_id": self._group_id,
+                    "entries": entries,
+                    "source_mission": source_mission,
+                    "mission_status": mission_status,
+                    "source_episode_uuid": source_episode_uuid,
+                },
+            )
             return resp.get("uuids", [])
 
     async def search_artifacts(
@@ -308,31 +353,40 @@ class MemoryClient:
     ) -> List[Dict[str, Any]]:
         """Hybrid search for artifacts."""
         if self._is_grpc:
-            resp = await self._transport.call("SearchArtifacts", {
-                "scope": self._scope,
-                "query": query,
-                "labels": labels or [],
-                "top_k": top_k,
-                "min_score": min_score,
-            })
+            resp = await self._transport.call(
+                "SearchArtifacts",
+                {
+                    "scope": self._scope,
+                    "query": query,
+                    "labels": labels or [],
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
             return resp.get("entries", [])
         else:
-            resp = await self._transport.post("/artifacts/search", {
-                "group_id": self._group_id,
-                "query": query,
-                "labels": labels or [],
-                "top_k": top_k,
-                "min_score": min_score,
-            })
+            resp = await self._transport.post(
+                "/artifacts/search",
+                {
+                    "group_id": self._group_id,
+                    "query": query,
+                    "labels": labels or [],
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
             return resp.get("entries", [])
 
     async def get_artifact(self, uuid: str) -> Optional[Dict[str, Any]]:
         """Get a single artifact by UUID."""
         if self._is_grpc:
-            resp = await self._transport.call("GetArtifact", {
-                "scope": self._scope,
-                "uuid": uuid,
-            })
+            resp = await self._transport.call(
+                "GetArtifact",
+                {
+                    "scope": self._scope,
+                    "uuid": uuid,
+                },
+            )
             return resp.get("artifact") if resp.get("found") else None
         else:
             try:
@@ -347,10 +401,13 @@ class MemoryClient:
     async def list_recent_artifacts(self, limit: int = 50) -> List[Dict[str, Any]]:
         """List recent artifacts."""
         if self._is_grpc:
-            resp = await self._transport.call("ListRecent", {
-                "scope": self._scope,
-                "limit": limit,
-            })
+            resp = await self._transport.call(
+                "ListRecent",
+                {
+                    "scope": self._scope,
+                    "limit": limit,
+                },
+            )
             return resp.get("entries", [])
         else:
             resp = await self._transport.get(
@@ -362,10 +419,13 @@ class MemoryClient:
     async def delete_artifact(self, uuid: str) -> bool:
         """Delete an artifact by UUID."""
         if self._is_grpc:
-            resp = await self._transport.call("DeleteArtifact", {
-                "scope": self._scope,
-                "uuid": uuid,
-            })
+            resp = await self._transport.call(
+                "DeleteArtifact",
+                {
+                    "scope": self._scope,
+                    "uuid": uuid,
+                },
+            )
             return resp.get("existed", False)
         else:
             resp = await self._transport.delete(
@@ -387,31 +447,40 @@ class MemoryClient:
     ) -> bool:
         """Persist execution state."""
         if self._is_grpc:
-            resp = await self._transport.call("PersistExecutionState", {
-                "scope": self._scope,
-                "state_description": state_description,
-                "iteration": iteration,
-                "plan_json": plan_json or "",
-                "judge_json": judge_json or "",
-            })
+            resp = await self._transport.call(
+                "PersistExecutionState",
+                {
+                    "scope": self._scope,
+                    "state_description": state_description,
+                    "iteration": iteration,
+                    "plan_json": plan_json or "",
+                    "judge_json": judge_json or "",
+                },
+            )
             return resp.get("success", False)
         else:
-            resp = await self._transport.put("/state/execution", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "state_description": state_description,
-                "iteration": iteration,
-                "plan_json": plan_json,
-                "judge_json": judge_json,
-            })
+            resp = await self._transport.put(
+                "/state/execution",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "state_description": state_description,
+                    "iteration": iteration,
+                    "plan_json": plan_json,
+                    "judge_json": judge_json,
+                },
+            )
             return resp.get("success", False)
 
     async def get_execution_state(self) -> Optional[Dict[str, Any]]:
         """Get current execution state."""
         if self._is_grpc:
-            resp = await self._transport.call("GetExecutionState", {
-                "scope": self._scope,
-            })
+            resp = await self._transport.call(
+                "GetExecutionState",
+                {
+                    "scope": self._scope,
+                },
+            )
             return resp if resp.get("found") else None
         else:
             resp = await self._transport.get(
@@ -432,23 +501,29 @@ class MemoryClient:
     ) -> bool:
         """Update tool usage statistics."""
         if self._is_grpc:
-            resp = await self._transport.call("UpdateToolStats", {
-                "scope": self._scope,
-                "tool_name": tool_name,
-                "success": success,
-                "duration_ms": duration_ms,
-                "state_description": state_description,
-            })
+            resp = await self._transport.call(
+                "UpdateToolStats",
+                {
+                    "scope": self._scope,
+                    "tool_name": tool_name,
+                    "success": success,
+                    "duration_ms": duration_ms,
+                    "state_description": state_description,
+                },
+            )
             return resp.get("success", False)
         else:
-            resp = await self._transport.post("/state/tool-stats", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "tool_name": tool_name,
-                "success": success,
-                "duration_ms": duration_ms,
-                "state_description": state_description,
-            })
+            resp = await self._transport.post(
+                "/state/tool-stats",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "tool_name": tool_name,
+                    "success": success,
+                    "duration_ms": duration_ms,
+                    "state_description": state_description,
+                },
+            )
             return resp.get("success", False)
 
     async def get_tool_stats(
@@ -457,10 +532,13 @@ class MemoryClient:
     ) -> str:
         """Get formatted tool statistics."""
         if self._is_grpc:
-            resp = await self._transport.call("GetToolStats", {
-                "scope": self._scope,
-                "tool_names": tool_names or [],
-            })
+            resp = await self._transport.call(
+                "GetToolStats",
+                {
+                    "scope": self._scope,
+                    "tool_names": tool_names or [],
+                },
+            )
             return resp.get("formatted_stats", "")
         else:
             resp = await self._transport.get(
@@ -475,10 +553,13 @@ class MemoryClient:
     async def get_memory_context(self, event_limit: int = 5) -> str:
         """Get formatted memory context for prompt injection."""
         if self._is_grpc:
-            resp = await self._transport.call("GetMemoryContext", {
-                "scope": self._scope,
-                "event_limit": event_limit,
-            })
+            resp = await self._transport.call(
+                "GetMemoryContext",
+                {
+                    "scope": self._scope,
+                    "event_limit": event_limit,
+                },
+            )
             return resp.get("formatted_context", "")
         else:
             resp = await self._transport.get(
@@ -507,24 +588,30 @@ class MemoryClient:
     ) -> Dict[str, Any]:
         """Unified observe: store observation + retrieve relevant context."""
         if self._is_grpc:
-            resp = await self._transport.call("Observe", {
-                "scope": self._scope,
-                "session_id": self._workflow_id,
-                "content": content,
-                "source": source or "",
-                "metadata": metadata or {},
-            })
+            resp = await self._transport.call(
+                "Observe",
+                {
+                    "scope": self._scope,
+                    "session_id": self._workflow_id,
+                    "content": content,
+                    "source": source or "",
+                    "metadata": metadata or {},
+                },
+            )
         else:
-            resp = await self._transport.post("/api/v1/memory/observe", {
-                "session_id": self._workflow_id,
-                "content": content,
-                "source": source,
-                "metadata": metadata,
-                "read_only": read_only,
-                "summarize": summarize,
-                "top_k": top_k,
-                "minimal": minimal,
-            })
+            resp = await self._transport.post(
+                "/api/v1/memory/observe",
+                {
+                    "session_id": self._workflow_id,
+                    "content": content,
+                    "source": source,
+                    "metadata": metadata,
+                    "read_only": read_only,
+                    "summarize": summarize,
+                    "top_k": top_k,
+                    "minimal": minimal,
+                },
+            )
         return resp or {}
 
     # =========================================================================
@@ -534,44 +621,79 @@ class MemoryClient:
     async def reinterpret_task(self, task: str, model: Optional[str] = None) -> Dict[str, Any]:
         """Reinterpret task into search labels, query, and complexity."""
         if self._is_grpc:
-            return await self._transport.call("ReinterpretTask", {
-                "task": task, "model": model or "",
-            })
+            return await self._transport.call(
+                "ReinterpretTask",
+                {
+                    "task": task,
+                    "model": model or "",
+                },
+            )
         else:
-            return await self._transport.post("/smart/reinterpret-task", {
-                "task": task, "model": model,
-            })
+            return await self._transport.post(
+                "/smart/reinterpret-task",
+                {
+                    "task": task,
+                    "model": model,
+                },
+            )
 
     async def filter_memory_results(
-        self, task: str, results: str, model: Optional[str] = None, max_results: int = 5,
+        self,
+        task: str,
+        results: str,
+        model: Optional[str] = None,
+        max_results: int = 5,
     ) -> str:
         """Filter memory results for relevance."""
         if self._is_grpc:
-            resp = await self._transport.call("FilterMemoryResults", {
-                "task": task, "search_results": results,
-                "model": model or "", "max_results": max_results,
-            })
+            resp = await self._transport.call(
+                "FilterMemoryResults",
+                {
+                    "task": task,
+                    "search_results": results,
+                    "model": model or "",
+                    "max_results": max_results,
+                },
+            )
             return resp.get("filtered_results", "")
         else:
-            resp = await self._transport.post("/smart/filter-results", {
-                "task": task, "search_results": results,
-                "model": model, "max_results": max_results,
-            })
+            resp = await self._transport.post(
+                "/smart/filter-results",
+                {
+                    "task": task,
+                    "search_results": results,
+                    "model": model,
+                    "max_results": max_results,
+                },
+            )
             return resp.get("filtered_results", "")
 
     async def infer_state(
-        self, task: str, memories: str, model: Optional[str] = None,
+        self,
+        task: str,
+        memories: str,
+        model: Optional[str] = None,
     ) -> str:
         """Infer agent state from task + memories."""
         if self._is_grpc:
-            resp = await self._transport.call("InferState", {
-                "task": task, "retrieved_memories": memories, "model": model or "",
-            })
+            resp = await self._transport.call(
+                "InferState",
+                {
+                    "task": task,
+                    "retrieved_memories": memories,
+                    "model": model or "",
+                },
+            )
             return resp.get("state_description", "")
         else:
-            resp = await self._transport.post("/smart/infer-state", {
-                "task": task, "retrieved_memories": memories, "model": model,
-            })
+            resp = await self._transport.post(
+                "/smart/infer-state",
+                {
+                    "task": task,
+                    "retrieved_memories": memories,
+                    "model": model,
+                },
+            )
             return resp.get("state_description", "")
 
     async def synthesize_background(
@@ -586,101 +708,138 @@ class MemoryClient:
     ) -> str:
         """Synthesize background narrative."""
         if self._is_grpc:
-            resp = await self._transport.call("SynthesizeBackground", {
-                "scope": self._scope,
-                "task": task,
-                "long_term_context": long_term,
-                "tool_stats_context": tool_stats,
-                "state_description": state,
-                "knowledge_context": knowledge,
-                "artifacts_context": artifacts,
-                "model": model or "",
-            })
+            resp = await self._transport.call(
+                "SynthesizeBackground",
+                {
+                    "scope": self._scope,
+                    "task": task,
+                    "long_term_context": long_term,
+                    "tool_stats_context": tool_stats,
+                    "state_description": state,
+                    "knowledge_context": knowledge,
+                    "artifacts_context": artifacts,
+                    "model": model or "",
+                },
+            )
             return resp.get("narrative", "")
         else:
-            resp = await self._transport.post("/smart/synthesize-background", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "task": task,
-                "long_term_context": long_term,
-                "tool_stats_context": tool_stats,
-                "state_description": state,
-                "knowledge_context": knowledge,
-                "artifacts_context": artifacts,
-                "model": model,
-            })
+            resp = await self._transport.post(
+                "/smart/synthesize-background",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "task": task,
+                    "long_term_context": long_term,
+                    "tool_stats_context": tool_stats,
+                    "state_description": state,
+                    "knowledge_context": knowledge,
+                    "artifacts_context": artifacts,
+                    "model": model,
+                },
+            )
             return resp.get("narrative", "")
 
     async def generate_reflection(self, mission_data: Dict[str, Any]) -> str:
         """Generate post-mission reflection."""
         data_json = json.dumps(mission_data)
         if self._is_grpc:
-            resp = await self._transport.call("GenerateReflection", {
-                "mission_data_json": data_json,
-            })
+            resp = await self._transport.call(
+                "GenerateReflection",
+                {
+                    "mission_data_json": data_json,
+                },
+            )
             return resp.get("reflection", "")
         else:
-            resp = await self._transport.post("/smart/generate-reflection", {
-                "mission_data_json": data_json,
-            })
+            resp = await self._transport.post(
+                "/smart/generate-reflection",
+                {
+                    "mission_data_json": data_json,
+                },
+            )
             return resp.get("reflection", "")
 
     async def extract_knowledge(
-        self, mission_data: Dict[str, Any], reflection: str, model: Optional[str] = None,
+        self,
+        mission_data: Dict[str, Any],
+        reflection: str,
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Extract knowledge entries from mission data."""
         data_json = json.dumps(mission_data)
         if self._is_grpc:
-            resp = await self._transport.call("ExtractKnowledge", {
-                "mission_data_json": data_json,
-                "reflection": reflection,
-                "model": model or "",
-            })
+            resp = await self._transport.call(
+                "ExtractKnowledge",
+                {
+                    "mission_data_json": data_json,
+                    "reflection": reflection,
+                    "model": model or "",
+                },
+            )
         else:
-            resp = await self._transport.post("/smart/extract-knowledge", {
-                "mission_data_json": data_json,
-                "reflection": reflection,
-                "model": model,
-            })
+            resp = await self._transport.post(
+                "/smart/extract-knowledge",
+                {
+                    "mission_data_json": data_json,
+                    "reflection": reflection,
+                    "model": model,
+                },
+            )
         entries_json = resp.get("entries_json", "[]")
         return json.loads(entries_json) if isinstance(entries_json, str) else entries_json
 
     async def extract_artifacts(
-        self, mission_data: Dict[str, Any], model: Optional[str] = None,
+        self,
+        mission_data: Dict[str, Any],
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Extract artifact entries from mission data."""
         data_json = json.dumps(mission_data)
         if self._is_grpc:
-            resp = await self._transport.call("ExtractArtifacts", {
-                "mission_data_json": data_json,
-                "model": model or "",
-            })
+            resp = await self._transport.call(
+                "ExtractArtifacts",
+                {
+                    "mission_data_json": data_json,
+                    "model": model or "",
+                },
+            )
         else:
-            resp = await self._transport.post("/smart/extract-artifacts", {
-                "mission_data_json": data_json,
-                "model": model,
-            })
+            resp = await self._transport.post(
+                "/smart/extract-artifacts",
+                {
+                    "mission_data_json": data_json,
+                    "model": model,
+                },
+            )
         entries_json = resp.get("entries_json", "[]")
         return json.loads(entries_json) if isinstance(entries_json, str) else entries_json
 
     async def compress_events(
-        self, run_id: str, state_description: str = "",
+        self,
+        run_id: str,
+        state_description: str = "",
     ) -> bool:
         """Compress old events into episode summary."""
         if self._is_grpc:
-            resp = await self._transport.call("CompressEvents", {
-                "scope": self._scope,
-                "run_id": run_id,
-                "state_description": state_description,
-            })
+            resp = await self._transport.call(
+                "CompressEvents",
+                {
+                    "scope": self._scope,
+                    "run_id": run_id,
+                    "state_description": state_description,
+                },
+            )
             return resp.get("compressed", False)
         else:
-            resp = await self._transport.post("/smart/compress-events", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "run_id": run_id,
-                "state_description": state_description,
-            })
+            resp = await self._transport.post(
+                "/smart/compress-events",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "run_id": run_id,
+                    "state_description": state_description,
+                },
+            )
             return resp.get("compressed", False)
 
     # =========================================================================
@@ -688,68 +847,89 @@ class MemoryClient:
     # =========================================================================
 
     async def startup_pipeline(
-        self, task: str, model: Optional[str] = None,
+        self,
+        task: str,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run full startup pipeline."""
         if self._is_grpc:
-            return await self._transport.call("StartupPipeline", {
-                "scope": self._scope,
-                "task": task,
-                "model": model or "",
-            })
+            return await self._transport.call(
+                "StartupPipeline",
+                {
+                    "scope": self._scope,
+                    "task": task,
+                    "model": model or "",
+                },
+            )
         else:
-            return await self._transport.post("/pipelines/startup", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "task": task,
-                "model": model,
-            })
+            return await self._transport.post(
+                "/pipelines/startup",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "task": task,
+                    "model": model,
+                },
+            )
 
     async def run_curation(
-        self, mission_data: Dict[str, Any], model: Optional[str] = None,
+        self,
+        mission_data: Dict[str, Any],
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run full curation pipeline."""
         if self._is_grpc:
-            return await self._transport.call("RunCuration", {
-                "scope": self._scope,
-                "mission_data_json": json.dumps(mission_data),
-                "model": model or "",
-            })
+            return await self._transport.call(
+                "RunCuration",
+                {
+                    "scope": self._scope,
+                    "mission_data_json": json.dumps(mission_data),
+                    "model": model or "",
+                },
+            )
         else:
-            return await self._transport.post("/pipelines/curation", {
-                "group_id": self._group_id,
-                "workflow_id": self._workflow_id,
-                "mission_data_json": json.dumps(mission_data),
-                "model": model,
-            })
+            return await self._transport.post(
+                "/pipelines/curation",
+                {
+                    "group_id": self._group_id,
+                    "workflow_id": self._workflow_id,
+                    "mission_data_json": json.dumps(mission_data),
+                    "model": model,
+                },
+            )
 
     # =========================================================================
     # Fire-and-Forget Helpers
     # =========================================================================
 
     def log_event_fire_and_forget(
-        self, event_type: str, event_data: Dict[str, Any], context: Optional[str] = None,
+        self,
+        event_type: str,
+        event_data: Dict[str, Any],
+        context: Optional[str] = None,
     ) -> None:
         """Non-blocking event logging. Errors are logged, not raised."""
-        asyncio.create_task(self._safe_call(
-            self.log_event, event_type, event_data, context
-        ))
+        asyncio.create_task(self._safe_call(self.log_event, event_type, event_data, context))
 
     def update_tool_stats_fire_and_forget(
-        self, tool_name: str, success: bool, **kwargs,
+        self,
+        tool_name: str,
+        success: bool,
+        **kwargs,
     ) -> None:
         """Non-blocking tool stats update."""
-        asyncio.create_task(self._safe_call(
-            self.update_tool_stats, tool_name, success, **kwargs
-        ))
+        asyncio.create_task(self._safe_call(self.update_tool_stats, tool_name, success, **kwargs))
 
     def persist_state_fire_and_forget(
-        self, state_desc: str, iteration: int, **kwargs,
+        self,
+        state_desc: str,
+        iteration: int,
+        **kwargs,
     ) -> None:
         """Non-blocking state persistence."""
-        asyncio.create_task(self._safe_call(
-            self.persist_execution_state, state_desc, iteration, **kwargs
-        ))
+        asyncio.create_task(
+            self._safe_call(self.persist_execution_state, state_desc, iteration, **kwargs)
+        )
 
     async def _safe_call(self, fn, *args, **kwargs):
         try:

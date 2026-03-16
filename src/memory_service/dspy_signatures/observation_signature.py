@@ -17,38 +17,39 @@ import dspy
 
 class ObservationAnalysis(BaseModel):
     """Routing analysis for an observation."""
+
     observation_type: str = Field(
         description="One of: 'chat' (conversation turn, user message, agent response), "
-                    "'tool_call' (tool invocation — API call, search, file op), "
-                    "'tool_result' (output/response from a tool call), "
-                    "'knowledge' (learned fact, discovered information, user preference), "
-                    "'artifact' (created or found resource — file, report, dataset, URL), "
-                    "'action' (agent decision or action taken), "
-                    "'error' (failure, exception, blocked operation), "
-                    "'state_update' (status change, progress update)"
+        "'tool_call' (tool invocation — API call, search, file op), "
+        "'tool_result' (output/response from a tool call), "
+        "'knowledge' (learned fact, discovered information, user preference), "
+        "'artifact' (created or found resource — file, report, dataset, URL), "
+        "'action' (agent decision or action taken), "
+        "'error' (failure, exception, blocked operation), "
+        "'state_update' (status change, progress update)"
     )
     storage_tier: str = Field(
         description="Where to store this observation: "
-                    "'short_term' — ephemeral event only, for routine noise "
-                    "(heartbeats, HTTP 200s, trivial acknowledgments). "
-                    "'long_term' — embedded episode for later retrieval, for high-value "
-                    "observations (insights, preferences, important results). "
-                    "'both' — event stream AND embedded episode, for important observations "
-                    "that also need event-stream context (most observations land here)."
+        "'short_term' — ephemeral event only, for routine noise "
+        "(heartbeats, HTTP 200s, trivial acknowledgments). "
+        "'long_term' — embedded episode for later retrieval, for high-value "
+        "observations (insights, preferences, important results). "
+        "'both' — event stream AND embedded episode, for important observations "
+        "that also need event-stream context (most observations land here)."
     )
     search_query: str = Field(
         description="Optimized 1-2 sentence query for vector similarity retrieval. "
-                    "Keyword-rich, captures the semantic core of the observation."
+        "Keyword-rich, captures the semantic core of the observation."
     )
     search_labels: List[str] = Field(
         description="5-15 semantic labels for knowledge graph retrieval. Lowercase, "
-                    "hyphenated. Include: domain terms, tool names, entity names, "
-                    "topics, methodologies. Be specific: 'weather-api' not 'api'."
+        "hyphenated. Include: domain terms, tool names, entity names, "
+        "topics, methodologies. Be specific: 'weather-api' not 'api'."
     )
     importance: str = Field(
         description="One of: 'low' (routine operation, acknowledgment, status ping), "
-                    "'medium' (useful context, standard tool result, conversation flow), "
-                    "'high' (key discovery, user preference, critical error, decision)"
+        "'medium' (useful context, standard tool result, conversation flow), "
+        "'high' (key discovery, user preference, critical error, decision)"
     )
 
 
@@ -88,9 +89,7 @@ class ObservationJudgeSignature(dspy.Signature):
     domain, tools, entities, and topics mentioned in the observation.
     """
 
-    observation: str = dspy.InputField(
-        desc="The observation text from the agent"
-    )
+    observation: str = dspy.InputField(desc="The observation text from the agent")
     source: str = dspy.InputField(
         desc="Who or what generated this observation (agent name, tool name, or 'unknown')"
     )

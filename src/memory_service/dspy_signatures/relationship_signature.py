@@ -18,68 +18,69 @@ class RelationshipEntryModel(BaseModel):
     partially-formed LLM output. The extractor filters out incomplete
     entries before storage.
     """
+
     subject: Optional[str] = Field(
         default=None,
         description="The subject entity name (complete form, e.g., 'Alex Rivera', 'Riverside Medical Center', "
-                    "'The Silence of Glaciers')"
+        "'The Silence of Glaciers')",
     )
     subject_type: Optional[str] = Field(
         default="Thing",
         description="Most specific Schema.org class of the subject entity "
-                    "(e.g., 'Person', 'Hospital', 'Movie', 'MusicGroup', 'SportsTeam', "
-                    "'Festival', 'ConferenceEvent', 'PodcastSeries', 'WebSite', 'Dataset'). "
-                    "Note: 'Animal', 'Award', 'Podcast' are NOT Schema.org classes — "
-                    "use 'Taxon', 'Intangible', 'PodcastSeries' respectively."
+        "(e.g., 'Person', 'Hospital', 'Movie', 'MusicGroup', 'SportsTeam', "
+        "'Festival', 'ConferenceEvent', 'PodcastSeries', 'WebSite', 'Dataset'). "
+        "Note: 'Animal', 'Award', 'Podcast' are NOT Schema.org classes — "
+        "use 'Taxon', 'Intangible', 'PodcastSeries' respectively.",
     )
     predicate: Optional[str] = Field(
         default=None,
         description="Schema.org property name in camelCase. Common predicates by domain:\n"
-                    "Person → *: 'worksFor', 'homeLocation', 'birthPlace', 'birthDate', "
-                    "'parent', 'children', 'sibling', 'spouse', 'knows', 'colleague', "
-                    "'alumniOf', 'memberOf', 'founder', 'nationality', 'jobTitle', "
-                    "'hasCredential', 'owns', 'affiliation', 'performerIn', 'knowsLanguage'.\n"
-                    "CreativeWork → *: 'director', 'author', 'byArtist', 'publisher', "
-                    "'award' (value=Text, not entity), 'datePublished', 'dateCreated', "
-                    "'about', 'genre', 'inLanguage', 'isPartOf', 'recordedAt', "
-                    "'mentions', 'locationCreated'.\n"
-                    "Organization → *: 'location', 'founder', 'foundingDate', 'employee', "
-                    "'member', 'subOrganization', 'parentOrganization', 'areaServed', "
-                    "'legalName', 'department'.\n"
-                    "Event → *: 'location', 'eventVenue', 'organizer', 'performer', "
-                    "'startDate', 'endDate', 'superEvent', 'subEvent', 'attendee'.\n"
-                    "Place → *: 'containedIn', 'containsPlace', 'address'.\n"
-                    "MedicalCondition → *: 'cause', 'signOrSymptom', 'possibleTreatment', "
-                    "'riskFactor', 'drug', 'associatedAnatomy'.\n"
-                    "MedicalProcedure/MedicalTherapy → *: 'drug', 'bodyLocation', 'followup'.\n"
-                    "Physician/Hospital/MedicalClinic → *: 'hospitalAffiliation', 'medicalSpecialty'.\n"
-                    "Patient → *: 'diagnosis', 'drug'.\n"
-                    "Note: 'award', 'startDate', 'endDate', 'datePublished', 'dateCreated', "
-                    "'foundingDate', 'birthDate' have Date/Text range — their object is a "
-                    "literal value, not a named entity node.\n"
-                    "Use the exact property name from the Schema.org reference."
+        "Person → *: 'worksFor', 'homeLocation', 'birthPlace', 'birthDate', "
+        "'parent', 'children', 'sibling', 'spouse', 'knows', 'colleague', "
+        "'alumniOf', 'memberOf', 'founder', 'nationality', 'jobTitle', "
+        "'hasCredential', 'owns', 'affiliation', 'performerIn', 'knowsLanguage'.\n"
+        "CreativeWork → *: 'director', 'author', 'byArtist', 'publisher', "
+        "'award' (value=Text, not entity), 'datePublished', 'dateCreated', "
+        "'about', 'genre', 'inLanguage', 'isPartOf', 'recordedAt', "
+        "'mentions', 'locationCreated'.\n"
+        "Organization → *: 'location', 'founder', 'foundingDate', 'employee', "
+        "'member', 'subOrganization', 'parentOrganization', 'areaServed', "
+        "'legalName', 'department'.\n"
+        "Event → *: 'location', 'eventVenue', 'organizer', 'performer', "
+        "'startDate', 'endDate', 'superEvent', 'subEvent', 'attendee'.\n"
+        "Place → *: 'containedIn', 'containsPlace', 'address'.\n"
+        "MedicalCondition → *: 'cause', 'signOrSymptom', 'possibleTreatment', "
+        "'riskFactor', 'drug', 'associatedAnatomy'.\n"
+        "MedicalProcedure/MedicalTherapy → *: 'drug', 'bodyLocation', 'followup'.\n"
+        "Physician/Hospital/MedicalClinic → *: 'hospitalAffiliation', 'medicalSpecialty'.\n"
+        "Patient → *: 'diagnosis', 'drug'.\n"
+        "Note: 'award', 'startDate', 'endDate', 'datePublished', 'dateCreated', "
+        "'foundingDate', 'birthDate' have Date/Text range — their object is a "
+        "literal value, not a named entity node.\n"
+        "Use the exact property name from the Schema.org reference.",
     )
     object: Optional[str] = Field(
-        default=None,
-        description="The object entity name (complete form)"
+        default=None, description="The object entity name (complete form)"
     )
     object_type: Optional[str] = Field(
         default="Thing",
         description="Most specific Schema.org class of the object entity. "
-                    "Same rules as subject_type — use the most specific real Schema.org class."
+        "Same rules as subject_type — use the most specific real Schema.org class.",
     )
     confidence: Optional[float] = Field(
         default=1.0,
-        description="Confidence in this relationship: 0.0 (speculative) to 1.0 (explicitly stated)"
+        description="Confidence in this relationship: 0.0 (speculative) to 1.0 (explicitly stated)",
     )
 
 
 class RelationshipExtractionResult(BaseModel):
     """Structured result from relationship extraction."""
+
     relationships: List[RelationshipEntryModel] = Field(
         default_factory=list,
         description="All entity relationships found in the text. "
-                    "Extract every stated relationship — family, professional, locational, social. "
-                    "Use Schema.org property names as predicates."
+        "Extract every stated relationship — family, professional, locational, social. "
+        "Use Schema.org property names as predicates.",
     )
 
 
@@ -120,12 +121,10 @@ class RelationshipExtractionSignature(dspy.Signature):
 
     schema_reference: str = dspy.InputField(
         desc="Full Schema.org property reference with domain/range/inverse info. "
-             "Use the exact property names and class names listed here."
+        "Use the exact property names and class names listed here."
     )
 
-    source_text: str = dspy.InputField(
-        desc="The text to extract relationships from"
-    )
+    source_text: str = dspy.InputField(desc="The text to extract relationships from")
 
     result: RelationshipExtractionResult = dspy.OutputField(
         desc="All entity relationships expressed as Schema.org triples"

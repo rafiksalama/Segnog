@@ -47,9 +47,7 @@ class EpisodeEventPublisher:
                 json.dumps(payload).encode(),
                 headers={"Nats-Msg-Id": episode_uuid},
             )
-            logger.debug(
-                f"Published {subject}: uuid={episode_uuid[:8]}, seq={ack.seq}"
-            )
+            logger.debug(f"Published {subject}: uuid={episode_uuid[:8]}, seq={ack.seq}")
         except Exception as e:
             logger.warning(f"Failed to publish episode event: {e}")
 
@@ -72,9 +70,7 @@ class EpisodeEventPublisher:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         try:
-            await self._nats.jetstream.publish(
-                subject, json.dumps(payload).encode()
-            )
+            await self._nats.jetstream.publish(subject, json.dumps(payload).encode())
             logger.debug(f"Published curation completed for {group_id}")
         except Exception as e:
             logger.warning(f"Failed to publish curation completed: {e}")

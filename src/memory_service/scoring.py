@@ -15,7 +15,9 @@ from typing import Any, Dict, List, Optional
 
 
 def compute_freshness(
-    created_at: float, half_life_hours: float, now: float = None,
+    created_at: float,
+    half_life_hours: float,
+    now: float = None,
 ) -> float:
     """Hyperbolic freshness: 1/(1 + age_hours/half_life). Returns (0, 1]."""
     now = now or time.time()
@@ -61,7 +63,8 @@ def apply_temporal_score(
 
 
 def compute_activation_strength(
-    activation_count: int, max_count: int = 100,
+    activation_count: int,
+    max_count: int = 100,
 ) -> float:
     """Log-normalized activation strength in [0, 1].
 
@@ -137,11 +140,7 @@ def apply_hebbian_score(
         result["_semantic_score"] = semantic
         result["_freshness"] = freshness
         result["_hebbian_boost"] = hebbian
-        result[score_key] = (
-            semantic_weight * semantic
-            + alpha * freshness
-            + beta * hebbian
-        )
+        result[score_key] = semantic_weight * semantic + alpha * freshness + beta * hebbian
 
     results.sort(key=lambda x: x.get(score_key, 0), reverse=True)
     return results

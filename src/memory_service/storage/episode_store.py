@@ -31,6 +31,7 @@ def _parse_datetime(dt_string: str) -> Optional[float]:
     Returns epoch float or None.
     """
     from dateutil import parser as dateutil_parser
+
     try:
         dt = dateutil_parser.parse(dt_string, fuzzy=True)
         return dt.timestamp()
@@ -62,23 +63,23 @@ class EpisodeStore(BaseStore):
     async def ensure_indexes(self) -> None:
         """Create indexes on Episode nodes if they don't exist."""
         for field in (
-            "uuid", "group_id", "episode_type",
-            "created_at", "created_at_iso", "consolidation_status",
+            "uuid",
+            "group_id",
+            "episode_type",
+            "created_at",
+            "created_at_iso",
+            "consolidation_status",
             "activation_count",
         ):
             try:
-                await self._graph.query(
-                    f"CREATE INDEX FOR (e:Episode) ON (e.{field})"
-                )
+                await self._graph.query(f"CREATE INDEX FOR (e:Episode) ON (e.{field})")
             except Exception:
                 pass  # Index may already exist
 
         # Entity indexes
         for field in ("name", "entity_type"):
             try:
-                await self._graph.query(
-                    f"CREATE INDEX FOR (ent:Entity) ON (ent.{field})"
-                )
+                await self._graph.query(f"CREATE INDEX FOR (ent:Entity) ON (ent.{field})")
             except Exception:
                 pass
 
@@ -153,12 +154,11 @@ class EpisodeStore(BaseStore):
             if parsed_time:
                 created_at = parsed_time
 
-        created_at_iso = datetime.fromtimestamp(
-            created_at, tz=timezone.utc
-        ).isoformat()
+        created_at_iso = datetime.fromtimestamp(created_at, tz=timezone.utc).isoformat()
 
         consolidation_status = (
-            "consolidated" if episode_type in ("reflection", "compressed", "narrative")
+            "consolidated"
+            if episode_type in ("reflection", "compressed", "narrative")
             else "pending"
         )
 
@@ -190,23 +190,22 @@ class EpisodeStore(BaseStore):
         if auto_link:
             await self._auto_link_to_predecessor(episode_uuid, created_at)
 
-        logger.debug(
-            f"Stored episode {episode_uuid[:8]} "
-            f"(type={episode_type}, len={len(content)})"
-        )
+        logger.debug(f"Stored episode {episode_uuid[:8]} (type={episode_type}, len={len(content)})")
 
         # Publish event to NATS (fire-and-forget)
         if self._event_publisher:
             import asyncio
 
-            asyncio.create_task(self._event_publisher.episode_stored(
-                episode_uuid=episode_uuid,
-                group_id=self._group_id,
-                episode_type=episode_type,
-                content_length=len(content),
-                consolidation_status=consolidation_status,
-                created_at=created_at,
-            ))
+            asyncio.create_task(
+                self._event_publisher.episode_stored(
+                    episode_uuid=episode_uuid,
+                    group_id=self._group_id,
+                    episode_type=episode_type,
+                    content_length=len(content),
+                    consolidation_status=consolidation_status,
+                    created_at=created_at,
+                )
+            )
 
         return episode_uuid
 
@@ -253,9 +252,7 @@ class EpisodeStore(BaseStore):
             result = await self._graph.query(cypher, params=params)
             created = result.result_set[0][0] if result.result_set else 0
             if created:
-                logger.debug(
-                    f"Linked episodes {from_uuid[:8]} -[{edge_type}]-> {to_uuid[:8]}"
-                )
+                logger.debug(f"Linked episodes {from_uuid[:8]} -[{edge_type}]-> {to_uuid[:8]}")
             return created > 0
         except Exception as e:
             logger.warning(f"Failed to link episodes: {e}")
@@ -320,11 +317,14 @@ class EpisodeStore(BaseStore):
             LIMIT 1
         """
         try:
-            result = await self._graph.ro_query(cypher, params={
-                "group_id": self._group_id,
-                "new_uuid": new_uuid,
-                "new_created_at": new_created_at,
-            })
+            result = await self._graph.ro_query(
+                cypher,
+                params={
+                    "group_id": self._group_id,
+                    "new_uuid": new_uuid,
+                    "new_created_at": new_created_at,
+                },
+            )
             if result.result_set:
                 prev_uuid = result.result_set[0][0]
                 prev_created_at = result.result_set[0][1]
@@ -370,8 +370,14 @@ class EpisodeStore(BaseStore):
         """
         query_embedding = await self._embed(query)
         return await self._search_with_embedding(
-            query_embedding, top_k, episode_type, min_score,
-            expand_adjacent, expansion_hops, after_time, before_time,
+            query_embedding,
+            top_k,
+            episode_type,
+            min_score,
+            expand_adjacent,
+            expansion_hops,
+            after_time,
+            before_time,
         )
 
     async def _search_with_embedding(
@@ -394,7 +400,9 @@ class EpisodeStore(BaseStore):
         if before_time is not None:
             time_filter += " AND e.created_at < $before_time"
 
-        embedding_return = ",\n                e.embedding AS embedding" if include_embedding else ""
+        embedding_return = (
+            ",\n                e.embedding AS embedding" if include_embedding else ""
+        )
 
         cypher = f"""
             MATCH (e:Episode)
@@ -433,8 +441,10 @@ class EpisodeStore(BaseStore):
         # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
         from ..scoring import apply_temporal_score, apply_hebbian_score
         from ..config import (
-            get_episode_half_life, get_episode_alpha,
-            get_hebbian_enabled, get_hebbian_beta_episode,
+            get_episode_half_life,
+            get_episode_alpha,
+            get_hebbian_enabled,
+            get_hebbian_beta_episode,
         )
 
         if get_hebbian_enabled():
@@ -460,9 +470,7 @@ class EpisodeStore(BaseStore):
         seen_uuids = {r["uuid"] for r in rows}
         expanded = []
         for row in rows:
-            neighbors = await self.get_adjacent_episodes(
-                uuid=row["uuid"], hops=expansion_hops
-            )
+            neighbors = await self.get_adjacent_episodes(uuid=row["uuid"], hops=expansion_hops)
             for neighbor in neighbors:
                 if neighbor["uuid"] not in seen_uuids:
                     seen_uuids.add(neighbor["uuid"])
@@ -473,8 +481,7 @@ class EpisodeStore(BaseStore):
         combined = rows + expanded
         combined.sort(key=lambda x: x.get("score", 0), reverse=True)
         logger.debug(
-            f"Search returned {len(rows)} + {len(expanded)} expanded "
-            f"= {len(combined)} episodes"
+            f"Search returned {len(rows)} + {len(expanded)} expanded = {len(combined)} episodes"
         )
         return combined
 
@@ -527,10 +534,12 @@ class EpisodeStore(BaseStore):
                 "uuid": compressed_uuid,
                 "group_id": group_id,
                 "content": summary_content,
-                "metadata": json.dumps({
-                    "source": "rem_compression",
-                    "source_count": len(source_uuids),
-                }),
+                "metadata": json.dumps(
+                    {
+                        "source": "rem_compression",
+                        "source_count": len(source_uuids),
+                    }
+                ),
                 "created_at": now,
                 "created_at_iso": created_at_iso,
                 "embedding": embedding,
@@ -549,9 +558,7 @@ class EpisodeStore(BaseStore):
             except Exception as e:
                 logger.warning(f"DERIVED_FROM edge failed for {src_uuid[:8]}: {e}")
 
-        logger.info(
-            f"Compressed {len(source_uuids)} episodes into {compressed_uuid[:8]}"
-        )
+        logger.info(f"Compressed {len(source_uuids)} episodes into {compressed_uuid[:8]}")
         return compressed_uuid
 
     # ── Entity Resolution ───────────────────────────────────────────

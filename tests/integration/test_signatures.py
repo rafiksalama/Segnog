@@ -28,16 +28,30 @@ Caroline: Yes! It was a beautiful ceremony.
 
 # Valid Schema.org class names — extracted types must be a subset of these
 _VALID_SCHEMA_TYPES = {
-    "Person", "Organization", "Place", "Event", "Product", "Action", "Thing",
+    "Person",
+    "Organization",
+    "Place",
+    "Event",
+    "Product",
+    "Action",
+    "Thing",
     # Common subclasses the LLM might pick
-    "LocalBusiness", "Hospital", "City", "Country", "Corporation",
-    "CollegeOrUniversity", "School", "MusicGroup", "NGO",
+    "LocalBusiness",
+    "Hospital",
+    "City",
+    "Country",
+    "Corporation",
+    "CollegeOrUniversity",
+    "School",
+    "MusicGroup",
+    "NGO",
 }
 
 
 # ---------------------------------------------------------------------------
 # T2.1 — T2.3: Relationship extraction
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_relationship_extraction_returns_list():
@@ -46,8 +60,16 @@ async def test_relationship_extraction_returns_list():
     assert isinstance(rels, list), "Expected list"
     assert len(rels) > 0, "Expected at least one relationship"
 
-    required_keys = {"subject", "subject_norm", "subject_type", "predicate",
-                     "object", "object_norm", "object_type", "confidence"}
+    required_keys = {
+        "subject",
+        "subject_norm",
+        "subject_type",
+        "predicate",
+        "object",
+        "object_norm",
+        "object_type",
+        "confidence",
+    }
     for r in rels:
         missing = required_keys - set(r.keys())
         assert not missing, f"Missing keys {missing} in relationship: {r}"
@@ -90,9 +112,7 @@ async def test_relationship_extraction_schema_org_types():
     for r in rels:
         for field in ("subject_type", "object_type"):
             t = r[field]
-            assert t in onto._classes, (
-                f"Invalid Schema.org class in {field}: {t!r} for {r}"
-            )
+            assert t in onto._classes, f"Invalid Schema.org class in {field}: {t!r} for {r}"
 
 
 @pytest.mark.asyncio
@@ -100,9 +120,7 @@ async def test_relationship_extraction_finds_family():
     """T2.4 — Finds parent/children relationship between Caroline and Julia."""
     rels = await extract_relationships(LOCOMO_EXCERPT)
     predicates = {r["predicate"] for r in rels}
-    subjects_and_objects = {
-        (r["subject_norm"], r["predicate"], r["object_norm"]) for r in rels
-    }
+    subjects_and_objects = {(r["subject_norm"], r["predicate"], r["object_norm"]) for r in rels}
 
     # Either Caroline→parent→Julia or Julia→children→Caroline (or inverse auto-stored)
     family_found = any(
@@ -120,17 +138,12 @@ async def test_relationship_extraction_finds_family():
 async def test_relationship_extraction_finds_employment():
     """T2.5 — Finds worksFor relationship (Melanie → Spotify or Julia → NHS)."""
     rels = await extract_relationships(LOCOMO_EXCERPT)
-    subjects_and_objects = {
-        (r["subject_norm"], r["predicate"], r["object_norm"]) for r in rels
-    }
+    subjects_and_objects = {(r["subject_norm"], r["predicate"], r["object_norm"]) for r in rels}
 
     work_found = any(
-        p == "worksFor" and ("melanie" in s or "julia" in s)
-        for s, p, o in subjects_and_objects
+        p == "worksFor" and ("melanie" in s or "julia" in s) for s, p, o in subjects_and_objects
     )
-    assert work_found, (
-        f"Expected worksFor relationship.\nGot triples: {subjects_and_objects}"
-    )
+    assert work_found, f"Expected worksFor relationship.\nGot triples: {subjects_and_objects}"
 
 
 @pytest.mark.asyncio
@@ -138,9 +151,7 @@ async def test_relationship_extraction_confidence_range():
     """T2.6 — Confidence values are in [0.0, 1.0]."""
     rels = await extract_relationships(LOCOMO_EXCERPT)
     for r in rels:
-        assert 0.0 <= r["confidence"] <= 1.0, (
-            f"Out-of-range confidence {r['confidence']} in {r}"
-        )
+        assert 0.0 <= r["confidence"] <= 1.0, f"Out-of-range confidence {r['confidence']} in {r}"
 
 
 @pytest.mark.asyncio
@@ -156,6 +167,7 @@ async def test_relationship_extraction_empty_input():
 # ---------------------------------------------------------------------------
 # T2.8 — T2.11: Ontology summary update
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_ontology_update_produces_summary():
@@ -181,7 +193,9 @@ async def test_ontology_update_captures_key_facts():
     )
     summary_lower = summary.lower()
     # Key LoCoMo fact: Julia Horrocks is Caroline's mother and a nurse
-    julia_mentioned = "julia" in summary_lower or "mother" in summary_lower or "mum" in summary_lower
+    julia_mentioned = (
+        "julia" in summary_lower or "mother" in summary_lower or "mum" in summary_lower
+    )
     assert julia_mentioned, (
         f"Expected mention of Julia (Caroline's mother) in summary.\nGot: {summary}"
     )
@@ -222,9 +236,7 @@ Caroline: I just got promoted at my new job at Spotify!
         f"Existing fact (Stockholm) lost after update.\nGot: {summary}"
     )
     # New fact (Spotify) should be integrated
-    assert "spotify" in summary_lower, (
-        f"New fact (Spotify) not integrated.\nGot: {summary}"
-    )
+    assert "spotify" in summary_lower, f"New fact (Spotify) not integrated.\nGot: {summary}"
 
 
 @pytest.mark.asyncio
@@ -252,6 +264,4 @@ async def test_ontology_update_julia_as_entity():
     summary_lower = summary.lower()
     # Julia is a nurse at NHS in London
     nurse_mentioned = "nurse" in summary_lower or "nhs" in summary_lower
-    assert nurse_mentioned, (
-        f"Expected 'nurse' or 'NHS' in Julia's summary.\nGot: {summary}"
-    )
+    assert nurse_mentioned, f"Expected 'nurse' or 'NHS' in Julia's summary.\nGot: {summary}"

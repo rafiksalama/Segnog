@@ -57,7 +57,8 @@ class GroupAccumulator:
         now = time.time()
         async with self._lock:
             return [
-                gid for gid, first in self._first_seen.items()
+                gid
+                for gid, first in self._first_seen.items()
                 if (now - first) > self._max_wait and len(self._groups[gid]) > 0
             ]
 
@@ -133,9 +134,7 @@ class CurationWorker:
                         await msg.ack()
 
                         if group_id:
-                            asyncio.create_task(
-                                self._trigger_curation(group_id, "threshold")
-                            )
+                            asyncio.create_task(self._trigger_curation(group_id, "threshold"))
                     except Exception as e:
                         logger.error(f"Failed to process message: {e}")
                         try:
@@ -156,9 +155,7 @@ class CurationWorker:
             try:
                 timed_out = await self._accumulator.get_timed_out_groups()
                 for group_id in timed_out:
-                    asyncio.create_task(
-                        self._trigger_curation(group_id, "timeout")
-                    )
+                    asyncio.create_task(self._trigger_curation(group_id, "timeout"))
             except Exception as e:
                 logger.error(f"Timeout check error: {e}")
 
@@ -171,8 +168,7 @@ class CurationWorker:
         async with self._curation_semaphore:
             start_time = time.time()
             logger.info(
-                f"Curation triggered for '{group_id}': "
-                f"{len(events)} episodes, reason={reason}"
+                f"Curation triggered for '{group_id}': {len(events)} episodes, reason={reason}"
             )
             try:
                 source_uuids = [e["episode_uuid"] for e in events]
@@ -186,15 +182,9 @@ class CurationWorker:
                     ORDER BY e.created_at ASC""",
                     params={"uuids": source_uuids},
                 )
-                episode_contents = {
-                    row[0]: row[1] for row in result.result_set if row[0]
-                }
-                all_knowledge_extracted = all(
-                    row[2] for row in result.result_set if row[0]
-                )
-                combined = "\n---\n".join(
-                    episode_contents.get(uuid, "") for uuid in source_uuids
-                )
+                episode_contents = {row[0]: row[1] for row in result.result_set if row[0]}
+                all_knowledge_extracted = all(row[2] for row in result.result_set if row[0])
+                combined = "\n---\n".join(episode_contents.get(uuid, "") for uuid in source_uuids)
 
                 mission_data = {
                     "task": f"Extract knowledge from conversation episodes in group '{group_id}'",
@@ -220,16 +210,19 @@ class CurationWorker:
                         "reflection_uuid": "",
                     }
                 else:
-                    curation_result = await self._handler.run_curation({
-                        "scope": {"group_id": group_id, "workflow_id": "nats_curation"},
-                        "mission_data_json": mission_data,
-                        "source_episode_uuids": source_uuids,
-                    })
+                    curation_result = await self._handler.run_curation(
+                        {
+                            "scope": {"group_id": group_id, "workflow_id": "nats_curation"},
+                            "mission_data_json": mission_data,
+                            "source_episode_uuids": source_uuids,
+                        }
+                    )
 
                 # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
                 if self._ontology_store is not None:
                     try:
                         from ..smart.ontology_pipeline import update_group_ontology
+
                         episodes_with_uuid = [
                             {"uuid": uuid, "content": episode_contents.get(uuid, "")}
                             for uuid in source_uuids
@@ -241,12 +234,12 @@ class CurationWorker:
                             combined_text=combined,
                         )
                     except Exception as e:
-                        logger.error("Ontology update failed for '%s': %s", group_id, e, exc_info=True)
+                        logger.error(
+                            "Ontology update failed for '%s': %s", group_id, e, exc_info=True
+                        )
 
                 # Mark episodes consolidated
-                consolidated = await self._episode_store.mark_episodes_consolidated(
-                    source_uuids
-                )
+                consolidated = await self._episode_store.mark_episodes_consolidated(source_uuids)
 
                 # Compress
                 compressed_uuid = ""
@@ -279,6 +272,4 @@ class CurationWorker:
                 )
 
             except Exception as e:
-                logger.error(
-                    f"Curation failed for '{group_id}': {e}", exc_info=True
-                )
+                logger.error(f"Curation failed for '{group_id}': {e}", exc_info=True)

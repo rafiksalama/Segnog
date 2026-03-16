@@ -47,6 +47,7 @@ async def teardown_backends(app: FastAPI) -> None:
 
 # --- Dependency helpers for routers ---
 
+
 def get_dragonfly(request: Request) -> DragonflyClient:
     return request.app.state.dragonfly
 
