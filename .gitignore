@@ -13,4 +13,5 @@ data/
 !data/schemaorg-current-https.jsonld
 benchmarks/
 scripts/
+tests/
 src/memory_service/data/class_embeddings_*.json
