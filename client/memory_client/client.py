@@ -492,6 +492,42 @@ class MemoryClient:
             return resp.get("formatted_context", "")
 
     # =========================================================================
+    # Observe (unified write + read)
+    # =========================================================================
+
+    async def observe(
+        self,
+        content: str,
+        source: Optional[str] = None,
+        read_only: bool = False,
+        summarize: bool = False,
+        top_k: int = 100,
+        minimal: bool = True,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Unified observe: store observation + retrieve relevant context."""
+        if self._is_grpc:
+            resp = await self._transport.call("Observe", {
+                "scope": self._scope,
+                "session_id": self._workflow_id,
+                "content": content,
+                "source": source or "",
+                "metadata": metadata or {},
+            })
+        else:
+            resp = await self._transport.post("/api/v1/memory/observe", {
+                "session_id": self._workflow_id,
+                "content": content,
+                "source": source,
+                "metadata": metadata,
+                "read_only": read_only,
+                "summarize": summarize,
+                "top_k": top_k,
+                "minimal": minimal,
+            })
+        return resp or {}
+
+    # =========================================================================
     # Smart Operations (Phase 2)
     # =========================================================================
 

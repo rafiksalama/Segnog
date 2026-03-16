@@ -73,6 +73,8 @@ class GenericServicer(grpc.GenericRpcHandler):
             f"/{SERVICE_NAME}/ExtractKnowledge": handler.extract_knowledge_op,
             f"/{SERVICE_NAME}/ExtractArtifacts": handler.extract_artifacts_op,
             f"/{SERVICE_NAME}/CompressEvents": handler.compress_events_op,
+            # Observe (unified write + read)
+            f"/{SERVICE_NAME}/Observe": handler.observe,
             # Pipelines
             f"/{SERVICE_NAME}/StartupPipeline": handler.startup_pipeline,
             f"/{SERVICE_NAME}/RunCuration": handler.run_curation,

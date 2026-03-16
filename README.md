@@ -1,8 +1,106 @@
 # Segnog
 
-> **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
+One endpoint. One Docker container. Your agent gets memory.
 
-Segnog is a memory microservice for AI agents. It stores what happened, distills what mattered, and returns the right context at the right moment — so the agent returns to the sign and plays it better.
+```bash
+docker-compose up -d
+```
+
+```bash
+curl -X POST http://localhost:9000/observe \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "agent-session-42",
+    "content": "The user asked about last quarter's deployment incident.",
+    "timestamp": "2025-11-01T14:30:00Z",
+    "source": "chat"
+  }'
+```
+
+```json
+{
+  "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "context": "In Q3, the v2.3 deployment on October 14th caused a memory leak in the worker pool. It was patched in v2.3.1 the following morning after Caroline identified the root cause in the session logs..."
+}
+```
+
+That's it. The agent passes what it sees. Segnog returns what it should remember.
+
+No schema to define. No retrieval logic to write. No storage layer to configure. Segnog decides what to store, what to search, and how to assemble the context. The agent just calls `/observe` at every turn and uses the returned `context` string.
+
+---
+
+## How it stays simple
+
+**One container holds everything.** DragonflyDB (session cache), FalkorDB (long-term graph), NATS (event bus), REST server, gRPC server, and background workers all run inside a single Docker container managed by supervisord. There is no external cluster to operate.
+
+**One endpoint does everything.** `/observe` stores the current observation, searches for related memory, and returns a formatted context passage — all in a single call. Reading and writing are not separate operations.
+
+**Data organises itself in the background.** The agent does not decide what is important or how to structure it. After returning the context, Segnog fires background tasks that extract knowledge, identify entities, consolidate episodes, and maintain a graph of who knows what. This happens asynchronously — the agent's response is not delayed.
+
+**Memory has two layers, kept separate.** DragonflyDB is the hot session cache — fast, in-memory, TTL-scoped. FalkorDB is the persistent graph — structured, searchable across sessions. The hot path never touches the graph. The graph is populated in the background, then pulled into the session on the next cold start.
+
+---
+
+## One Endpoint
+
+Every interaction with memory is a POST to `/observe`. The only required fields are `session_id` and `content`.
+
+**Request:**
+```json
+{
+  "session_id": "agent-session-42",
+  "content": "The user asked about last quarter's deployment incident.",
+  "timestamp": "2025-11-01T14:30:00Z",
+  "source": "chat"
+}
+```
+
+**Response:**
+```json
+{
+  "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "context": "..."
+}
+```
+
+**Optional flags:**
+| Field | Default | Effect |
+|-------|---------|--------|
+| `read_only` | false | Skip all writes — only retrieve and return context |
+| `summarize` | false | LLM-summarize the context instead of listing entries |
+| `top_k` | 10 | Max episodes to include in context |
+| `knowledge_top_k` | 10 | Max knowledge entries to include |
+| `minimal` | false | Skip DragonflyDB entirely — direct FalkorDB search only |
+
+---
+
+## Deployment
+
+```bash
+docker-compose build
+docker-compose up -d
+
+# Health check
+curl http://localhost:9000/health
+```
+
+**Set your API keys** (environment or `.secrets.toml`):
+```bash
+MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
+MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
+```
+
+Named Docker volumes persist data across container restarts:
+- `dragonfly_data` — session cache
+- `falkordb_data` — episodes, knowledge, ontology
+- `nats_data` — event stream
+
+---
+
+## Name
+
+> **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
 
 ---
 
@@ -20,32 +118,6 @@ A keyword match tells you what is *related*. What you actually need is what was 
 
 **3. Consolidation should be unconscious.**
 An agent should not have to decide how to manage its own memory. The observe endpoint handles everything in one call — store, retrieve, summarize, return context — while background workers consolidate experiences into knowledge asynchronously, the way biological memory is refined during sleep.
-
----
-
-## The Observe Endpoint
-
-Every interaction with memory happens through a single call to `/observe`:
-
-```json
-{
-  "session_id": "agent-session-42",
-  "content": "The user asked about last quarter's deployment incident.",
-  "timestamp": "2025-11-01T14:30:00Z",
-  "source": "chat"
-}
-```
-
-Segnog returns a context passage the agent can use immediately:
-
-```json
-{
-  "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "context": "In Q3, the v2.3 deployment on October 14th caused a memory leak in the worker pool. It was patched in v2.3.1 the following morning after Caroline identified the root cause in the session logs..."
-}
-```
-
-The agent does not choose where to store, what to search, or how to format. Observe handles all of it.
 
 ---
 
@@ -82,7 +154,7 @@ The agent does not choose where to store, what to search, or how to format. Obse
               triggered)             decay, fallback)
 ```
 
-All six services — DragonflyDB, FalkorDB, NATS, gRPC server, REST server, and background workers — run inside a single Docker container managed by supervisord.
+All six services run inside a single Docker container managed by supervisord.
 
 ---
 
@@ -150,7 +222,7 @@ All FalkorDB queries filter by `group_id`. All session keys include `group_id`. 
 ```
 POST /observe
    │
-   ├─ 1. Embed content  ──────────────────────────────── OpenAI embeddings API
+   ├─ 1. Embed content  ──────────────────────────────── embeddings API
    │
    ├─ 2. Store in DragonflyDB session
    │
@@ -168,7 +240,7 @@ POST /observe
    │       summarize=true:  LLM summarize session entries  (DSPy)
    │       summarize=false: format entries as text list  (default)
    │
-   ├─ 6. Return context to agent  ←─────────────── ~1–2 seconds total
+   ├─ 6. Return context to agent  ←─────────────── ~300–800ms (no LLM)
    │
    └─ 7. Fire background tasks (non-blocking)  [skipped if read_only=true]
          ├─ Store episode to FalkorDB
@@ -179,7 +251,7 @@ POST /observe
          └─ Judge observation type + importance
 ```
 
-The agent receives its context in ~1–2 seconds. Everything that touches FalkorDB or calls LLMs for extraction happens asynchronously in the background. When `read_only=true`, steps 2 and 7 are skipped entirely — no writes occur.
+The agent receives its context in ~300–800ms (no LLM calls on the default path). Everything that touches FalkorDB or calls LLMs for extraction happens asynchronously in the background. When `read_only=true`, steps 2 and 7 are skipped entirely — no writes occur.
 
 ---
 
@@ -194,8 +266,6 @@ Defaults:
   α = 0.30  (temporal weight)
   β = 0.20  (Hebbian weight)
 ```
-
-Direct FalkorDB searches (e.g. the benchmark's `episodes_knowledge` mode) return raw semantic scores from the vector index without 3D re-scoring.
 
 **Semantic** — cosine similarity between query embedding and result embedding.
 
@@ -263,7 +333,7 @@ After each consolidation batch, `update_group_ontology()` runs:
      Each entity → (name, Schema.org class)
      Filtered: no image entities, no names > 4 words
 
-8b. Upsert OntologyNodes
+8b. Upsert OntologyNodes  (parallel per entity)
      MERGE by (name, group_id)
      └─ If new: create node + embed summary
      └─ If existing: LLM updates summary with new episode context
@@ -365,8 +435,6 @@ Retrieval mode: `episodes_knowledge` (episodes + knowledge hybrid, top-25 + top-
 
 Temporal reasoning scores highest — episodes are stored with explicit session timestamps and the `expand_adjacent` hops pull in surrounding turns, giving the model strong sequential context for date-relative questions. Multi-hop reasoning (cross-session inference) is the hardest category: it requires linking facts across separate sessions, which the ontology and knowledge graph help but do not fully solve.
 
-Note: the `episodes_knowledge` retrieval mode queries FalkorDB directly and uses raw semantic scores from the vector index, not the 3D scorer (which applies only to the DragonflyDB warm path in `/observe`). The Hebbian component accumulates over repeated interactions and is therefore not a factor in single-pass benchmark evaluation.
-
 ### Running the Benchmark
 
 ```bash
@@ -379,32 +447,6 @@ python -m benchmarks.locomo run \
   --phase evaluate --conversations 0 --trials 3 \
   --retrieval episodes_knowledge --use-llm-judge
 ```
-
----
-
-## Deployment
-
-All six services (DragonflyDB, FalkorDB, NATS, gRPC, REST, workers) run in a single container managed by supervisord.
-
-```bash
-# Build and start
-docker-compose build
-docker-compose up -d
-
-# Health check
-curl http://localhost:9000/health
-```
-
-**API keys** (environment or `.secrets.toml`):
-```bash
-MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
-MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
-```
-
-Named Docker volumes persist data across rebuilds:
-- `dragonfly_data` — session cache + event streams
-- `falkordb_data` — episodes, knowledge, ontology
-- `nats_data` — event stream persistence
 
 ---
 
