@@ -10,6 +10,7 @@ build/
 .service.log
 .venv/
 data/
+!data/schemaorg-current-https.jsonld
 benchmarks/
 scripts/
 src/memory_service/data/class_embeddings_*.json
