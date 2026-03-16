@@ -355,9 +355,8 @@ async def main():
     session_id = f"smoke-hebbian-{int(time.time())}"
     passed = 0
     failed = 0
-    total = 7
 
-    print(f"Smoke test: temporal scoring + Hebbian learning")
+    print("Smoke test: temporal scoring + Hebbian learning")
     print(f"Session: {session_id}")
 
     async with httpx.AsyncClient(timeout=30) as client:

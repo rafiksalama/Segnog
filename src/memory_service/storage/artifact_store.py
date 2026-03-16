@@ -87,8 +87,8 @@ class ArtifactStore(BaseStore):
         for entry, embedding in zip(entries, embeddings):
             artifact_uuid = str(uuid4())
             labels_raw = entry.get("labels", [])
-            labels_normalized = [normalize_label(l) for l in labels_raw if l]
-            labels_normalized = [l for l in labels_normalized if l]
+            labels_normalized = [normalize_label(lbl) for lbl in labels_raw if lbl]
+            labels_normalized = [lbl for lbl in labels_normalized if lbl]
 
             await self._graph.query(
                 """CREATE (a:Artifact {
@@ -279,7 +279,7 @@ class ArtifactStore(BaseStore):
         if not labels:
             return candidates[:top_k]
 
-        normalized_labels = [normalize_label(l) for l in labels if l]
+        normalized_labels = [normalize_label(lbl) for lbl in labels if lbl]
         if not normalized_labels:
             return candidates[:top_k]
 

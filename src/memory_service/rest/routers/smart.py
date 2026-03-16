@@ -2,11 +2,12 @@
 
 import json
 import logging
+
 from fastapi import APIRouter, Request
 
-logger = logging.getLogger(__name__)
-
 from ..dependencies import get_episode_store, get_short_term, get_dragonfly, get_ontology_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

@@ -12,7 +12,6 @@ Prerequisites:
   - OpenRouter API key configured
 """
 
-import asyncio
 import json
 import time
 
@@ -539,7 +538,7 @@ class TestStartupPipeline:
         assert "search_labels" in data
         assert "search_query" in data
 
-        print(f"\n  ✓ StartupPipeline completed:")
+        print("\n  ✓ StartupPipeline completed:")
         print(f"    - search_labels: {data['search_labels']}")
         print(f"    - search_query: '{data['search_query'][:60]}...'")
         print(f"    - long_term_context: {len(data['long_term_context'])} chars")
@@ -616,7 +615,7 @@ class TestRunCuration:
         assert "artifact_count" in data
         assert "events_compressed" in data
 
-        print(f"\n  ✓ RunCuration completed:")
+        print("\n  ✓ RunCuration completed:")
         print(f"    - reflection: '{data['reflection'][:100]}...' ({len(data['reflection'])} chars)")
         print(f"    - reflection_uuid: {data['reflection_uuid']}")
         print(f"    - knowledge_count: {data['knowledge_count']}")

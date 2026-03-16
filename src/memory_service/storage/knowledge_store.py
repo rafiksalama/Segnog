@@ -153,8 +153,8 @@ class KnowledgeStore(BaseStore):
             # Otherwise: create new knowledge node
             knowledge_uuid = str(uuid4())
             labels_raw = entry.get("labels", [])
-            labels_normalized = [normalize_label(l) for l in labels_raw if l]
-            labels_normalized = [l for l in labels_normalized if l]
+            labels_normalized = [normalize_label(lbl) for lbl in labels_raw if lbl]
+            labels_normalized = [lbl for lbl in labels_normalized if lbl]
 
             await self._graph.query(
                 """CREATE (k:Knowledge {
@@ -311,7 +311,7 @@ class KnowledgeStore(BaseStore):
         top_k: int = 10,
     ) -> List[Dict[str, Any]]:
         """Label-based search via HAS_LABEL graph edges. Ranks by match count."""
-        normalized = [normalize_label(l) for l in labels if l]
+        normalized = [normalize_label(lbl) for lbl in labels if lbl]
         if not normalized:
             return []
 
@@ -416,7 +416,7 @@ class KnowledgeStore(BaseStore):
         if not labels:
             return candidates[:top_k]
 
-        normalized_labels = [normalize_label(l) for l in labels if l]
+        normalized_labels = [normalize_label(lbl) for lbl in labels if lbl]
         if not normalized_labels:
             return candidates[:top_k]
 
