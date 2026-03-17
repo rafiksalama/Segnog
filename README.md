@@ -85,11 +85,23 @@ docker-compose up -d
 curl http://localhost:9000/health
 ```
 
-**Set your API keys** (environment or `.secrets.toml`):
-```bash
-MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
-MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
+**Set your API keys** — create `.secrets.toml` in the project root (it is gitignored):
+```toml
+# .secrets.toml
+[default.embeddings]
+api_key = "sk-or-v1-..."
+
+[default.llm]
+api_key = "sk-or-v1-..."
 ```
+
+Or via environment variables:
+```bash
+export MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
+export MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
+```
+
+Both fields accept the same OpenRouter key. The Docker container reads environment variables directly — pass them with `-e` or via `docker-compose.yml`.
 
 Named Docker volumes persist data across container restarts:
 - `dragonfly_data` — session cache
