@@ -1,0 +1,44 @@
+<svg width="480" height="300" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg">
+<rect x="0" y="0" width="680" height="420" fill="#FFFFFF"/>
+<g transform="translate(155, 30)">
+  <path d="M80 65 Q115 45 155 75" fill="none" stroke="#D85A30" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  <path d="M155 75 Q195 55 230 55" fill="none" stroke="#EF9F27" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  <path d="M80 65 Q55 100 65 140" fill="none" stroke="#EF9F27" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  <path d="M155 75 Q150 120 145 155" fill="none" stroke="#D85A30" stroke-width="2.5" stroke-linecap="round" opacity="0.45"/>
+  <path d="M65 140 Q100 160 145 155" fill="none" stroke="#F0997B" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  <path d="M145 155 Q185 145 215 125" fill="none" stroke="#EF9F27" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  <path d="M145 155 Q115 195 95 225" fill="none" stroke="#D85A30" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  <path d="M95 225 Q140 235 180 215" fill="none" stroke="#F0997B" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  <ellipse cx="80" cy="65" rx="14" ry="10" fill="#D85A30" transform="rotate(-20 80 65)"/>
+  <line x1="93" y1="60" x2="93" y2="20" stroke="#D85A30" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M93 20 Q105 28 93 36" fill="#D85A30" opacity="0.7"/>
+  <ellipse cx="155" cy="78" rx="17" ry="12" fill="#EF9F27" transform="rotate(-20 155 78)"/>
+  <line x1="171" y1="72" x2="171" y2="25" stroke="#EF9F27" stroke-width="3" stroke-linecap="round"/>
+  <path d="M171 25 Q186 35 171 45" fill="#EF9F27" opacity="0.7"/>
+  <ellipse cx="230" cy="55" rx="11" ry="8" fill="#F0997B" transform="rotate(-20 230 55)"/>
+  <line x1="240" y1="50" x2="240" y2="20" stroke="#F0997B" stroke-width="2" stroke-linecap="round"/>
+  <ellipse cx="65" cy="142" rx="13" ry="9" fill="#EF9F27" transform="rotate(-25 65 142)"/>
+  <line x1="77" y1="137" x2="77" y2="100" stroke="#EF9F27" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M77 100 Q90 108 77 116" fill="#EF9F27" opacity="0.6"/>
+  <ellipse cx="145" cy="158" rx="20" ry="14" fill="#D85A30" transform="rotate(-20 145 158)"/>
+  <line x1="164" y1="150" x2="164" y2="95" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/>
+  <path d="M164 95 Q180 106 164 117" fill="#D85A30" opacity="0.7"/>
+  <ellipse cx="145" cy="158" rx="9" ry="6" fill="#FAC775" transform="rotate(-20 145 158)" opacity="0.7"/>
+  <ellipse cx="215" cy="125" rx="11" ry="8" fill="#F0997B" transform="rotate(-15 215 125)"/>
+  <line x1="225" y1="120" x2="225" y2="88" stroke="#F0997B" stroke-width="2" stroke-linecap="round"/>
+  <ellipse cx="95" cy="228" rx="14" ry="10" fill="#EF9F27" transform="rotate(-20 95 228)"/>
+  <line x1="108" y1="222" x2="108" y2="180" stroke="#EF9F27" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M108 180 Q121 188 108 196" fill="#EF9F27" opacity="0.6"/>
+  <ellipse cx="180" cy="218" rx="12" ry="9" fill="#D85A30" transform="rotate(-25 180 218)"/>
+  <line x1="191" y1="212" x2="191" y2="178" stroke="#D85A30" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="38" cy="85" r="4" fill="#FAC775" opacity="0.6"/>
+  <circle cx="255" cy="75" r="3.5" fill="#D85A30" opacity="0.5"/>
+  <circle cx="35" cy="190" r="5" fill="#F0997B" opacity="0.5"/>
+  <circle cx="245" cy="160" r="4" fill="#FAC775" opacity="0.5"/>
+  <circle cx="130" cy="250" r="3.5" fill="#EF9F27" opacity="0.45"/>
+  <circle cx="205" cy="245" r="3" fill="#FAC775" opacity="0.45"/>
+  <circle cx="115" cy="15" r="3.5" fill="#F0997B" opacity="0.5"/>
+</g>
+<text x="340" y="340" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="50" font-weight="500" fill="#3C3C3A" letter-spacing="0">segnog</text>
+<text x="340" y="378" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#D85A30" letter-spacing="5">MEMORY</text>
+</svg>
