@@ -1,4 +1,6 @@
-# Segnog
+<p align="center">
+  <img src="assets/segnog-logo-dark.svg" width="480" alt="Segnog" />
+</p>
 
 One endpoint. One Docker container. Your agent gets memory.
 
