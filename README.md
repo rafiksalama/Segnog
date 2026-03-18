@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/segnog-logo-light.svg" width="600" alt="Segnog" />
+  <img src="assets/segnog-logo.png" width="600" alt="Segnog" />
 </p>
 
 One endpoint. One Docker container. Your agent gets memory.
