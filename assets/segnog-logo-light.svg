@@ -1,5 +1,4 @@
 <svg width="480" height="300" viewBox="0 0 680 420" xmlns="http://www.w3.org/2000/svg">
-<rect x="0" y="0" width="680" height="420" fill="#FFFFFF"/>
 <g transform="translate(155, 30)">
   <path d="M80 65 Q115 45 155 75" fill="none" stroke="#D85A30" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
   <path d="M155 75 Q195 55 230 55" fill="none" stroke="#EF9F27" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
