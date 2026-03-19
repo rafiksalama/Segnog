@@ -54,8 +54,8 @@ def create_app() -> FastAPI:
     # Serve the built UI. In Docker the package is installed to site-packages so
     # we check a list of candidate paths rather than walking up from __file__.
     for _candidate in [
-        Path("/app/ui/dist"),                                           # Docker
-        Path(__file__).parent.parent.parent.parent / "ui" / "dist",   # editable install
+        Path("/app/ui/dist"),  # Docker
+        Path(__file__).parent.parent.parent.parent / "ui" / "dist",  # editable install
     ]:
         if _candidate.exists():
             app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="ui")

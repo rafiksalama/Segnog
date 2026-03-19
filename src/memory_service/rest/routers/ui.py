@@ -43,17 +43,13 @@ async def get_stats(request: Request, group_id: Optional[str] = None):
     ep_count = kn_count = onto_count = grp_count = pending_count = hebbian_count = 0
 
     try:
-        r = await ep_store._graph.ro_query(
-            f"MATCH (e:Episode {gid_filter}) RETURN count(e) AS n"
-        )
+        r = await ep_store._graph.ro_query(f"MATCH (e:Episode {gid_filter}) RETURN count(e) AS n")
         ep_count = r.result_set[0][0] if r.result_set else 0
     except Exception:
         pass
 
     try:
-        r = await ep_store._graph.ro_query(
-            f"MATCH (k:Knowledge {gid_filter}) RETURN count(k) AS n"
-        )
+        r = await ep_store._graph.ro_query(f"MATCH (k:Knowledge {gid_filter}) RETURN count(k) AS n")
         kn_count = r.result_set[0][0] if r.result_set else 0
     except Exception:
         pass
@@ -84,9 +80,7 @@ async def get_stats(request: Request, group_id: Optional[str] = None):
         pass
 
     try:
-        r = await ep_store._graph.ro_query(
-            "MATCH ()-[r:CO_ACTIVATED]->() RETURN count(r) AS n"
-        )
+        r = await ep_store._graph.ro_query("MATCH ()-[r:CO_ACTIVATED]->() RETURN count(r) AS n")
         hebbian_count = r.result_set[0][0] if r.result_set else 0
     except Exception:
         pass
@@ -354,8 +348,7 @@ async def list_ontology_cooccurrence(request: Request, limit: int = 400):
             params={"limit": limit},
         )
         edges = [
-            {"source": row[0], "target": row[1], "weight": int(row[2])}
-            for row in result.result_set
+            {"source": row[0], "target": row[1], "weight": int(row[2])} for row in result.result_set
         ]
         return {"edges": edges}
     except Exception as e:
