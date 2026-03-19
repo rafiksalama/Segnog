@@ -9,8 +9,9 @@ build/
 .service.pid
 .service.log
 .venv/
-data/
-!data/schemaorg-current-https.jsonld
+/data/
+!/data/schemaorg-current-https.jsonld
+src/memory_service/data/class_embeddings_*.json
 benchmarks/
 scripts/
 tests/
