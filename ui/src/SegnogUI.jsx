@@ -2,6 +2,18 @@ import { useState, useEffect, useRef, createContext, useContext } from "react";
 
 const API = "/api/v1/memory";
 
+// ─── Deterministic type → color ────────────────────────────────────────
+const TYPE_PALETTE = [
+  "#5de4c7","#82aaff","#c792ea","#ffd580","#ff6b8a","#22c55e",
+  "#f97316","#06b6d4","#a78bfa","#fb923c","#34d399","#f472b6",
+  "#60a5fa","#facc15","#4ade80","#e879f9","#38bdf8","#fb7185",
+];
+const typeColor = t => {
+  let h = 0;
+  for (let i = 0; i < (t || "").length; i++) h = (h * 31 + (t || "").charCodeAt(i)) >>> 0;
+  return TYPE_PALETTE[h % TYPE_PALETTE.length];
+};
+
 // ─── Theme Palettes ────────────────────────────────────────────────────
 const DARK = {
   bg: "#0a0b0f",
@@ -445,10 +457,6 @@ const GraphPage = () => {
     }
     const pan  = panRef.current;
     const zoom = zoomRef.current;
-    const typeColor = t => ({ Person: p.accent, Organization: p.blue,
-      SoftwareApplication: p.purple, CreativeWork: p.warm,
-      Place: p.coral, Event: p.green })[t] || p.textMuted;
-
     // Build nodes when ontology data changes
     const rawEdges   = ontoEdgeData?.edges    || [];
     const rawCooccur = ontoCooccurData?.edges || [];
@@ -565,8 +573,8 @@ const GraphPage = () => {
       const singletonNodes = nodes.filter(n => n.isSingleton);
 
       // ── Adaptive ring geometry ─────────────────────────────────────────
-      const maxOrbit = Math.min(w, h) * 0.10;
-      const orbitR   = c => Math.min(maxOrbit, 20 + c.spokes.length * 8);
+      const maxOrbit = Math.min(w, h) * 0.07;
+      const orbitR   = c => Math.min(maxOrbit, 16 + c.spokes.length * 6);
       const nC       = realComms.length;
       // Pairwise minSep: use actual orbit radii of adjacent community pairs,
       // not a uniform maxOrbit — avoids over-spacing small communities
@@ -577,7 +585,7 @@ const GraphPage = () => {
           maxPairSep = Math.max(maxPairSep, orbitR(byOrbit[i]) + orbitR(byOrbit[(i+1) % nC]) + 28);
       }
       const minRing  = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
-      const hubRing  = nC <= 1 ? 0 : Math.min(Math.min(w, h) * 0.38, Math.max(minRing, 36));
+      const hubRing  = nC <= 1 ? 0 : Math.min(Math.min(w, h) * 0.26, Math.max(minRing, 36));
 
       if (nC === 0) {
         // All singletons — centered grid
@@ -889,20 +897,36 @@ const GraphPage = () => {
         }
       } else if (layout === "fabric") {
         const colW = w * 0.84 / Math.max(types.length, 1);
+        const WAVE_AMP = 18, WAVE_FREQ = (Math.PI * 2) / Math.max(types.length, 4);
         types.forEach((t, ti) => {
           const x = w * 0.08 + ti * colW + colW / 2;
-          ctx.beginPath(); ctx.moveTo(x, h * 0.08); ctx.lineTo(x, h * 0.94);
+          const labelY = h * 0.055 + Math.sin(ti * WAVE_FREQ) * WAVE_AMP;
+          ctx.beginPath(); ctx.moveTo(x, labelY + 6); ctx.lineTo(x, h * 0.94);
           ctx.strokeStyle = typeColor(t) + "30"; ctx.lineWidth = 1.2; ctx.stroke();
           ctx.fillStyle = typeColor(t) + "cc"; ctx.font = `600 9px ${MONO}`; ctx.textAlign = "center";
-          ctx.fillText(t, x, h * 0.055);
+          ctx.fillText(t, x, labelY);
+        });
+      }
+
+      // Hub layout: draw spoke→hub connector lines first (behind everything)
+      if (layout === "hub") {
+        nodes.forEach(n => {
+          if (n.isSingleton || n.isHub || n.community === -1) return;
+          // Find hub of this community
+          const hub = nodes.find(h => h.isHub && !h.isSingleton && h.community === n.community);
+          if (!hub) return;
+          ctx.beginPath(); ctx.moveTo(hub.x, hub.y); ctx.lineTo(n.x, n.y);
+          ctx.setLineDash([2, 5]);
+          ctx.strokeStyle = n.color + "35"; ctx.lineWidth = 0.8; ctx.stroke();
+          ctx.setLineDash([]);
         });
       }
 
       // Edges: type 0 = RELATES (solid, accent-tinted), type 1 = co-occurrence (dashed, muted)
-      // In hub layout skip intra-community edges — orbit decoration implies those
+      // In hub layout skip intra-community co-occurrence edges — orbit decoration implies those
       edges.forEach(([a, b, etype]) => {
         if (!nodes[a] || !nodes[b]) return;
-        if (layout === "hub") {
+        if (layout === "hub" && etype === 1) {
           if (nodes[a].community !== undefined && nodes[a].community === nodes[b].community) return;
         }
         ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y);
@@ -972,8 +996,8 @@ const GraphPage = () => {
 
     // ── CoSE: simulated-annealing force-directed layout ──────────────────
     // Equations: spring F=k_s×(d−L)/d  |  repulsion F=k_r/d²  |  gravity F=k_g×d
-    const COSE_K_S = 0.45, COSE_L = 50, COSE_K_R = 4500, COSE_K_G = 0.25;
-    const COSE_INIT = 0.1, COSE_MAX = 500, COSE_CELL = 80;
+    const COSE_K_S = 0.35, COSE_L = 90, COSE_K_R = 18000, COSE_K_G = 0.015;
+    const COSE_INIT = 0.12, COSE_MAX = 600, COSE_CELL = 150;
     let coseIter = 0;
     let coseGrid  = {};
 
@@ -1148,10 +1172,13 @@ const GraphPage = () => {
       canvas.style.cursor = "move";
     };
 
+    // mouseleave only cancels drag state — never touches selectedNode
+    const onLeave = () => { drag.node = null; drag.panning = false; drag.didMove = false; drag.downClient = null; canvas.style.cursor = "move"; };
+
     canvas.addEventListener("mousedown",  onDown);
     canvas.addEventListener("mousemove",  onMove);
     canvas.addEventListener("mouseup",    onUp);
-    canvas.addEventListener("mouseleave", onUp);
+    canvas.addEventListener("mouseleave", onLeave);
     canvas.addEventListener("wheel",      onWheel, { passive: false });
 
     return () => {
@@ -1160,7 +1187,7 @@ const GraphPage = () => {
       canvas.removeEventListener("mousedown",  onDown);
       canvas.removeEventListener("mousemove",  onMove);
       canvas.removeEventListener("mouseup",    onUp);
-      canvas.removeEventListener("mouseleave", onUp);
+      canvas.removeEventListener("mouseleave", onLeave);
       canvas.removeEventListener("wheel",      onWheel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1232,16 +1259,25 @@ const GraphPage = () => {
         ))}
       </div>
 
-      {/* Bottom-left legend */}
-      <div style={{ position: "absolute", bottom: 20, left: 24, zIndex: 10, display: "flex", gap: 14, pointerEvents: "none" }}>
-        {[["Person", p.accent], ["Organization", p.blue], ["SoftwareApplication", p.purple],
-          ["CreativeWork", p.warm], ["Place", p.coral], ["Event", p.green]].map(([label, color]) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
-            <span style={{ fontSize: 10, color: p.textMuted, fontFamily: MONO }}>{label}</span>
+      {/* Bottom-left legend — derived from actual node types */}
+      {ontology.length > 0 && (() => {
+        const types = [...new Set(ontology.map(o => o.schema_type || "Thing"))].sort();
+        return (
+          <div style={{
+            position: "absolute", bottom: 20, left: 24, zIndex: 10, pointerEvents: "none",
+            background: p.surface + "cc", backdropFilter: "blur(8px)",
+            border: `1px solid ${p.border}`, borderRadius: 8,
+            padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: "6px 14px", maxWidth: 340,
+          }}>
+            {types.map(t => (
+              <div key={t} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor(t), flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: p.textMuted, fontFamily: MONO }}>{t}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* Right panel — floating overlay */}
       <div style={{
