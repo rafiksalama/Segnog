@@ -15,3 +15,5 @@ benchmarks/
 scripts/
 tests/
 src/memory_service/data/class_embeddings_*.json
+ui/node_modules/
+ui/dist/

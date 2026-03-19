@@ -1,6 +1,6 @@
 ## ---------------------------------------------------------------------------
 ##  Segnog — All-in-one container
-##  Bundles DragonflyDB + FalkorDB + Memory Service in a single image.
+##  Bundles DragonflyDB + FalkorDB + Memory Service + UI in a single image.
 ## ---------------------------------------------------------------------------
 
 # ── Build Python deps ──────────────────────────────────────────────────────
@@ -17,6 +17,17 @@ COPY src/ src/
 COPY client/ client/
 
 RUN pip install --no-cache-dir --prefix=/install .
+
+# ── Build UI ───────────────────────────────────────────────────────────────
+FROM node:20-slim AS ui-builder
+
+WORKDIR /ui
+
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+COPY ui/ .
+RUN npm run build
 
 # ── Runtime ────────────────────────────────────────────────────────────────
 FROM python:3.11-slim
@@ -49,6 +60,9 @@ COPY --from=builder /install /usr/local
 COPY src/ src/
 COPY client/ client/
 COPY settings.toml ./
+
+# ── Copy built UI ─────────────────────────────────────────────────────────
+COPY --from=ui-builder /ui/dist /app/ui/dist
 
 # ── Data directories ──────────────────────────────────────────────────────
 RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /var/log/supervisor
@@ -96,7 +110,7 @@ stderr_logfile_maxbytes=0
 environment=MEMORY_SERVICE_DRAGONFLY__URL="redis://localhost:6381",MEMORY_SERVICE_FALKORDB__URL="redis://localhost:6380",MEMORY_SERVICE_NATS__URL="nats://localhost:4222",MEMORY_SERVICE_NATS__ENABLED="true"
 EOF
 
-# gRPC + REST
+# gRPC + REST (port 9000 also serves the UI at http://localhost:9000/)
 EXPOSE 50051 9000
 
 # Persist database state

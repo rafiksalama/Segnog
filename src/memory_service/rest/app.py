@@ -1,10 +1,13 @@
 """FastAPI application factory."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe
+from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe, ui
 from .dependencies import setup_backends, teardown_backends
 
 
@@ -25,6 +28,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     prefix = "/api/v1/memory"
 
     app.include_router(events.router, prefix=prefix, tags=["events"])
@@ -35,9 +45,20 @@ def create_app() -> FastAPI:
     app.include_router(smart.router, prefix=prefix, tags=["smart"])
     app.include_router(pipelines.router, prefix=prefix, tags=["pipelines"])
     app.include_router(observe.router, prefix=prefix, tags=["observe"])
+    app.include_router(ui.router, prefix=prefix, tags=["ui"])
 
     @app.get("/health")
     async def health():
         return {"status": "ok", "service": "agent-memory-service"}
+
+    # Serve the built UI. In Docker the package is installed to site-packages so
+    # we check a list of candidate paths rather than walking up from __file__.
+    for _candidate in [
+        Path("/app/ui/dist"),                                           # Docker
+        Path(__file__).parent.parent.parent.parent / "ui" / "dist",   # editable install
+    ]:
+        if _candidate.exists():
+            app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="ui")
+            break
 
     return app
