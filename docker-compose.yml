@@ -2,8 +2,8 @@ services:
   segnog:
     build: .
     ports:
-      - "50051:50051"   # gRPC
-      - "9000:9000"     # REST
+      - "${GRPC_PORT:-50051}:50051"   # gRPC
+      - "${PORT:-9000}:9000"          # REST + UI
     environment:
       - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${OPENROUTER_API_KEY}
       - MEMORY_SERVICE_LLM__API_KEY=${OPENROUTER_API_KEY}

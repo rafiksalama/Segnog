@@ -47,11 +47,17 @@ COPY --from=docker.dragonflydb.io/dragonflydb/dragonfly:latest /usr/local/bin/dr
 COPY --from=falkordb/falkordb:latest /usr/local/bin/redis-server /usr/local/bin/falkordb-server
 COPY --from=falkordb/falkordb:latest /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
 
-# ── Install NATS server ──────────────────────────────────────────────────
+# ── Install NATS server (arch-aware: amd64 + arm64) ─────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
-    curl -L https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | \
-    tar xz -C /usr/local/bin --strip-components=1 nats-server-v2.10.24-linux-amd64/nats-server && \
+    ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) NATS_ARCH=amd64 ;; \
+      arm64) NATS_ARCH=arm64 ;; \
+      *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -L "https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-${NATS_ARCH}.tar.gz" | \
+    tar xz -C /usr/local/bin --strip-components=1 "nats-server-v2.10.24-linux-${NATS_ARCH}/nats-server" && \
     apt-get purge -y curl && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 

@@ -252,6 +252,39 @@ const DashboardPage = () => {
 };
 
 // ─── Page: Sessions ────────────────────────────────────────────────────
+const EPISODE_PREVIEW_LEN = 200;
+
+const EpisodeCard = ({ ep }) => {
+  const p = useP();
+  const [expanded, setExpanded] = useState(false);
+  const content = ep.content || "";
+  const truncated = content.length > EPISODE_PREVIEW_LEN && !expanded;
+  return (
+    <div style={{ background: p.surfaceAlt, borderRadius: 8, padding: "12px 16px", borderLeft: `3px solid ${ep.consolidated ? p.accent : p.textDim}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 11, fontFamily: MONO, color: p.textDim }}>{ep.uuid?.slice(0, 18)}…</span>
+          <Badge color={ep.episode_type === "raw" ? p.blue : p.warm}>{ep.episode_type || "raw"}</Badge>
+        </div>
+        <span style={{ fontSize: 11, fontFamily: MONO, color: p.textMuted }}>{ep.created_at_iso?.slice(11, 19) || ""}</span>
+      </div>
+      <div style={{ fontSize: 13, color: p.text, lineHeight: 1.5, marginBottom: 6 }}>
+        {truncated ? content.slice(0, EPISODE_PREVIEW_LEN) + "…" : content}
+      </div>
+      {content.length > EPISODE_PREVIEW_LEN && (
+        <button onClick={() => setExpanded(v => !v)} style={{
+          background: "none", border: "none", padding: 0, cursor: "pointer",
+          fontSize: 11, fontFamily: MONO, color: p.accent, marginBottom: 6,
+        }}>{expanded ? "show less" : "show more"}</button>
+      )}
+      <div style={{ display: "flex", gap: 12, fontSize: 11, fontFamily: MONO, color: p.textMuted }}>
+        <span style={{ color: ep.consolidated ? p.green : p.textDim }}>{ep.consolidated ? "✓ consolidated" : "○ pending"}</span>
+        <span style={{ color: ep.knowledge_extracted ? p.green : p.textDim }}>{ep.knowledge_extracted ? "✓ knowledge" : "○ no knowledge"}</span>
+      </div>
+    </div>
+  );
+};
+
 const SessionsPage = () => {
   const p = useP();
   const { data: sessData, loading } = useFetch(`${API}/ui/sessions?limit=50`, [], 10000);
@@ -274,7 +307,7 @@ const SessionsPage = () => {
 
   const { data: epData } = useFetch(
     selectedId ? `${API}/ui/episodes?group_id=${encodeURIComponent(selectedId)}&limit=20` : null,
-    [selectedId], 10000
+    [selectedId], 30000
   );
   const episodes = epData?.episodes || [];
 
@@ -305,7 +338,7 @@ const SessionsPage = () => {
                 <div key={s.group_id} onClick={() => setSelectedId(s.group_id)} style={{
                   background: isActive ? p.surfaceAlt : p.surface,
                   border: `1px solid ${isActive ? p.accentMid : p.border}`,
-                  borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "all 0.15s",
+                  borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "border-color 0.15s, background 0.15s",
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: p.text, fontFamily: MONO,
@@ -341,22 +374,7 @@ const SessionsPage = () => {
                   ? <Empty msg="No episodes yet." />
                   : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {episodes.map((ep, i) => (
-                        <div key={i} style={{ background: p.surfaceAlt, borderRadius: 8, padding: "12px 16px", borderLeft: `3px solid ${ep.consolidated ? p.accent : p.textDim}` }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                              <span style={{ fontSize: 11, fontFamily: MONO, color: p.textDim }}>{ep.uuid?.slice(0, 18)}…</span>
-                              <Badge color={ep.episode_type === "raw" ? p.blue : p.warm}>{ep.episode_type || "raw"}</Badge>
-                            </div>
-                            <span style={{ fontSize: 11, fontFamily: MONO, color: p.textMuted }}>{ep.created_at_iso?.slice(11, 19) || ""}</span>
-                          </div>
-                          <div style={{ fontSize: 13, color: p.text, lineHeight: 1.5, marginBottom: 8 }}>{ep.content}</div>
-                          <div style={{ display: "flex", gap: 12, fontSize: 11, fontFamily: MONO, color: p.textMuted }}>
-                            <span style={{ color: ep.consolidated ? p.green : p.textDim }}>{ep.consolidated ? "✓ consolidated" : "○ pending"}</span>
-                            <span style={{ color: ep.knowledge_extracted ? p.green : p.textDim }}>{ep.knowledge_extracted ? "✓ knowledge" : "○ no knowledge"}</span>
-                          </div>
-                        </div>
-                      ))}
+                      {episodes.map(ep => <EpisodeCard key={ep.uuid} ep={ep} />)}
                     </div>
                   )}
               </>
