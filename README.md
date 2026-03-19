@@ -176,43 +176,6 @@ Open `http://localhost:9000` → **Observe** page. Type any message, click **Sen
 
 ---
 
-## Architecture
-
-```
-                            Agent (caller)
-                                  │
-                    ┌─────────────┴──────────────┐
-                    │                            │
-              gRPC :50051                  REST :9000
-                    │                            │
-                    └──────────┬─────────────────┘
-                               │
-                    MemoryServiceHandler
-                               │
-              ┌────────────────┼────────────────┐
-              │                │                │
-        DragonflyDB         FalkorDB           NATS
-        Short-Term          Long-Term        Event Bus
-        (:6381)             (:6380)          (:4222)
-              │                │
-         Sessions           Episodes
-         Hot cache          Knowledge
-         TTL 24h            Artifacts
-                            Entities
-                            Ontology
-                            Hebbian Graph
-                               │
-                    ┌──────────┴──────────┐
-                    │                     │
-             CurationWorker         REMSweepWorker
-             (NATS, threshold-       (periodic sweep,
-              triggered)             decay, fallback)
-```
-
-All six services run inside a single Docker container managed by supervisord.
-
----
-
 ## Name
 
 > **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
