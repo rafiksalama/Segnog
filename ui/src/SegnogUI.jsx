@@ -417,6 +417,10 @@ const GraphPage = () => {
   const drawRef          = useRef(null);      // shared so edge-effect can redraw
   const prevLayoutRef    = useRef(null);
   const prevNodeCountRef = useRef(0);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [popupPos, setPopupPos]         = useState({ x: 0, y: 0 });
+  const setSelectedNodeRef = useRef(setSelectedNode);
+  const setPopupPosRef     = useRef(setPopupPos);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1090,10 +1094,12 @@ const GraphPage = () => {
       nodes.forEach(n => { const d = Math.hypot(n.x - pos.x, n.y - pos.y); if (d <= n.r + 8 && d < minD) { minD = d; hit = n; } });
       return hit;
     };
-    const drag = { node: null, panning: false, panStart: null, panOrigin: null };
+    const drag = { node: null, panning: false, panStart: null, panOrigin: null, downClient: null, didMove: false };
     const onDown = e => {
       const pos = getPos(e);
       const hit = hitTest(pos);
+      drag.downClient = { x: e.clientX, y: e.clientY };
+      drag.didMove = false;
       if (hit) {
         drag.node = hit; hit.fixed = true; hit.vx = 0; hit.vy = 0;
         canvas.style.cursor = "grabbing";
@@ -1105,6 +1111,10 @@ const GraphPage = () => {
       }
     };
     const onMove = e => {
+      if (drag.downClient) {
+        const dx = e.clientX - drag.downClient.x, dy = e.clientY - drag.downClient.y;
+        if (Math.hypot(dx, dy) > 4) drag.didMove = true;
+      }
       if (drag.node) {
         const pos = getPos(e);
         drag.node.x = Math.max(drag.node.r + 20, Math.min(w - drag.node.r - 20, pos.x));
@@ -1118,7 +1128,25 @@ const GraphPage = () => {
         canvas.style.cursor = hitTest(getPos(e)) ? "grab" : "move";
       }
     };
-    const onUp = () => { drag.node = null; drag.panning = false; canvas.style.cursor = "move"; };
+    const onUp = e => {
+      if (!drag.didMove) {
+        const r = canvas.getBoundingClientRect();
+        if (drag.node) {
+          // Node click — compute screen position of the node centre
+          const sx = drag.node.x * zoom.z + pan.x;
+          const sy = drag.node.y * zoom.z + pan.y;
+          // Convert canvas-space to CSS pixels (canvas is scaled 2x for retina)
+          const cssX = r.left + sx * (r.width  / w);
+          const cssY = r.top  + sy * (r.height / h);
+          setSelectedNodeRef.current(drag.node.data);
+          setPopupPosRef.current({ x: cssX, y: cssY });
+        } else {
+          setSelectedNodeRef.current(null);
+        }
+      }
+      drag.node = null; drag.panning = false; drag.didMove = false; drag.downClient = null;
+      canvas.style.cursor = "move";
+    };
 
     canvas.addEventListener("mousedown",  onDown);
     canvas.addEventListener("mousemove",  onMove);
@@ -1277,6 +1305,63 @@ const GraphPage = () => {
           )}
         </div>
       </div>
+
+      {/* Node popup */}
+      {selectedNode && (() => {
+        const POPUP_W = 300;
+        const POPUP_H_EST = 220;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        // Prefer placing popup to the right of the node; flip left if it would overflow
+        let left = popupPos.x + 18;
+        if (left + POPUP_W > vw - 12) left = popupPos.x - POPUP_W - 18;
+        // Prefer below the node; flip up if it would overflow
+        let top = popupPos.y - 20;
+        if (top + POPUP_H_EST > vh - 12) top = vh - POPUP_H_EST - 12;
+        return (
+          <div style={{
+            position: "fixed", left, top, width: POPUP_W, zIndex: 100,
+            background: p.surface, border: `1px solid ${p.border}`,
+            borderRadius: 10, boxShadow: `0 8px 32px rgba(0,0,0,0.35)`,
+            padding: "16px 18px",
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: p.text, lineHeight: 1.3 }}>
+                  {selectedNode.display_name || selectedNode.name}
+                </div>
+                {selectedNode.display_name && selectedNode.display_name !== selectedNode.name && (
+                  <div style={{ fontSize: 10, fontFamily: MONO, color: p.textDim, marginTop: 1 }}>{selectedNode.name}</div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Badge color={p.purple}>{selectedNode.schema_type}</Badge>
+                <button onClick={() => setSelectedNode(null)} style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: p.textMuted, fontSize: 16, lineHeight: 1, padding: "0 2px",
+                }}>×</button>
+              </div>
+            </div>
+
+            {/* Summary */}
+            {selectedNode.summary && (
+              <div style={{
+                fontSize: 12, color: p.textDim, lineHeight: 1.55, marginBottom: 10,
+                maxHeight: 120, overflowY: "auto",
+                borderTop: `1px solid ${p.border}`, paddingTop: 8,
+              }}>
+                {selectedNode.summary}
+              </div>
+            )}
+
+            {/* Footer stats */}
+            <div style={{ display: "flex", gap: 14, fontSize: 10, fontFamily: MONO, color: p.textMuted, borderTop: `1px solid ${p.border}`, paddingTop: 8 }}>
+              <span>{selectedNode.source_count || 0} source{(selectedNode.source_count || 0) !== 1 ? "s" : ""}</span>
+              {selectedNode.group_id && <span>group: {selectedNode.group_id}</span>}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
