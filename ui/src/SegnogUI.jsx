@@ -307,7 +307,7 @@ const SessionsPage = () => {
 
   const { data: epData } = useFetch(
     selectedId ? `${API}/ui/episodes?group_id=${encodeURIComponent(selectedId)}&limit=20` : null,
-    [selectedId], 30000
+    [selectedId], 10000
   );
   const episodes = epData?.episodes || [];
 
