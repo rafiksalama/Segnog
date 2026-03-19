@@ -112,6 +112,63 @@ Named Docker volumes persist data across container restarts:
 
 ---
 
+## Dashboard UI
+
+After `docker-compose up -d`, open **[http://localhost:9000](http://localhost:9000)** in a browser.
+
+The dashboard is a single-page React app served directly from the container. No separate process or install is needed.
+
+### Pages
+
+| Page | What it shows |
+|------|--------------|
+| **Dashboard** | Live counts: episodes, knowledge nodes, ontology entities, active groups, pending REM, Hebbian edges. Recent event stream. |
+| **Sessions** | All `group_id` sessions ordered by most-recent activity. Select one to see its episodes and extracted knowledge. |
+| **Memory Graph** | Interactive canvas of all OntologyNodes with edges from explicit relationships (`RELATES`) and co-occurrence via shared `ABOUT` links. |
+| **Observe** | Live playground — send an `/observe` request and see the returned context and episode UUID in real time. |
+| **REM Monitor** | Status of the background consolidation pipeline: worker state, scoring weights, Hebbian parameters. |
+| **Configuration** | All `settings.toml` values currently in effect, read live from the service. |
+
+### Memory Graph
+
+The graph canvas renders all `OntologyNode` entities and two types of edges:
+
+- **Solid lines** — explicit `RELATES` edges extracted by the LLM (e.g. `knows`, `worksFor`, `memberOf`)
+- **Dashed lines** — co-occurrence edges: pairs of entities that appear in the same `Episode` (via `ABOUT` links)
+
+Nine layout algorithms are available from the toolbar:
+
+| Layout | Description |
+|--------|-------------|
+| **Hub** | Connected-components BFS. Each component gets one hub (highest-degree node); spokes arrange around it. Isolated nodes collect below. |
+| **Force** | CoSE simulated-annealing: spring + repulsion + gravity forces with linear cooling over 500 iterations. |
+| **Spiral** | Archimedean spiral ordered by type. |
+| **Circular** | Sub-circles per Schema.org type arranged on an outer ring. |
+| **Hierarchical** | Horizontal lanes per type. |
+| **Grid** | Uniform grid, type-sorted. |
+| **Radial** | Most-connected node at centre; concentric rings outward. |
+| **Matrix** | Rectangular tile per type. |
+| **Fabric** | Vertical strand per type. |
+
+Pan with drag, zoom with scroll wheel, drag individual nodes to pin them. The canvas polls for new data every 20 seconds — edges update in place without resetting your view.
+
+### Live Polling
+
+| Data | Interval |
+|------|----------|
+| Dashboard stats | 8 s |
+| Event stream | 4 s |
+| Sessions list | 10 s |
+| Memory graph edges | 20 s |
+
+The header shows a **LIVE** badge and the time since the last successful fetch on any page with polling.
+
+### Light / Dark Theme
+
+Toggle with the sun/moon button in the top-right corner. The preference is saved to `localStorage`.
+
+---
+
 ## Name
 
 > **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
@@ -503,9 +560,17 @@ curation_max_concurrent     = 2
 ```
 agent-memory-service/
 │
-├── Dockerfile                      # All-in-one container (supervisord)
+├── Dockerfile                      # All-in-one container (supervisord + Node build stage)
 ├── docker-compose.yml
 ├── settings.toml                   # Service configuration
+│
+├── ui/                             # React/Vite dashboard (built into container)
+│   ├── src/
+│   │   ├── SegnogUI.jsx            # Single-file React app — all 6 pages + canvas
+│   │   └── main.jsx                # ReactDOM entry point
+│   ├── index.html
+│   ├── vite.config.js              # Dev proxy: /api → localhost:9000
+│   └── package.json
 │
 ├── src/memory_service/
 │   ├── main.py                     # Entry point, startup sequence
@@ -539,7 +604,13 @@ agent-memory-service/
 │   ├── background/
 │   │   └── rem_worker.py           # Polling-based REM consolidation
 │   │
-│   ├── rest/                       # FastAPI REST server
+│   ├── rest/
+│   │   ├── app.py                  # FastAPI factory — CORS, routers, StaticFiles
+│   │   └── routers/
+│   │       ├── observe.py          # POST /observe
+│   │       ├── ui.py               # GET /ui/* — dashboard read endpoints
+│   │       └── ...
+│   │
 │   └── grpc/                       # gRPC server
 │
 └── benchmarks/locomo/              # LoCoMo benchmark suite
