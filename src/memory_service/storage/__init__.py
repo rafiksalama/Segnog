@@ -1,19 +1,28 @@
 """
-Storage layer — extracted from GeneralAgent framework.
+Storage — persistence backends.
 
-Provides DragonflyDB (short-term) and FalkorDB (long-term) storage backends.
+Responsibility: All reads and writes to DragonflyDB (short-term) and FalkorDB
+(long-term). No business logic, no LLM calls.
+
+Allowed imports: ontology/ (for SchemaOrgOntology type and normalize_name).
+Must NOT import from: intelligence/, services/, workers/, messaging/, transport/.
+
+Sub-packages:
+  short_term/  — DragonflyDB client and session-scoped memory
+  long_term/   — FalkorDB graph stores (episodes, knowledge, artifacts, ontology)
+  retrieval/   — temporal scoring and Hebbian co-activation ranking
 """
 
 import logging
 from urllib.parse import urlparse
 
-from .base_store import BaseStore, normalize_name
-from .dragonfly import DragonflyClient, create_dragonfly_client
-from .short_term import ShortTermMemory
-from .episode_store import EpisodeStore, create_episode_store
-from .knowledge_store import KnowledgeStore
-from .artifact_store import ArtifactStore
-from .ontology_store import OntologyStore
+from .long_term.base_store import BaseStore, normalize_name
+from .short_term.dragonfly import DragonflyClient, create_dragonfly_client
+from .short_term.memory import ShortTermMemory
+from .long_term.episode_store import EpisodeStore, create_episode_store
+from .long_term.knowledge_store import KnowledgeStore
+from .long_term.artifact_store import ArtifactStore
+from .long_term.ontology_store import OntologyStore
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +45,10 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     """Create and connect all storage backends.
 
     Returns dict with keys: dragonfly, short_term, episode_store,
-    knowledge_store, artifact_store, openai_client.
+    knowledge_store, artifact_store, ontology_store, openai_client.
+
+    NATS wiring is intentionally excluded — callers (main.py) are responsible
+    for creating NatsClient and calling episode_store.set_event_publisher().
     """
     from openai import AsyncOpenAI
     from ..config import (
@@ -75,12 +87,13 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     openai_client = AsyncOpenAI(
         api_key=embedding_api_key,
         base_url=get_embedding_base_url(),
+        max_retries=0,  # Our _embed/_embed_batch retry loop handles retries
     )
 
     embedding_model = get_embedding_model()
 
     # Schema.org Ontology (loaded once, shared singleton)
-    from ..schema_org import get_shared_ontology
+    from ..ontology.schema_org import get_shared_ontology
 
     schema_ontology = get_shared_ontology()
 
@@ -97,22 +110,6 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology)
     await ontology_store.ensure_indexes()
 
-    # Optional NATS client
-    from ..config import get_nats_enabled, get_nats_url
-
-    nats_client = None
-    if get_nats_enabled():
-        from ..events.client import NatsClient
-        from ..events.publisher import EpisodeEventPublisher
-
-        nats_client = NatsClient(url=get_nats_url())
-        await nats_client.connect()
-
-        # Wire publisher so every episode store emits NATS events
-        publisher = EpisodeEventPublisher(nats_client)
-        episode_store.set_event_publisher(publisher)
-        logger.info("NATS client initialized")
-
     logger.info("All storage backends initialized")
 
     return {
@@ -122,7 +119,5 @@ async def init_backends(session_ttl: int = 3600) -> dict:
         "knowledge_store": knowledge_store,
         "artifact_store": artifact_store,
         "ontology_store": ontology_store,
-        "schema_ontology": schema_ontology,
         "openai_client": openai_client,
-        "nats_client": nats_client,
     }

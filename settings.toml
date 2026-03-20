@@ -54,6 +54,43 @@ enabled = true
 interval_seconds = 60
 batch_size = 5
 min_episodes_for_processing = 3
+# Cosine-similarity threshold above which a pending episode is treated as a duplicate
+# of an already-consolidated episode (0.90 = very high similarity required)
+dedup_threshold = 0.90
+
+# Retrieval parameters (observe pipeline)
+[default.retrieval]
+# How many episode candidates to fetch from FalkorDB per observe call
+episode_top_k = 25
+# How many knowledge-node candidates to fetch per observe call
+knowledge_top_k = 10
+# Minimum semantic similarity score for episode/knowledge results (0–1)
+min_score = 0.40
+# How many ontology nodes to include in context
+ontology_top_k = 5
+# Minimum score for ontology node inclusion
+ontology_min_score = 0.30
+# Number of prior session entries below which a cold-start FalkorDB pre-fill is run
+cold_start_threshold = 2
+
+# Ontology extraction
+[default.ontology]
+# Entities with more than this many words in their display name are skipped
+# (long names are almost always image captions, not real-world entities)
+entity_max_name_words = 4
+
+# Observe pipeline feature flags
+# Set any flag to false to disable that step for all observe calls.
+# Useful for debugging, cost reduction, or A/B testing pipeline variants.
+[default.pipeline]
+# Run per-episode LLM knowledge extraction in the background (step 1b)
+extract_knowledge = true
+# Run LLM observation judge in the background (step 4) — classifies type + importance
+judge_observation = true
+# Run LLM reinterpret_task() on cold-start sessions before FalkorDB pre-fill
+reinterpret_on_cold_start = true
+# Hydrate DragonflyDB session with OntologyNode summaries during warm/cold hydration
+hydrate_ontology = true
 
 # NATS event bus (event-driven curation)
 [default.nats]

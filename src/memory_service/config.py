@@ -213,3 +213,79 @@ def get_nats_curation_max_wait() -> float:
 def get_nats_curation_max_concurrent() -> int:
     s = get_settings()
     return int(s.get("nats.curation_max_concurrent", 2))
+
+
+# Background deduplication
+def get_background_dedup_threshold() -> float:
+    s = get_settings()
+    return float(s.get("background.dedup_threshold", 0.90))
+
+
+# Retrieval parameters (observe pipeline)
+def get_retrieval_episode_top_k() -> int:
+    s = get_settings()
+    return int(s.get("retrieval.episode_top_k", 25))
+
+
+def get_retrieval_knowledge_top_k() -> int:
+    s = get_settings()
+    return int(s.get("retrieval.knowledge_top_k", 10))
+
+
+def get_retrieval_min_score() -> float:
+    s = get_settings()
+    return float(s.get("retrieval.min_score", 0.40))
+
+
+def get_retrieval_ontology_top_k() -> int:
+    s = get_settings()
+    return int(s.get("retrieval.ontology_top_k", 5))
+
+
+def get_retrieval_ontology_min_score() -> float:
+    s = get_settings()
+    return float(s.get("retrieval.ontology_min_score", 0.30))
+
+
+def get_retrieval_cold_start_threshold() -> int:
+    """Session entry count below which a cold-start FalkorDB pre-fill is triggered."""
+    s = get_settings()
+    return int(s.get("retrieval.cold_start_threshold", 2))
+
+
+# Ontology extraction
+def get_ontology_entity_max_name_words() -> int:
+    """Entities with more words than this in their display name are skipped."""
+    s = get_settings()
+    return int(s.get("ontology.entity_max_name_words", 4))
+
+
+# Pipeline feature flags (observe pipeline steps)
+def get_pipeline_extract_knowledge() -> bool:
+    """Run per-episode LLM knowledge extraction in background_hydrate."""
+    s = get_settings()
+    return bool(s.get("pipeline.extract_knowledge", True))
+
+
+def get_pipeline_judge_observation() -> bool:
+    """Run LLM observation judge in background_hydrate."""
+    s = get_settings()
+    return bool(s.get("pipeline.judge_observation", True))
+
+
+def get_pipeline_reinterpret_on_cold_start() -> bool:
+    """Run LLM reinterpret on cold-start sessions before FalkorDB pre-fill."""
+    s = get_settings()
+    return bool(s.get("pipeline.reinterpret_on_cold_start", True))
+
+
+def get_pipeline_hydrate_ontology() -> bool:
+    """Hydrate DragonflyDB session cache with OntologyNode summaries."""
+    s = get_settings()
+    return bool(s.get("pipeline.hydrate_ontology", True))
+
+
+def get_pipeline_hebbian_reinforcement() -> bool:
+    """Run Hebbian co-activation reinforcement after retrieval."""
+    s = get_settings()
+    return bool(s.get("pipeline.hebbian_reinforcement", True))

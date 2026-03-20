@@ -37,7 +37,7 @@ The service exposes dual APIs (gRPC + REST), manages multi-tenant scopes via `gr
 │  │            └──────────────┘                             │         │
 │  │                                                        │         │
 │  │  ┌──────────────────┐    ┌─────────────────────────┐   │         │
-│  │  │  DragonflyClient │    │   Smart Operations      │   │         │
+│  │  │  DragonflyClient │    │   Intelligence          │   │         │
 │  │  │  (sessions,      │    │   (judge, reflect,      │   │         │
 │  │  │   events, state) │    │    extract, synthesize)  │   │         │
 │  │  └──────────────────┘    └─────────────────────────┘   │         │
@@ -54,73 +54,110 @@ The service exposes dual APIs (gRPC + REST), manages multi-tenant scopes via `gr
 
 ## Module Organization
 
+Packages are organised in strict dependency layers. Each layer may only import from layers below it; no upward or circular imports.
+
+```
+transport/ → services/ → storage/, intelligence/, ontology/
+                       ↑
+               messaging/, workers/ (same level)
+ontology/  — foundation layer (no internal imports)
+```
+
 ```
 src/memory_service/
 ├── __init__.py                    # Package (version 0.1.0)
 ├── main.py                        # CLI entrypoint, async orchestration
 ├── config.py                      # Dynaconf settings management
 │
-├── core/                          # Framework-agnostic business logic
-│   ├── __init__.py
-│   └── observe.py                 # observe_core() — shared observe logic
+├── ontology/                      # Domain vocabulary — foundation layer
+│   ├── schema_org.py              # SchemaOrgOntology (930 classes, 1520 props)
+│   └── names.py                   # normalize_name() — canonical entity keys
 │
-├── storage/                       # Storage backends
-│   ├── __init__.py                # init_backends() factory
-│   ├── base_store.py              # BaseStore + normalize_name()
-│   ├── dragonfly.py               # DragonflyClient (Redis/DragonflyDB)
-│   ├── short_term.py              # ShortTermMemory (routing layer)
-│   ├── episode_store.py           # EpisodeStore (FalkorDB)
-│   ├── knowledge_store.py         # KnowledgeStore (FalkorDB)
-│   └── artifact_store.py          # ArtifactStore (FalkorDB)
+├── storage/                       # Persistence backends
+│   ├── __init__.py                # init_backends() factory + re-exports
+│   ├── short_term/
+│   │   ├── dragonfly.py           # DragonflyClient (Redis/DragonflyDB)
+│   │   └── memory.py              # ShortTermMemory (routing layer)
+│   ├── long_term/
+│   │   ├── base_store.py          # BaseStore (_embed, _parse, normalize_name)
+│   │   ├── episode_store.py       # EpisodeStore (FalkorDB)
+│   │   ├── knowledge_store.py     # KnowledgeStore (FalkorDB)
+│   │   ├── artifact_store.py      # ArtifactStore (FalkorDB)
+│   │   └── ontology_store.py      # OntologyStore (FalkorDB)
+│   └── retrieval/
+│       ├── scoring.py             # 3D scoring (semantic + temporal + Hebbian)
+│       └── hebbian.py             # Co-activation reinforcement
 │
-├── dto/                           # Pydantic data transfer objects
-│   ├── events.py                  # Event DTOs
-│   ├── episodes.py                # Episode + Observe DTOs
-│   ├── knowledge.py               # Knowledge DTOs
-│   ├── artifacts.py               # Artifact DTOs
-│   ├── state.py                   # Execution state DTOs
-│   └── pipelines.py               # Pipeline DTOs
+├── intelligence/                  # LLM-powered operations
+│   ├── llm/
+│   │   ├── client.py              # AsyncOpenAI wrapper (llm_call)
+│   │   └── dspy_adapter.py        # DSPy LM config + DirectJSONAdapter
+│   ├── signatures/                # DSPy structured extraction schemas
+│   │   ├── observation_signature.py
+│   │   ├── entity_signature.py
+│   │   ├── knowledge_signature.py
+│   │   ├── artifact_signature.py
+│   │   ├── relationship_signature.py
+│   │   ├── ontology_update_signature.py
+│   │   └── context_signature.py
+│   ├── extract/                   # Information extraction
+│   │   ├── entities.py            # Entity extraction (Schema.org types)
+│   │   ├── knowledge.py           # Knowledge entry extraction
+│   │   ├── artifacts.py           # Artifact reference extraction
+│   │   └── relationships.py       # Relationship triple extraction
+│   ├── synthesis/                 # Output generation
+│   │   ├── synthesize.py          # Synthesize narrative briefing
+│   │   ├── reflect.py             # Generate reflection
+│   │   ├── compress.py            # Compress events into episode
+│   │   └── summarize_context.py   # Summarize session context (DSPy)
+│   ├── evaluation/                # Judgment and filtering
+│   │   ├── judge_observation.py   # Observation → type/tier/labels
+│   │   ├── reinterpret.py         # Task → labels/query/complexity
+│   │   ├── filter.py              # Filter results by relevance
+│   │   └── infer_state.py         # Infer state from memories
+│   └── graph/                     # Ontology graph operations
+│       ├── class_retriever.py     # Embedding-based Schema.org class retrieval
+│       ├── ontology_pipeline.py   # update_group_ontology() — Steps 8a–8d
+│       └── update_ontology.py     # LLM-driven OntologyNode summary update
 │
-├── llm/                           # LLM integration
-│   ├── client.py                  # AsyncOpenAI wrapper (llm_call)
-│   └── dspy_adapter.py            # DSPy LM config + DirectJSONAdapter
+├── services/                      # Core business logic
+│   ├── memory_service.py          # MemoryService — all operations
+│   ├── observe.py                 # observe_core() + background_hydrate()
+│   └── task_registry.py           # Async task lifecycle management
 │
-├── dspy_signatures/               # DSPy structured extraction schemas
-│   ├── observation_signature.py   # ObservationJudgeSignature
-│   ├── entity_signature.py        # EntityExtractionSignature
-│   ├── knowledge_signature.py     # KnowledgeExtractionSignature
-│   └── artifact_signature.py      # ArtifactExtractionSignature
+├── messaging/                     # NATS event bus
+│   ├── client.py                  # NatsClient (connect/publish/subscribe)
+│   ├── publisher.py               # EpisodeEventPublisher
+│   └── schemas.py                 # Event payload schemas
 │
-├── smart/                         # LLM-powered operations
-│   ├── judge_observation.py       # Observation → type/tier/labels
-│   ├── reinterpret.py             # Task → labels/query/complexity
-│   ├── filter.py                  # Filter results by relevance
-│   ├── infer_state.py             # Infer state from memories
-│   ├── synthesize.py              # Synthesize narrative briefing
-│   ├── reflect.py                 # Generate reflection
-│   ├── extract_knowledge.py       # Extract knowledge entries
-│   ├── extract_artifacts.py       # Extract artifact entries
-│   └── compress.py                # Compress events into episode
+├── workers/                       # Background job scheduling
+│   ├── rem_worker.py              # REMWorker — polling-based consolidation
+│   ├── curation_worker.py         # CurationWorker — NATS event-driven curation
+│   └── rem_sweep_worker.py        # REMSweepPublisher + REMSweepWorker (NATS)
 │
-├── rest/                          # FastAPI REST server
-│   ├── app.py                     # create_app() factory
-│   ├── dependencies.py            # DI helpers (setup/teardown/getters)
-│   └── routers/
-│       ├── events.py              # /events endpoints
-│       ├── episodes.py            # /episodes endpoints
-│       ├── knowledge.py           # /knowledge endpoints
-│       ├── artifacts.py           # /artifacts endpoints
-│       ├── state.py               # /state endpoints
-│       ├── smart.py               # /smart/* endpoints
-│       ├── pipelines.py           # /pipelines endpoints
-│       └── observe.py             # /observe endpoint
-│
-├── grpc/                          # gRPC server
-│   ├── server.py                  # GenericServicer (JSON-over-gRPC)
-│   └── service_handler.py         # MemoryServiceHandler
-│
-└── background/                    # Background workers
-    └── rem_worker.py              # REMWorker (periodic consolidation)
+└── transport/                     # Request/response adapters
+    ├── rest/                      # FastAPI REST server
+    │   ├── app.py                 # create_app() factory
+    │   ├── dependencies.py        # DI helpers (setup/teardown/getters)
+    │   ├── dto/                   # Pydantic data transfer objects
+    │   │   ├── episodes.py        # Episode + Observe DTOs
+    │   │   ├── events.py          # Event DTOs
+    │   │   ├── knowledge.py       # Knowledge DTOs
+    │   │   ├── artifacts.py       # Artifact DTOs
+    │   │   └── state.py           # Execution state DTOs
+    │   └── routers/
+    │       ├── observe.py         # /observe endpoint
+    │       ├── episodes.py        # /episodes endpoints
+    │       ├── knowledge.py       # /knowledge endpoints
+    │       ├── artifacts.py       # /artifacts endpoints
+    │       ├── events.py          # /events endpoints
+    │       ├── state.py           # /state endpoints
+    │       ├── smart.py           # /smart/* endpoints
+    │       ├── pipelines.py       # /pipelines endpoints
+    │       └── ui.py              # /ui/* dashboard read endpoints
+    └── grpc/                      # gRPC server
+        ├── server.py              # GenericServicer (JSON-over-gRPC)
+        └── service_handler.py     # MemoryServiceHandler
 
 proto/memory/v1/                   # Protocol Buffer definitions
 ├── common.proto                   # Scope, Pagination, Metadata
@@ -436,11 +473,13 @@ For operations requiring structured output (knowledge extraction, observation ju
 | `dspy.Predict` | Runs signatures through configured LM |
 | Default model | `arcee-ai/trinity-mini` via OpenRouter |
 
-**Signatures**:
+Signatures live in `intelligence/signatures/`:
 - `ObservationJudgeSignature` → `ObservationAnalysis` (type, tier, labels, importance)
-- `EntityExtractionSignature` → `EntityExtractionResult` (entities list)
+- `EntityExtractionSignature` → `EntityExtractionResult` (entities list + Schema.org types)
 - `KnowledgeExtractionSignature` → knowledge entries list
 - `ArtifactExtractionSignature` → artifact entries list
+- `RelationshipExtractionSignature` → relationship triples (subject, predicate, object)
+- `OntologyNodeUpdateSignature` → updated entity summary prose
 
 ### Free-form LLM Calls
 
@@ -584,14 +623,40 @@ Uses a **generic JSON-over-gRPC transport** — proto files define the contract 
 (:Episode)-[:HAS_ENTITY]->(:Entity)
 ```
 
+### Additional Nodes (OntologyStore)
+
+```
+(:OntologyNode {
+    name: STRING,          # Normalized entity key (e.g. "caroline-zhao")
+    display_name: STRING,  # Display form (e.g. "Caroline Zhao")
+    schema_type: STRING,   # Schema.org class (e.g. "Person")
+    summary: STRING,       # Prose profile, updated by LLM on each mention
+    group_id: STRING,
+    source_count: INT,     # Number of episodes that informed this node
+    created_at: FLOAT,
+    embedding: VECF32      # Embedding of summary, re-computed on each update
+})
+```
+
+### Additional Edges (OntologyStore)
+
+```
+(:Episode)-[:ABOUT]->(:OntologyNode)              # Episode mentions entity
+(:OntologyNode)-[:RELATES {predicate, confidence}]->(:OntologyNode)
+                                                  # Schema.org relationship
+(:Episode)-[:CO_ACTIVATED {weight}]->(:Episode)  # Hebbian co-retrieval edge
+(:Episode)-[:DUPLICATE_OF]->(:Episode)            # Near-duplicate detected
+(:Knowledge)-[:REINFORCES]->(:Knowledge)          # Near-dup knowledge merge
+```
+
 ### Indexes
 
 ```
-Episode:  uuid, group_id, episode_type, created_at, consolidation_status
-Knowledge: uuid, group_id, knowledge_type, created_at
-Artifact: uuid, group_id, artifact_type, created_at
-Entity:  name, entity_type
-Label:   name
+Episode:      uuid, group_id, episode_type, created_at, consolidation_status
+Knowledge:    uuid, group_id, knowledge_type, created_at
+Artifact:     uuid, group_id, artifact_type, created_at
+OntologyNode: name, group_id, schema_type
+Label:        name
 ```
 
 ---
@@ -724,20 +789,32 @@ GET http://localhost:9000/health → {"status": "ok", "service": "agent-memory-s
 ```
 cli() → asyncio.run(main())
   │
-  ├─ init_backends(session_ttl)
+  ├─ storage.init_backends(session_ttl)
   │    ├─ DragonflyClient.connect()
   │    ├─ FalkorDB graph selection
-  │    ├─ AsyncOpenAI client creation
+  │    ├─ AsyncOpenAI embeddings client
   │    ├─ EpisodeStore.ensure_indexes()
   │    ├─ KnowledgeStore.ensure_indexes()
-  │    └─ ArtifactStore.ensure_indexes()
+  │    ├─ ArtifactStore.ensure_indexes()
+  │    └─ OntologyStore.ensure_indexes()
   │
-  ├─ MemoryServiceHandler(all backends)
+  ├─ NATS bootstrap (main.py, if nats.enabled)
+  │    ├─ messaging.NatsClient.connect()
+  │    ├─ messaging.EpisodeEventPublisher
+  │    └─ episode_store.set_event_publisher(publisher)
+  │
+  ├─ services.MemoryService(all backends)
+  ├─ transport.grpc.MemoryServiceHandler(service)
   │
   └─ asyncio.gather(
        run_grpc_server(handler, 50051),
        run_rest_server("0.0.0.0", 9000),
-       rem_worker.run()  # if background.enabled
+       # If NATS enabled:
+       curation_worker.run(),
+       rem_sweep_publisher.run(),
+       rem_sweep_worker.run(),
+       # Else if background.enabled:
+       rem_worker.run()
      )
 ```
 
@@ -769,14 +846,16 @@ cli() → asyncio.run(main())
 
 2. **JSON-over-gRPC**: Proto files define the contract, but the server uses JSON serialization for implementation simplicity. Proto definitions serve as documentation and client code generation.
 
-3. **Shared handler pattern**: `MemoryServiceHandler` implements all business logic once. Both gRPC `GenericServicer` and FastAPI routers delegate to it.
+3. **Layered dependency rules**: Strict import direction — `transport/ → services/ → storage/, intelligence/`; `ontology/` is a foundation layer imported by both `storage/` and `intelligence/` but importing nothing internal. `messaging/` and `workers/` are orchestration layers that may import from services and storage. Circular imports are prohibited.
 
-4. **BaseStore inheritance**: Eliminates duplicate embedding, parsing, and initialization code across three FalkorDB store classes.
+4. **Shared service pattern**: `MemoryService` implements all business logic once. `MemoryServiceHandler` (gRPC) and FastAPI routers both delegate to it.
 
-5. **REM Worker metaphor**: Background consolidation cycle named after REM sleep — processes raw memories into structured knowledge during "downtime".
+5. **BaseStore inheritance**: Eliminates duplicate embedding, parsing, and initialization code across FalkorDB store classes in `storage/long_term/`.
 
-6. **Hybrid search scoring**: Knowledge and artifact search combines vector similarity with label graph matching (`final = vector + 0.15 * label_ratio`).
+6. **REM Worker metaphor**: Background consolidation cycle named after REM sleep — processes raw memories into structured knowledge during "downtime".
 
-7. **Entity enrichment**: Proper noun extraction via regex supplements vector search, with merge scoring that boosts overlapping results (+0.1) and discounts entity-only results (0.7x).
+7. **Hybrid search scoring**: Knowledge and artifact search combines vector similarity with label graph matching (`final = vector + 0.15 * label_ratio`).
 
-8. **Bundled container**: All services (DragonflyDB, FalkorDB, Python service) in one container via supervisord for simple deployment.
+8. **Entity enrichment**: Proper noun extraction via regex supplements vector search, with merge scoring that boosts overlapping results (+0.1) and discounts entity-only results (0.7x).
+
+9. **Bundled container**: All services (DragonflyDB, FalkorDB, NATS, Python service) in one container via supervisord for simple deployment.

@@ -56,5 +56,9 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-
 testpaths = ["tests"]
+markers = [
+    "smoke: fast health checks, no LLM required",
+    "e2e: full stack tests against a running container",
+    "slow: long-running tests with REM consolidation polling (up to 2 min)",
+]

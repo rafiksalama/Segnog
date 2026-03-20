@@ -92,15 +92,25 @@ PRs need at least one review before merging. Keep PRs focused — one concern pe
 
 ## Project Structure
 
-The codebase has clear layers:
+The codebase is organised in strict dependency layers — each layer may only import from layers below it:
 
-- `src/memory_service/storage/` — storage backends (DragonflyDB, FalkorDB)
-- `src/memory_service/smart/` — LLM-powered operations
-- `src/memory_service/grpc/` — gRPC server and shared handler
-- `src/memory_service/rest/` — FastAPI app and routers
-- `src/memory_service/llm/` — LLM client and DSPy adapter
+```
+transport/ → services/ → storage/, intelligence/, ontology/
+messaging/, workers/ → services/, storage/
+ontology/ — foundation layer (no internal imports)
+```
+
+Key packages:
+
+- `src/memory_service/ontology/` — Schema.org vocabulary + entity name normalization (foundation)
+- `src/memory_service/storage/` — persistence backends, split into `short_term/`, `long_term/`, `retrieval/`
+- `src/memory_service/intelligence/` — LLM operations, split into `extract/`, `synthesis/`, `evaluation/`, `graph/`
+- `src/memory_service/services/` — core business logic (`MemoryService`, `observe_core`)
+- `src/memory_service/messaging/` — NATS event bus client and publisher
+- `src/memory_service/workers/` — background consolidation workers (REM, curation)
+- `src/memory_service/transport/` — REST (`transport/rest/`) and gRPC (`transport/grpc/`) adapters
 - `client/memory_client/` — Python client library
-- `tests/` — test suites
+- `tests/` — unit, integration, and smoke test suites
 
 ## Reporting Bugs
 

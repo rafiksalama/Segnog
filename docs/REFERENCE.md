@@ -73,12 +73,24 @@ The dashboard is a single-page React app served directly from the container. No 
 
 | Page | What it shows |
 |------|--------------|
-| **Dashboard** | Live counts: episodes, knowledge nodes, ontology entities, active groups, pending REM, Hebbian edges. Recent event stream. |
-| **Sessions** | All `group_id` sessions ordered by most-recent activity. Select one to see its episodes and extracted knowledge. |
-| **Memory Graph** | Interactive canvas of all OntologyNodes with edges from explicit relationships (`RELATES`) and co-occurrence via shared `ABOUT` links. |
+| **Dashboard** | Service health grid (DragonflyDB, FalkorDB, NATS, REST, gRPC, REM Worker), observe/embed/search latency (p50 · p95), hydrate stats, and REM pipeline step visualisation — all live. |
+| **Reporting** | Aggregate counters (episodes, knowledge nodes, ontology entities, active sessions), full per-endpoint latency chart with p50/p95/p99/max and sample timeline, and a scrollable event history log. |
+| **Sessions** | Hierarchical session tree. Parent-child relationships are visualised as indented branches — click ▶/▼ to expand. Selecting a session shows its latest 20 episodes in the right panel with a breadcrumb trail showing the full ancestor path. |
+| **Memory Graph** | Interactive canvas of all OntologyNodes with edges from explicit `RELATES` relationships and co-occurrence via shared `ABOUT` links. Nine layout algorithms available (Hub, Force, Spiral, Circular, Hierarchical, Grid, Radial, Matrix, Fabric). |
 | **Observe** | Live playground — send an `/observe` request and see the returned context and episode UUID in real time. |
-| **REM Monitor** | Status of the background consolidation pipeline: worker state, scoring weights, Hebbian parameters. |
+| **REM Monitor** | Status of the background consolidation pipeline: pending episodes, Hebbian edge count, ontology entity count, sweep cycle latency. |
 | **Configuration** | All `settings.toml` values currently in effect, read live from the service. |
+
+### API Specification
+
+The service publishes its full OpenAPI spec at the API prefix — accessible to any service or agent:
+
+| URL | What it serves |
+|---|---|
+| `GET /api/v1/memory` | Discovery manifest — service name, version, links to spec and endpoint groups |
+| `GET /api/v1/memory/openapi.json` | OpenAPI 3.x spec (JSON) |
+| `GET /api/v1/memory/docs` | Swagger UI |
+| `GET /api/v1/memory/redoc` | ReDoc |
 
 ### Memory Graph
 
@@ -497,45 +509,58 @@ agent-memory-service/
 │   └── package.json
 │
 ├── src/memory_service/
-│   ├── main.py                     # Entry point, startup sequence
+│   ├── main.py                     # Entry point, startup + task orchestration
 │   │
-│   ├── core/
-│   │   ├── observe.py              # observe_core() — hot path + background_hydrate
-│   │   └── hebbian.py              # Co-activation reinforcement
+│   ├── ontology/                   # Domain vocabulary (foundation layer)
+│   │   ├── schema_org.py           # SchemaOrgOntology — 930 classes, 1520 properties
+│   │   └── names.py                # normalize_name() — canonical entity keys
 │   │
 │   ├── storage/
-│   │   ├── dragonfly.py            # DragonflyDB client (sessions, events)
-│   │   ├── episode_store.py        # FalkorDB episodes
-│   │   ├── knowledge_store.py      # FalkorDB knowledge
-│   │   ├── artifact_store.py       # FalkorDB artifacts
-│   │   └── ontology_store.py       # FalkorDB OntologyNodes
+│   │   ├── short_term/
+│   │   │   ├── dragonfly.py        # DragonflyDB client (sessions, events)
+│   │   │   └── memory.py           # ShortTermMemory routing layer
+│   │   ├── long_term/
+│   │   │   ├── base_store.py       # BaseStore (embed, parse, normalize)
+│   │   │   ├── episode_store.py    # FalkorDB episodes
+│   │   │   ├── knowledge_store.py  # FalkorDB knowledge
+│   │   │   ├── artifact_store.py   # FalkorDB artifacts
+│   │   │   └── ontology_store.py   # FalkorDB OntologyNodes
+│   │   └── retrieval/
+│   │       ├── scoring.py          # 3D scoring (semantic + temporal + Hebbian)
+│   │       └── hebbian.py          # Co-activation reinforcement
 │   │
-│   ├── scoring.py                  # 3D scoring functions
+│   ├── intelligence/               # LLM-powered operations
+│   │   ├── llm/                    # LLM client + DSPy adapter
+│   │   ├── signatures/             # DSPy structured extraction schemas
+│   │   ├── extract/                # entities, knowledge, artifacts, relationships
+│   │   ├── synthesis/              # synthesize, reflect, compress, summarize_context
+│   │   ├── evaluation/             # judge, reinterpret, filter, infer_state
+│   │   └── graph/                  # class_retriever, ontology_pipeline, update_ontology
 │   │
-│   ├── smart/                      # DSPy-powered LLM operations
-│   │   ├── summarize_context.py
-│   │   ├── extract_knowledge.py
-│   │   ├── extract_entities.py
-│   │   ├── extract_relationships.py
-│   │   ├── ontology_pipeline.py    # update_group_ontology() — Steps 8a–8d
-│   │   ├── reinterpret.py
-│   │   └── judge_observation.py
+│   ├── services/
+│   │   ├── memory_service.py       # MemoryService — all operations
+│   │   ├── observe.py              # observe_core() + background_hydrate()
+│   │   └── task_registry.py        # Async task lifecycle management
 │   │
-│   ├── events/
+│   ├── messaging/                  # NATS event bus
+│   │   ├── client.py               # NatsClient
+│   │   ├── publisher.py            # EpisodeEventPublisher
+│   │   └── schemas.py              # Event payload schemas
+│   │
+│   ├── workers/                    # Background job scheduling
+│   │   ├── rem_worker.py           # Polling-based REM consolidation
 │   │   ├── curation_worker.py      # NATS event-driven curation
-│   │   └── rem_sweep_worker.py     # NATS periodic sweep
+│   │   └── rem_sweep_worker.py     # NATS periodic sweep + fallback
 │   │
-│   ├── background/
-│   │   └── rem_worker.py           # Polling-based REM consolidation
-│   │
-│   ├── rest/
-│   │   ├── app.py                  # FastAPI factory — CORS, routers, StaticFiles
-│   │   └── routers/
-│   │       ├── observe.py          # POST /observe
-│   │       ├── ui.py               # GET /ui/* — dashboard read endpoints
-│   │       └── ...
-│   │
-│   └── grpc/                       # gRPC server
+│   └── transport/
+│       ├── rest/
+│       │   ├── app.py              # FastAPI factory — CORS, routers, StaticFiles
+│       │   ├── dto/                # Pydantic DTOs (episodes, knowledge, artifacts…)
+│       │   └── routers/
+│       │       ├── observe.py      # POST /observe
+│       │       ├── ui.py           # GET /ui/* — dashboard read endpoints
+│       │       └── ...
+│       └── grpc/                   # gRPC server + MemoryServiceHandler
 │
 └── benchmarks/locomo/              # LoCoMo benchmark suite
     ├── runner.py

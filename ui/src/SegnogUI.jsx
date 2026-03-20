@@ -83,6 +83,7 @@ const icons = {
   observe:   "M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z M12 9a3 3 0 110 6 3 3 0 010-6z",
   rem:       "M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z",
   config:    "M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001.08 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1.08z",
+  reporting: "M18 20V10 M12 20V4 M6 20v-6",
   check:     "M20 6L9 17l-5-5",
   send:      "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
   brain:     "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z M12 6v6l4.5 2.5",
@@ -186,75 +187,377 @@ function useFetch(url, deps = [], interval = 0) {
   return { data, loading, updatedAt };
 }
 
+// ─── Latency Chart ─────────────────────────────────────────────────────
+const LatencyChart = ({ data }) => {
+  const p = useP();
+  const [sel, setSel] = useState(0);
+
+  if (!data || data.length === 0) {
+    return (
+      <div style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 28 }}>
+        <SectionTitle>API Latency</SectionTitle>
+        <Empty msg="No latency data yet — make a few API requests first." />
+      </div>
+    );
+  }
+
+  const idx = Math.min(sel, data.length - 1);
+  const entry = data[idx] || data[0];
+  const samples = entry?.samples || [];
+
+  const W = 560, H = 160;
+  const PAD = { top: 14, right: 62, bottom: 26, left: 48 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top - PAD.bottom;
+
+  const maxMs = samples.length > 0
+    ? Math.max(...samples.map(s => s.ms), entry.p99 || 10, 10)
+    : 100;
+  const yScale = v => PAD.top + cH - Math.min((v / maxMs) * cH, cH);
+  const xScale = i => PAD.left + (samples.length > 1 ? (i / (samples.length - 1)) * cW : cW / 2);
+
+  const pts = samples.map((s, i) => `${xScale(i)},${yScale(s.ms)}`).join(" ");
+  const lineColor = entry.p95 < 100 ? p.green : entry.p95 < 500 ? p.warm : p.coral;
+
+  const yTicks = [0, Math.round(maxMs * 0.5), Math.round(maxMs)];
+  const t0 = samples.length > 0 ? samples[0].ts : 0;
+  const tLast = samples.length > 0 ? samples[samples.length - 1].ts : 0;
+  const elapsed = Math.round(tLast - t0);
+
+  // Percentile reference lines with labels
+  const refLines = [
+    { val: entry.p50, color: p.green,  label: `p50 ${entry.p50}ms` },
+    { val: entry.p95, color: p.warm,   label: `p95 ${entry.p95}ms` },
+    { val: entry.p99, color: p.coral,  label: `p99 ${entry.p99}ms` },
+  ];
+
+  return (
+    <div style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 28 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: p.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: MONO }}>API Latency</div>
+          <div style={{ fontSize: 11, color: p.textDim, marginTop: 2, fontFamily: MONO }}>realtime · 3s refresh · last 200 samples per endpoint</div>
+        </div>
+        {/* Big stat pills for selected endpoint */}
+        <div style={{ display: "flex", gap: 10 }}>
+          {[
+            { label: "p50", val: entry.p50, color: p.green },
+            { label: "p95", val: entry.p95, color: p.warm },
+            { label: "p99", val: entry.p99, color: p.coral },
+            { label: "max", val: entry.max,  color: p.textMuted },
+          ].map(({ label, val, color }) => (
+            <div key={label} style={{ textAlign: "center", background: color + "12", border: `1px solid ${color}30`, borderRadius: 8, padding: "6px 12px", minWidth: 54 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color, fontFamily: MONO, lineHeight: 1 }}>{val}</div>
+              <div style={{ fontSize: 9, color: p.textDim, fontFamily: MONO, marginTop: 3 }}>{label} ms</div>
+            </div>
+          ))}
+          <div style={{ textAlign: "center", background: p.surfaceAlt, border: `1px solid ${p.border}`, borderRadius: 8, padding: "6px 12px", minWidth: 54 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: p.text, fontFamily: MONO, lineHeight: 1 }}>{entry.count}</div>
+            <div style={{ fontSize: 9, color: p.textDim, fontFamily: MONO, marginTop: 3 }}>calls</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Endpoint selector tabs */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {data.map((d, i) => {
+          const active = i === idx;
+          const lc = d.p95 < 100 ? p.green : d.p95 < 500 ? p.warm : p.coral;
+          return (
+            <button key={i} onClick={() => setSel(i)} style={{
+              fontSize: 10, fontFamily: MONO, fontWeight: 600, padding: "3px 10px",
+              borderRadius: 6, cursor: "pointer", border: "1px solid",
+              borderColor: active ? lc : p.border,
+              background: active ? lc + "18" : "transparent",
+              color: active ? lc : p.textMuted, transition: "all 0.15s",
+            }}>
+              <span style={{ opacity: 0.7, marginRight: 3, fontSize: 9 }}>{d.endpoint.startsWith("BG:") ? "BG" : d.endpoint.split(":")[0]}</span>
+              {d.endpoint.replace(/^(GET|POST|PUT|DELETE|PATCH|BG):/, "")}{" "}
+              <span style={{ opacity: 0.5 }}>{d.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Time-series SVG */}
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, display: "block" }}>
+        {/* Y-axis grid + labels */}
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={PAD.left} x2={PAD.left + cW} y1={yScale(v)} y2={yScale(v)}
+              stroke={p.border} strokeWidth="1" />
+            <text x={PAD.left - 5} y={yScale(v) + 4} textAnchor="end"
+              fill={p.textDim} fontSize="9" fontFamily={MONO}>{v}ms</text>
+          </g>
+        ))}
+        {/* Reference lines with value labels on the right */}
+        {refLines.map(({ val, color, label }) => val > 0 && (
+          <g key={label}>
+            <line x1={PAD.left} x2={PAD.left + cW} y1={yScale(val)} y2={yScale(val)}
+              stroke={color} strokeWidth="1" strokeDasharray="4,3" opacity="0.7" />
+            <text x={PAD.left + cW + 5} y={yScale(val) + 3} textAnchor="start"
+              fill={color} fontSize="8" fontFamily={MONO} opacity="0.9">{label}</text>
+          </g>
+        ))}
+        {/* Fill + line */}
+        {samples.length > 1 && (
+          <>
+            <polygon
+              points={`${PAD.left},${yScale(0)} ${pts} ${xScale(samples.length - 1)},${yScale(0)}`}
+              fill={lineColor} opacity="0.07" />
+            <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round" />
+          </>
+        )}
+        {/* Latest point dot */}
+        {samples.length > 0 && (
+          <circle cx={xScale(samples.length - 1)} cy={yScale(samples[samples.length - 1].ms)}
+            r="3.5" fill={lineColor} />
+        )}
+        {/* X-axis labels */}
+        {elapsed > 0 && [
+          { x: PAD.left,         label: "0s" },
+          { x: PAD.left + cW/2,  label: `+${Math.round(elapsed / 2)}s` },
+          { x: PAD.left + cW,    label: `+${elapsed}s` },
+        ].map((l, i) => (
+          <text key={i} x={l.x} y={H - 4} textAnchor="middle"
+            fill={p.textDim} fontSize="9" fontFamily={MONO}>{l.label}</text>
+        ))}
+        {/* Axes */}
+        <line x1={PAD.left} x2={PAD.left + cW} y1={PAD.top + cH} y2={PAD.top + cH} stroke={p.border} strokeWidth="1" />
+        <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={PAD.top + cH} stroke={p.border} strokeWidth="1" />
+      </svg>
+
+      {/* Summary table — all endpoints */}
+      <div style={{ marginTop: 16, borderTop: `1px solid ${p.border}`, paddingTop: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: MONO }}>
+          <thead>
+            <tr>
+              {["Endpoint", "Calls", "avg", "p50", "p95", "p99", "max"].map(h => (
+                <th key={h} style={{ fontSize: 9, color: p.textDim, fontWeight: 700, textTransform: "uppercase",
+                  letterSpacing: "0.08em", padding: "0 8px 6px 0", textAlign: h === "Endpoint" ? "left" : "right" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((d, i) => {
+              const badge = d.endpoint.startsWith("BG:") ? p.purple : p.blue;
+              const lc = d.p95 < 100 ? p.green : d.p95 < 500 ? p.warm : p.coral;
+              const active = i === idx;
+              return (
+                <tr key={i} onClick={() => setSel(i)} style={{ cursor: "pointer", background: active ? lc + "08" : "transparent" }}>
+                  <td style={{ padding: "4px 8px 4px 0", maxWidth: 240 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: badge + "20", color: badge, flexShrink: 0 }}>
+                        {d.endpoint.startsWith("BG:") ? "BG" : d.endpoint.split(":")[0]}
+                      </span>
+                      <span style={{ fontSize: 11, color: active ? p.text : p.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {d.endpoint.replace(/^(GET|POST|PUT|DELETE|PATCH|BG):/, "")}
+                      </span>
+                    </div>
+                  </td>
+                  <td style={{ fontSize: 11, color: p.textMuted, textAlign: "right", padding: "4px 8px 4px 0" }}>{d.count}</td>
+                  <td style={{ fontSize: 11, color: p.textDim,   textAlign: "right", padding: "4px 8px 4px 0" }}>{d.mean}ms</td>
+                  <td style={{ fontSize: 11, color: p.green,     textAlign: "right", padding: "4px 8px 4px 0", fontWeight: 600 }}>{d.p50}ms</td>
+                  <td style={{ fontSize: 11, color: p.warm,      textAlign: "right", padding: "4px 8px 4px 0", fontWeight: 600 }}>{d.p95}ms</td>
+                  <td style={{ fontSize: 11, color: lc,          textAlign: "right", padding: "4px 8px 4px 0", fontWeight: 600 }}>{d.p99}ms</td>
+                  <td style={{ fontSize: 11, color: p.textMuted, textAlign: "right", padding: "4px 8px 4px 0" }}>{d.max}ms</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ─── Dashboard sub-components (module-level to avoid remount on re-render) ──
+const DashCardTitle = ({ title, sub }) => {
+  const p = useP();
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: p.textMuted, letterSpacing: "0.09em", textTransform: "uppercase", fontFamily: MONO }}>{title}</div>
+      {sub && <div style={{ fontSize: 10, color: p.textDim, fontFamily: MONO, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+};
+
+const DashMetricRow = ({ label, entry }) => {
+  const p = useP();
+  const lc = !entry ? p.textDim : entry.p95 < 100 ? p.green : entry.p95 < 500 ? p.warm : p.coral;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${p.border}` }}>
+      <span style={{ fontSize: 11, color: p.textMuted, fontFamily: MONO }}>{label}</span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {entry?.count != null && <span style={{ fontSize: 10, color: p.textDim, fontFamily: MONO }}>{entry.count}×</span>}
+        <span style={{ fontSize: 11, fontFamily: MONO, color: p.green, fontWeight: 600 }}>{entry?.p50 ?? "—"}<span style={{ fontSize: 9, color: p.textDim }}>ms</span></span>
+        <span style={{ fontSize: 11, fontFamily: MONO, color: lc, fontWeight: 600 }}>{entry?.p95 ?? "—"}<span style={{ fontSize: 9, color: p.textDim }}>ms</span></span>
+      </div>
+    </div>
+  );
+};
+
+const DashMiniStat = ({ value, label, color }) => {
+  const p = useP();
+  return (
+    <div style={{ flex: 1, background: p.surfaceAlt, borderRadius: 8, padding: "10px 12px", minWidth: 0 }}>
+      <div style={{ fontSize: 20, fontWeight: 700, color, fontFamily: MONO, lineHeight: 1 }}>{value ?? "—"}</div>
+      <div style={{ fontSize: 10, color: p.textMuted, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+    </div>
+  );
+};
+
 // ─── Page: Dashboard ───────────────────────────────────────────────────
 const DashboardPage = () => {
   const p = useP();
   const [pulse, setPulse] = useState(true);
-  const { data: stats, updatedAt: statsAt } = useFetch(`${API}/ui/stats`,        [], 8000);
-  const { data: evData }                    = useFetch(`${API}/ui/events?count=12`, [], 4000);
-  const events = evData?.events || [];
+  const { data: stats, updatedAt: statsAt } = useFetch(`${API}/ui/stats`,  [], 8000);
+  const { data: latency }                   = useFetch(`${API}/ui/latency`, [], 5000);
   const ago = statsAt ? Math.round((Date.now() - statsAt) / 1000) : null;
 
   useEffect(() => { const t = setInterval(() => setPulse(v => !v), 2000); return () => clearInterval(t); }, []);
 
+  const lat = key => latency?.find(d => d.endpoint === key);
+  const card = { background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: "18px 20px" };
+
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: p.text }}>System Overview</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: p.text }}>Dashboard</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 6, background: p.green + "15", padding: "4px 12px", borderRadius: 20 }}>
           <div style={{ width: 7, height: 7, borderRadius: "50%", background: p.green, boxShadow: pulse ? `0 0 8px ${p.green}` : "none", transition: "box-shadow 0.8s" }} />
           <span style={{ fontSize: 11, color: p.green, fontWeight: 600, fontFamily: MONO }}>LIVE</span>
         </div>
-        {ago !== null && (
-          <span style={{ fontSize: 11, color: p.textDim, fontFamily: MONO }}>
-            updated {ago === 0 ? "just now" : `${ago}s ago`}
-          </span>
-        )}
+        {ago !== null && <span style={{ fontSize: 11, color: p.textDim, fontFamily: MONO }}>updated {ago === 0 ? "just now" : `${ago}s ago`}</span>}
       </div>
-      <p style={{ color: p.textMuted, fontSize: 14, marginTop: 4, marginBottom: 28 }}>Auto-refreshes every 8s · localhost:9000</p>
+      <p style={{ color: p.textMuted, fontSize: 14, marginTop: 4, marginBottom: 24 }}>Latency refreshes every 5s · localhost:9000</p>
+
+      {/* Row 1: Health | Observe | Search */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+
+        {/* Health */}
+        <div style={card}>
+          <DashCardTitle title="Health" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {[
+              { name: "DragonflyDB", port: 6381 },
+              { name: "FalkorDB",    port: 6380 },
+              { name: "NATS",        port: 4222 },
+              { name: "REST Server", port: 9000 },
+              { name: "gRPC Server", port: 50051 },
+              { name: "REM Worker",  port: "—"  },
+            ].map((s, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 9px", background: p.surfaceAlt, borderRadius: 7 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.green, flexShrink: 0, boxShadow: `0 0 4px ${p.green}` }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: p.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                  <div style={{ fontSize: 9, color: p.textDim, fontFamily: MONO }}>{s.port}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Observe */}
+        <div style={card}>
+          <DashCardTitle title="Observe" sub="p50 · p95" />
+          <DashMetricRow label="POST /observe"  entry={lat("POST:observe")} />
+          <DashMetricRow label="embed"          entry={lat("observe:embed")} />
+          <DashMetricRow label="session_add"    entry={lat("observe:session_add")} />
+          <DashMetricRow label="session_search" entry={lat("observe:session_search")} />
+          <DashMetricRow label="score_3dim"     entry={lat("observe:score_3dim")} />
+        </div>
+
+        {/* Search */}
+        <div style={card}>
+          <DashCardTitle title="Search" sub="p50 · p95" />
+          <DashMetricRow label="episodes/search"  entry={lat("POST:episodes/search")} />
+          <DashMetricRow label="knowledge/search" entry={lat("POST:knowledge/search")} />
+          <DashMetricRow label="knowledge store"  entry={lat("POST:knowledge")} />
+          <DashMetricRow label="artifacts"        entry={lat("POST:artifacts")} />
+          <DashMetricRow label="artifacts/search" entry={lat("POST:artifacts/search")} />
+        </div>
+      </div>
+
+      {/* Row 2: Hydrate | REM */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+        {/* Hydrate */}
+        <div style={card}>
+          <DashCardTitle title="Hydrate" sub="Background session hydration from FalkorDB" />
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <DashMiniStat value={stats?.episodes?.toLocaleString()} label="Episodes in FalkorDB" color={p.blue}   />
+            <DashMiniStat value={stats?.knowledge_nodes}            label="Knowledge Nodes"       color={p.warm}   />
+            <DashMiniStat value={stats?.active_groups}              label="Active Sessions"        color={p.accent} />
+          </div>
+          <DashMetricRow label="embed"  entry={lat("observe:embed")} />
+          <DashMetricRow label="format" entry={lat("observe:format")} />
+        </div>
+
+        {/* REM */}
+        <div style={card}>
+          <DashCardTitle title="REM" sub="Memory consolidation · 60s cycle" />
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <DashMiniStat value={stats?.pending_episodes}  label="Pending"       color={p.warm}   />
+            <DashMiniStat value={stats?.hebbian_edges}     label="Hebbian Edges" color={p.coral}  />
+            <DashMiniStat value={stats?.ontology_entities} label="Ontology"      color={p.purple} />
+          </div>
+          <DashMetricRow label="sweep/cycle" entry={lat("BG:sweep/cycle")} />
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 12, flexWrap: "wrap" }}>
+            {[
+              { label: "Find Groups",       active: true  },
+              { label: "Dedup",             active: true  },
+              { label: "Knowledge Extract", active: true  },
+              { label: "Ontology Update",   active: false },
+              { label: "Compress",          active: false },
+              { label: "Hebbian Decay",     active: false },
+            ].map((step, i, arr) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <div style={{ width: 20, height: 20, borderRadius: "50%", border: `1.5px solid ${step.active ? p.accent : p.border}`, background: step.active ? p.accent + "20" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: step.active ? p.accent : p.textDim, fontFamily: MONO }}>{i + 1}</div>
+                <span style={{ fontSize: 10, color: step.active ? p.text : p.textDim, whiteSpace: "nowrap" }}>{step.label}</span>
+                {i < arr.length - 1 && <span style={{ fontSize: 10, color: p.textDim, margin: "0 2px" }}>›</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Page: Reporting ───────────────────────────────────────────────────
+const ReportingPage = () => {
+  const p = useP();
+  const { data: stats }   = useFetch(`${API}/ui/stats`,           [], 10000);
+  const { data: latency } = useFetch(`${API}/ui/latency`,          [], 3000);
+  const { data: evData }  = useFetch(`${API}/ui/events?count=30`,  [], 5000);
+  const events = evData?.events || [];
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: p.text }}>Reporting</h2>
+      <p style={{ color: p.textMuted, fontSize: 14, marginTop: 4, marginBottom: 28 }}>System metrics · API latency · Event history</p>
 
       <div style={{ display: "flex", gap: 14, marginBottom: 28, flexWrap: "wrap" }}>
-        <StatCard label="Active Groups"     value={stats?.active_groups}                          sub="distinct group IDs"       color={p.accent} icon={icons.sessions} />
-        <StatCard label="Episodes Stored"   value={stats ? stats.episodes.toLocaleString() : null} sub="in FalkorDB"              color={p.blue}   icon={icons.brain} />
-        <StatCard label="Knowledge Nodes"   value={stats?.knowledge_nodes}                        sub="facts, patterns, insights" color={p.warm}   icon={icons.zap} />
-        <StatCard label="Ontology Entities" value={stats?.ontology_entities}                      sub="Schema.org typed"          color={p.purple} icon={icons.graph} />
+        <StatCard label="Active Groups"     value={stats?.active_groups}                           sub="distinct group IDs"        color={p.accent} icon={icons.sessions} />
+        <StatCard label="Episodes Stored"   value={stats ? stats.episodes.toLocaleString() : null} sub="in FalkorDB"               color={p.blue}   icon={icons.brain}   />
+        <StatCard label="Knowledge Nodes"   value={stats?.knowledge_nodes}                         sub="facts, patterns, insights" color={p.warm}   icon={icons.zap}     />
+        <StatCard label="Ontology Entities" value={stats?.ontology_entities}                       sub="Schema.org typed"          color={p.purple} icon={icons.graph}   />
       </div>
 
-      <SectionTitle>Infrastructure Services</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 28 }}>
-        {[
-          { name: "DragonflyDB", port: 6381, role: "Session Cache",     extra: "short-term"    },
-          { name: "FalkorDB",    port: 6380, role: "Graph Store",        extra: "long-term"     },
-          { name: "NATS",        port: 4222, role: "Event Bus",          extra: "curation trigger" },
-          { name: "REST Server", port: 9000, role: "HTTP API + UI",      extra: "this page"     },
-          { name: "gRPC Server", port: 50051, role: "RPC API",           extra: ""              },
-          { name: "REM Worker",  port: "—",  role: "Consolidation",      extra: "60s interval"  },
-        ].map((s, i) => (
-          <div key={i} style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 10, padding: "16px 18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: p.text, marginBottom: 2 }}>{s.name}</div>
-                <div style={{ fontSize: 11, color: p.textMuted }}>{s.role}</div>
-              </div>
-              <Badge color={p.green}>Running</Badge>
-            </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 16 }}>
-              <div style={{ fontSize: 11, color: p.textDim, fontFamily: MONO }}><span style={{ color: p.textMuted }}>port</span> {s.port}</div>
-              {s.extra && <div style={{ fontSize: 11, color: p.textDim, fontFamily: MONO }}>{s.extra}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
+      <LatencyChart data={latency || []} />
 
-      <SectionTitle>Recent Events</SectionTitle>
+      <SectionTitle>Event History</SectionTitle>
       {events.length === 0
         ? <Empty msg="No events yet. Send some observations." />
         : (
-          <div style={{ background: p.bg, border: `1px solid ${p.border}`, borderRadius: 10, padding: 14, fontFamily: MONO, fontSize: 11, lineHeight: 1.9, color: p.textMuted, maxHeight: 200, overflowY: "auto" }}>
+          <div style={{ background: p.bg, border: `1px solid ${p.border}`, borderRadius: 10, padding: 14, fontFamily: MONO, fontSize: 11, lineHeight: 1.9, color: p.textMuted, maxHeight: 320, overflowY: "auto" }}>
             {events.map((ev, i) => (
               <div key={i}>
                 <span style={{ color: p.textDim }}>{ev.time}</span>{" "}
-                <span style={{ color: ev.subject?.includes("curation") ? p.warm : ev.subject?.includes("stored") ? p.blue : p.accent }}>{ev.subject}</span>
+                <span style={{ color: ev.subject?.includes("curation") ? p.warm : ev.subject?.includes("stored") ? p.blue : ev.subject?.includes("decay") ? p.coral : p.accent }}>{ev.subject}</span>
               </div>
             ))}
           </div>
@@ -297,25 +600,104 @@ const EpisodeCard = ({ ep }) => {
   );
 };
 
+function buildSessionTree(sessions) {
+  const map = {};
+  sessions.forEach(s => { map[s.group_id] = { ...s, children: [] }; });
+  const roots = [];
+  sessions.forEach(s => {
+    if (s.parent_session_id && map[s.parent_session_id]) {
+      map[s.parent_session_id].children.push(map[s.group_id]);
+    } else {
+      roots.push(map[s.group_id]);
+    }
+  });
+  return { roots, map };
+}
+
+const SessionTreeNode = ({ node, depth, selectedId, onSelect, expandedIds, onToggle, formatAge, p }) => {
+  const hasChildren = node.children && node.children.length > 0;
+  const isExpanded = expandedIds.has(node.group_id);
+  const isActive = node.group_id === selectedId;
+  const ageSecs = Date.now() / 1000 - (node.latest_at || 0);
+  const freshLabel = ageSecs < 3600 ? "recent" : ageSecs < 86400 ? "today" : null;
+
+  return (
+    <div>
+      <div
+        onClick={() => onSelect(node.group_id)}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          paddingLeft: depth * 18 + 6, paddingRight: 10, paddingTop: 9, paddingBottom: 9,
+          borderRadius: 8, cursor: "pointer",
+          background: isActive ? p.surfaceAlt : "transparent",
+          border: `1px solid ${isActive ? p.accentMid : "transparent"}`,
+          transition: "background 0.12s, border-color 0.12s",
+          marginBottom: 2,
+        }}
+      >
+        <span
+          onClick={e => { if (hasChildren) { e.stopPropagation(); onToggle(node.group_id); } }}
+          style={{
+            width: 14, textAlign: "center", fontSize: 11, color: p.textDim,
+            cursor: hasChildren ? "pointer" : "default", userSelect: "none", flexShrink: 0,
+          }}
+        >
+          {hasChildren ? (isExpanded ? "▼" : "▶") : "·"}
+        </span>
+        <span style={{
+          fontSize: 13, fontWeight: isActive ? 600 : 400, color: p.text, fontFamily: MONO,
+          flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {node.group_id}
+        </span>
+        {freshLabel
+          ? <Badge color={p.green} bg={p.green + "18"}>{freshLabel}</Badge>
+          : <span style={{ fontSize: 11, fontFamily: MONO, color: p.textDim, flexShrink: 0 }}>{node.episode_count} eps</span>
+        }
+      </div>
+      {hasChildren && isExpanded && node.children.map(child => (
+        <SessionTreeNode key={child.group_id} node={child} depth={depth + 1}
+          selectedId={selectedId} onSelect={onSelect}
+          expandedIds={expandedIds} onToggle={onToggle}
+          formatAge={formatAge} p={p} />
+      ))}
+    </div>
+  );
+};
+
 const SessionsPage = () => {
   const p = useP();
-  const { data: sessData, loading } = useFetch(`${API}/ui/sessions?limit=50`, [], 10000);
+  const { data: sessData, loading } = useFetch(`${API}/ui/sessions`, [], 10000);
   const sessions = sessData?.sessions || [];
+  const { roots, map: sessMap } = buildSessionTree(sessions);
 
-  // Store only the ID — derive full object from the live list so polls stay fresh
   const [selectedId, setSelectedId] = useState(null);
-  const selected = sessions.find(s => s.group_id === selectedId) ?? null;
+  const [expandedIds, setExpandedIds] = useState(new Set());
 
-  // Auto-select the newest session on first load; also follow when a new one appears
+  // Auto-select newest session and auto-expand root nodes on first load
   const prevTopRef = useRef(null);
   useEffect(() => {
     if (sessions.length === 0) return;
     const topId = sessions[0].group_id;
-    if (!selectedId || (!prevTopRef.current && topId !== prevTopRef.current)) {
+    if (!selectedId || topId !== prevTopRef.current) {
       setSelectedId(topId);
     }
     prevTopRef.current = topId;
-  }, [sessions]);
+    // Auto-expand root nodes
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      roots.forEach(r => { if (r.children.length > 0) next.add(r.group_id); });
+      return next;
+    });
+  }, [sessions.length]);
+
+  const toggleExpand = id => setExpandedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const selected = selectedId ? sessMap[selectedId] : null;
 
   const { data: epData } = useFetch(
     selectedId ? `${API}/ui/episodes?group_id=${encodeURIComponent(selectedId)}&limit=20` : null,
@@ -331,6 +713,16 @@ const SessionsPage = () => {
     return hrs < 24 ? `${hrs}h ${mins % 60}m` : `${Math.floor(hrs / 24)}d`;
   };
 
+  // Build breadcrumb by walking parent_session_id chain upward
+  const breadcrumb = [];
+  if (selectedId && sessMap[selectedId]) {
+    let cur = sessMap[selectedId];
+    while (cur) {
+      breadcrumb.unshift(cur.group_id);
+      cur = cur.parent_session_id ? sessMap[cur.parent_session_id] : null;
+    }
+  }
+
   return (
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: p.text }}>Session Explorer</h2>
@@ -340,44 +732,55 @@ const SessionsPage = () => {
       {!loading && sessions.length === 0 && <Empty msg="No sessions found. Send some observations first." />}
 
       {sessions.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 20 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {sessions.map((s, idx) => {
-              const ageSecs = Date.now() / 1000 - (s.latest_at || 0);
-              const freshLabel = ageSecs < 3600 ? "recent" : ageSecs < 86400 ? "today" : null;
-              const isActive = s.group_id === selectedId;
-              return (
-                <div key={s.group_id} onClick={() => setSelectedId(s.group_id)} style={{
-                  background: isActive ? p.surfaceAlt : p.surface,
-                  border: `1px solid ${isActive ? p.accentMid : p.border}`,
-                  borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "border-color 0.15s, background 0.15s",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: p.text, fontFamily: MONO,
-                      maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {s.group_id}
-                    </span>
-                    {freshLabel
-                      ? <Badge color={p.green} bg={p.green + "18"}>{freshLabel}</Badge>
-                      : <span style={{ fontSize: 11, fontFamily: MONO, color: p.textDim }}>{s.episode_count} eps</span>
-                    }
-                  </div>
-                  <div style={{ display: "flex", gap: 16, fontSize: 11, color: p.textMuted, fontFamily: MONO }}>
-                    <span>{s.episode_count} episodes</span>
-                    <span>{formatAge(s.latest_at)} ago</span>
-                  </div>
-                </div>
-              );
-            })}
+        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20, height: "calc(100vh - 200px)" }}>
+          {/* Tree panel */}
+          <div style={{
+            background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12,
+            padding: "12px 8px", overflowY: "auto", height: "100%", boxSizing: "border-box",
+          }}>
+            <div style={{ fontSize: 11, fontFamily: MONO, color: p.textDim, paddingLeft: 6, marginBottom: 8 }}>
+              {sessions.length} session{sessions.length !== 1 ? "s" : ""}
+            </div>
+            {roots.map(root => (
+              <SessionTreeNode key={root.group_id} node={root} depth={0}
+                selectedId={selectedId} onSelect={setSelectedId}
+                expandedIds={expandedIds} onToggle={toggleExpand}
+                formatAge={formatAge} p={p} />
+            ))}
           </div>
 
-          <div style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: 20 }}>
-            {selected && (
+          {/* Detail panel */}
+          <div style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: 20, overflowY: "auto", height: "100%", boxSizing: "border-box" }}>
+            {selected ? (
               <>
+                {/* Breadcrumb */}
+                {breadcrumb.length > 1 && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+                    {breadcrumb.map((id, i) => (
+                      <span key={id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          onClick={() => setSelectedId(id)}
+                          style={{
+                            fontSize: 12, fontFamily: MONO, cursor: "pointer",
+                            color: i === breadcrumb.length - 1 ? p.accent : p.textDim,
+                            fontWeight: i === breadcrumb.length - 1 ? 600 : 400,
+                          }}
+                        >{id}</span>
+                        {i < breadcrumb.length - 1 && <span style={{ fontSize: 12, color: p.textDim }}>›</span>}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                   <div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: p.text, fontFamily: MONO }}>{selected.group_id}</div>
-                    <div style={{ fontSize: 12, color: p.textMuted, marginTop: 2 }}>group_id · {formatAge(selected.latest_at)} ago</div>
+                    <div style={{ fontSize: 12, color: p.textMuted, marginTop: 2 }}>
+                      {selected.parent_session_id
+                        ? <>child of <span style={{ fontFamily: MONO, color: p.textDim }}>{selected.parent_session_id}</span> · </>
+                        : "root session · "
+                      }
+                      {formatAge(selected.latest_at)} ago
+                    </div>
                   </div>
                   <Badge color={p.accent}>Episodes: {selected.episode_count}</Badge>
                 </div>
@@ -390,6 +793,8 @@ const SessionsPage = () => {
                     </div>
                   )}
               </>
+            ) : (
+              <Empty msg="Select a session to view episodes." />
             )}
           </div>
         </div>
@@ -418,7 +823,7 @@ const GraphPage = () => {
   const [layout, setLayout] = useState("hub");
   const { data: epData }       = useFetch(`${API}/ui/episodes?limit=50`,              [], 20000);
   const { data: knData }       = useFetch(`${API}/ui/knowledge?limit=50`,              [], 20000);
-  const { data: ontoData }     = useFetch(`${API}/ui/ontology?limit=120`,              [], 20000);
+  const { data: ontoData }     = useFetch(`${API}/ui/ontology`,                        [], 20000);
   const { data: ontoEdgeData }    = useFetch(`${API}/ui/ontology/edges?limit=400`,        [], 20000);
   const { data: ontoCooccurData } = useFetch(`${API}/ui/ontology/cooccurrence?limit=400`, [], 20000);
   const canvasRef        = useRef(null);
@@ -429,10 +834,28 @@ const GraphPage = () => {
   const drawRef          = useRef(null);      // shared so edge-effect can redraw
   const prevLayoutRef    = useRef(null);
   const prevNodeCountRef = useRef(0);
+  // Debounce: coalesce node + edge data so the layout fires once with everything
+  const stableRef   = useRef({ nodes: [], edges: [], cooccur: [] });
+  const debounceRef = useRef(null);
+  const [layoutKey, setLayoutKey] = useState(0);
   const [selectedNode, setSelectedNode] = useState(null);
   const [popupPos, setPopupPos]         = useState({ x: 0, y: 0 });
   const setSelectedNodeRef = useRef(setSelectedNode);
   const setPopupPosRef     = useRef(setPopupPos);
+
+  // Debounce: wait 120ms after the last data change before triggering layout.
+  // Ensures nodes + edges arrive together so hub community detection has full graph.
+  useEffect(() => {
+    if (!ontoData) return;
+    stableRef.current = {
+      nodes:   ontoData?.nodes           || [],
+      edges:   ontoEdgeData?.edges       || [],
+      cooccur: ontoCooccurData?.edges    || [],
+    };
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setLayoutKey(k => k + 1), 120);
+    return () => clearTimeout(debounceRef.current);
+  }, [ontoData, ontoEdgeData, ontoCooccurData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -444,7 +867,7 @@ const GraphPage = () => {
     ctx.scale(2, 2);
     const w = W / 2, h = H / 2;
 
-    const ontology = ontoData?.nodes || [];
+    const ontology = stableRef.current.nodes;
 
     // Only reset pan/zoom + restart animation when something structural changes
     const nodeCountChanged = ontology.length !== prevNodeCountRef.current;
@@ -458,8 +881,8 @@ const GraphPage = () => {
     const pan  = panRef.current;
     const zoom = zoomRef.current;
     // Build nodes when ontology data changes
-    const rawEdges   = ontoEdgeData?.edges    || [];
-    const rawCooccur = ontoCooccurData?.edges || [];
+    const rawEdges   = stableRef.current.edges;
+    const rawCooccur = stableRef.current.cooccur;
     if (nodesRef.current.length !== ontology.length) {
       const sorted = [...ontology].sort((a, b) =>
         (a.schema_type || "Thing").localeCompare(b.schema_type || "Thing")
@@ -1191,37 +1614,7 @@ const GraphPage = () => {
       canvas.removeEventListener("wheel",      onWheel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ontoData, layout, p]);
-
-  // Edge-only effect: polls update edges + redraw without resetting pan/zoom or restarting layout
-  useEffect(() => {
-    if (nodesRef.current.length === 0) return;
-    const rawEdges   = ontoEdgeData?.edges    || [];
-    const rawCooccur = ontoCooccurData?.edges || [];
-    if (rawEdges.length === 0 && rawCooccur.length === 0) return;
-    const uuidIdx = {};
-    nodesRef.current.forEach((n, i) => { uuidIdx[n.data.uuid] = i; });
-    const hasEdge = new Set();
-    const merged  = [];
-    rawEdges.forEach(e => {
-      const a = uuidIdx[e.source], b = uuidIdx[e.target];
-      if (a === undefined || b === undefined || a === b) return;
-      const key = `${Math.min(a,b)},${Math.max(a,b)}`;
-      if (hasEdge.has(key)) return;
-      hasEdge.add(key);
-      merged.push([a, b, 0]);
-    });
-    rawCooccur.forEach(e => {
-      const a = uuidIdx[e.source], b = uuidIdx[e.target];
-      if (a === undefined || b === undefined || a === b) return;
-      const key = `${Math.min(a,b)},${Math.max(a,b)}`;
-      if (hasEdge.has(key)) return;
-      hasEdge.add(key);
-      merged.push([a, b, 1]);
-    });
-    if (merged.length > 0) edgesRef.current = merged;
-    drawRef.current?.();
-  }, [ontoEdgeData, ontoCooccurData]);
+  }, [layoutKey, layout, p]);
 
   // Derived for the side panel (not used in canvas)
   const episodes  = epData?.episodes  || [];
@@ -1624,12 +2017,13 @@ const REMPage = () => {
 
 // ─── Main App ──────────────────────────────────────────────────────────
 const NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard",    icon: icons.dashboard },
-  { id: "sessions",  label: "Sessions",     icon: icons.sessions  },
-  { id: "graph",     label: "Memory Graph", icon: icons.graph     },
-  { id: "observe",   label: "Observe",      icon: icons.observe   },
-  { id: "rem",       label: "REM Monitor",  icon: icons.rem       },
-  { id: "config",    label: "Configuration",icon: icons.config    },
+  { id: "dashboard",  label: "Dashboard",    icon: icons.dashboard  },
+  { id: "reporting",  label: "Reporting",    icon: icons.reporting  },
+  { id: "sessions",   label: "Sessions",     icon: icons.sessions   },
+  { id: "graph",      label: "Memory Graph", icon: icons.graph      },
+  { id: "observe",    label: "Observe",      icon: icons.observe    },
+  { id: "rem",        label: "REM Monitor",  icon: icons.rem        },
+  { id: "config",     label: "Configuration",icon: icons.config     },
 ];
 
 export default function SegnogUI() {
@@ -1697,12 +2091,13 @@ export default function SegnogUI() {
 
         {/* Main Content */}
         <div style={{ flex: 1, overflow: "auto", padding: "28px 36px" }}>
-          {page === "dashboard" && <DashboardPage />}
-          {page === "sessions"  && <SessionsPage />}
-          {page === "graph"     && <GraphPage />}
-          {page === "observe"   && <ObservePage />}
-          {page === "rem"       && <REMPage />}
-          {page === "config"    && <ConfigPage />}
+          {page === "dashboard"  && <DashboardPage />}
+          {page === "reporting"  && <ReportingPage />}
+          {page === "sessions"   && <SessionsPage />}
+          {page === "graph"      && <GraphPage />}
+          {page === "observe"    && <ObservePage />}
+          {page === "rem"        && <REMPage />}
+          {page === "config"     && <ConfigPage />}
         </div>
       </div>
     </ThemeCtx.Provider>

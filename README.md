@@ -2,7 +2,23 @@
   <img src="assets/segnog-logo.png" width="600" alt="Segnog" />
 </p>
 
-One endpoint. One Docker container. Your agent gets memory.
+Agentic memory, we are all getting obsessed with them, for the right reasons. LLMs cannot remember a thing, you need to constantly tell them every time what we were doing, and what we want to do, and here is everything else you need to know. A common problem for everything I try to build is a good memory,  and I wanted a very simple one API call memory, and it handles everything internally, one docker container, so a weekend project Segnog, that I kept iterating on it in the evenings, suspiciously good, for now. 
+
+The trick it uses, is very simple, short memory fast, using Redis cache and embeddings for indexing. Long memory using Knowledge Graph and embeddings on the content and the Ontology terms. Internally it has a NATS event bus to sort out all artifacts internally. Like a good boy I used Schema.org for the Ontology, and dspy for optimizing prompts based on the context. Thanks Claude for all the help 🙃 
+
+## Name
+
+> **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
+
+## How it stays simple
+
+**One container holds everything.** DragonflyDB (session cache), FalkorDB (long-term graph), NATS (event bus), REST server, gRPC server, and background workers all run inside a single Docker container managed by supervisord. There is no external cluster to operate.
+
+**One endpoint does everything.** `/observe` stores the current observation, searches for related memory, and returns a formatted context passage — all in a single call. Reading and writing are not separate operations.
+
+**Data organises itself in the background.** The agent does not decide what is important or how to structure it. After returning the context, Segnog fires background tasks that extract knowledge, identify entities, consolidate episodes, and maintain a graph of who knows what. This happens asynchronously — the agent's response is not delayed.
+
+**Memory has two layers, kept separate.** DragonflyDB is the hot session cache — fast, in-memory, TTL-scoped. FalkorDB is the persistent graph — structured, searchable across sessions. The hot path never touches the graph. The graph is populated in the background, then pulled into the session on the next cold start.
 
 ```bash
 docker-compose up -d
@@ -102,7 +118,21 @@ curl http://localhost:9000/health
 
 Visit **[http://localhost:9000](http://localhost:9000)** in a browser.
 
-The dashboard shows live memory stats, sessions, episodes, the entity graph, and an Observe playground where you can send requests and inspect the returned context.
+<p align="center">
+  <img src="assets/Dashboard.png" width="600" alt="Dashboard" />
+</p>
+
+The dashboard has seven pages:
+
+| Page | What it shows |
+|---|---|
+| **Dashboard** | Service health grid, observe/search latency (p50 · p95), hydrate stats, and REM pipeline status — all live. |
+| **Reporting** | Aggregate counters (episodes, knowledge nodes, ontology entities, active sessions), full per-endpoint latency chart with p50/p95/p99/max, and a scrollable event history log. |
+| **Sessions** | A collapsible tree of all sessions. Parent-child relationships are visualised as indented branches — click ▶/▼ to expand or collapse. Selecting a session shows its latest episodes in the right panel, with a breadcrumb trail showing the full ancestor path (e.g. `project-x › task-1 › subtask-1a`). |
+| **Memory Graph** | An interactive canvas graph of all ontology entities (nodes) and their relationships (edges). Switch between Hub, Force, Radial, Hierarchical and other layout modes. Click a node to see its Schema.org type and prose summary. |
+| **Observe** | A live playground. Type any message, set a session ID, and click Send to call `/observe` directly and inspect the returned context. |
+| **REM Monitor** | Status of the background consolidation pipeline: pending episodes, Hebbian edge count, ontology entity count, sweep cycle latency. |
+| **Configuration** | All current configuration values from `settings.toml` — scoring weights, Hebbian parameters, background worker intervals, NATS settings. |
 
 ---
 
@@ -160,39 +190,59 @@ Open `http://localhost:9000` → **Observe** page. Type any message, click **Sen
 
 ---
 
+### Hierarchical sessions
+
+Sessions can be nested — a child session automatically inherits memory from all its ancestors at query time. The agent in `subtask-1a` sees everything from `task-1` and `project-x` without any extra logic.
+
+```bash
+# Root session
+curl -X POST http://localhost:9000/api/v1/memory/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "project-x", "content": "Building a search engine"}'
+
+# Child session — links to project-x
+curl -X POST http://localhost:9000/api/v1/memory/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "task-1", "parent_session_id": "project-x", "content": "Working on indexing pipeline"}'
+
+# Grandchild session — links to task-1
+curl -X POST http://localhost:9000/api/v1/memory/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "subtask-1a", "parent_session_id": "task-1", "content": "Implementing tokenizer"}'
+
+# Query from the grandchild — context includes episodes from ALL ancestors
+curl -X POST http://localhost:9000/api/v1/memory/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "subtask-1a", "content": "What are we building?", "read_only": true}'
+```
+
+Session links are created lazily on first write — no pre-registration needed. The hierarchy is visible in the dashboard Sessions page as a collapsible tree.
+
+---
+
+---
+
+## API Specification
+
+Segnog publishes a machine-readable OpenAPI 3.x spec and interactive docs at the API prefix, so any service or agent can discover its capabilities programmatically:
+
+| URL | What it serves |
+|---|---|
+| `GET /api/v1/memory` | Discovery manifest — service name, version, and links to all endpoint groups |
+| `GET /api/v1/memory/openapi.json` | Full OpenAPI 3.x spec (JSON) |
+| `GET /api/v1/memory/docs` | Swagger UI — interactive browser exploration |
+| `GET /api/v1/memory/redoc` | ReDoc — alternative rendered documentation |
+
+```bash
+# Fetch the spec programmatically
+curl http://localhost:9000/api/v1/memory/openapi.json | python3 -m json.tool | head -30
+```
+
+---
+
 → **[Full reference documentation](docs/REFERENCE.md)** — architecture, memory layers, observe sequence, 3D scoring, ontology, REM consolidation, configuration reference, benchmark results.
 
----
+→ **[REST API reference](docs/API.md)** — every endpoint with request/response shapes and examples.
 
-## How it stays simple
 
-**One container holds everything.** DragonflyDB (session cache), FalkorDB (long-term graph), NATS (event bus), REST server, gRPC server, and background workers all run inside a single Docker container managed by supervisord. There is no external cluster to operate.
 
-**One endpoint does everything.** `/observe` stores the current observation, searches for related memory, and returns a formatted context passage — all in a single call. Reading and writing are not separate operations.
-
-**Data organises itself in the background.** The agent does not decide what is important or how to structure it. After returning the context, Segnog fires background tasks that extract knowledge, identify entities, consolidate episodes, and maintain a graph of who knows what. This happens asynchronously — the agent's response is not delayed.
-
-**Memory has two layers, kept separate.** DragonflyDB is the hot session cache — fast, in-memory, TTL-scoped. FalkorDB is the persistent graph — structured, searchable across sessions. The hot path never touches the graph. The graph is populated in the background, then pulled into the session on the next cold start.
-
----
-
-## Name
-
-> **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
-
----
-
-## Philosophy
-
-Most AI agents are amnesiac by default. They are stateless across conversations, unable to learn from prior experience, and forced to rediscover the same context on every new turn.
-
-Segnog is built around three convictions:
-
-**1. Memory has two layers.**
-Short-term memory is fast, volatile, and session-scoped. Long-term memory is permanent, structured, and accumulates over time. These are different problems with different tools. Keeping them separate — DragonflyDB for hot sessions, FalkorDB for the persistent graph — means the hot path never pays the cost of the cold store.
-
-**2. Relevance is not just semantic similarity.**
-A keyword match tells you what is *related*. What you actually need is what was *useful before in similar situations*. When reading from the session cache, Segnog re-scores results on three dimensions: how similar, how recent, and how often co-retrieved. Episodes that fire together, wire together.
-
-**3. Consolidation should be unconscious.**
-An agent should not have to decide how to manage its own memory. The observe endpoint handles everything in one call — store, retrieve, summarize, return context — while background workers consolidate experiences into knowledge asynchronously, the way biological memory is refined during sleep.

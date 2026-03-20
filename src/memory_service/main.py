@@ -19,13 +19,15 @@ from .config import (
     get_background_batch_size,
     get_background_min_episodes,
     get_nats_enabled,
+    get_nats_url,
     get_nats_curation_min_episodes,
     get_nats_curation_max_wait,
     get_nats_curation_max_concurrent,
 )
 from .storage import init_backends
-from .grpc.service_handler import MemoryServiceHandler
-from .grpc.server import create_grpc_server
+from .services.memory_service import MemoryService
+from .transport.grpc.service_handler import MemoryServiceHandler
+from .transport.grpc.server import create_grpc_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +51,7 @@ async def run_grpc_server(handler: MemoryServiceHandler, port: int):
 
 async def run_rest_server(host: str, port: int):
     """Start and run the REST server."""
-    from .rest.app import create_app
+    from .transport.rest.app import create_app
 
     app = create_app()
     config = uvicorn.Config(
@@ -69,14 +71,35 @@ async def main():
 
     backends = await init_backends(session_ttl=get_session_ttl())
 
-    handler = MemoryServiceHandler(
-        dragonfly=backends["dragonfly"],
-        short_term=backends["short_term"],
+    if backends.get("ontology_store") is None:
+        logger.warning(
+            "OntologyStore not available — ontology features (entity extraction, "
+            "node search, relationship inference) will be disabled. "
+            "Check FalkorDB connectivity and schema_org data path."
+        )
+
+    # NATS bootstrap (messaging concerns live here, not in storage/)
+    nats_client = None
+    if get_nats_enabled():
+        from .messaging.client import NatsClient
+        from .messaging.publisher import EpisodeEventPublisher
+
+        nats_client = NatsClient(url=get_nats_url())
+        await nats_client.connect()
+
+        publisher = EpisodeEventPublisher(nats_client)
+        backends["episode_store"].set_event_publisher(publisher)
+        logger.info("NATS client initialized")
+
+    svc = MemoryService(
         episode_store=backends["episode_store"],
         knowledge_store=backends["knowledge_store"],
         artifact_store=backends["artifact_store"],
         ontology_store=backends.get("ontology_store"),
+        dragonfly=backends["dragonfly"],
+        short_term=backends["short_term"],
     )
+    handler = MemoryServiceHandler(service=svc)
 
     grpc_port = get_grpc_port()
     rest_host = get_rest_host()
@@ -88,15 +111,12 @@ async def main():
         run_rest_server(rest_host, rest_port),
     ]
 
-    nats_client = backends.get("nats_client")
-
-    if nats_client and get_nats_enabled():
+    if nats_client:
         # NATS event-driven curation replaces polling-based REM worker
-        from .events.publisher import EpisodeEventPublisher
-        from .events.curation_worker import CurationWorker
-        from .events.rem_sweep_worker import REMSweepPublisher, REMSweepWorker
+        from .messaging.publisher import EpisodeEventPublisher
+        from .workers.curation_worker import CurationWorker
+        from .workers.rem_sweep_worker import REMSweepPublisher, REMSweepWorker
 
-        # Publisher already wired to episode_store in init_backends()
         publisher = backends["episode_store"]._event_publisher or EpisodeEventPublisher(nats_client)
 
         curation_worker = CurationWorker(
@@ -108,6 +128,7 @@ async def main():
             max_wait_seconds=get_nats_curation_max_wait(),
             max_concurrent=get_nats_curation_max_concurrent(),
             ontology_store=backends.get("ontology_store"),
+            dragonfly=backends["dragonfly"],
         )
         tasks.append(curation_worker.run())
 
@@ -122,6 +143,7 @@ async def main():
             batch_size=get_background_batch_size(),
             min_episodes=1,
             ontology_store=backends.get("ontology_store"),
+            dragonfly=backends["dragonfly"],
         )
         tasks.append(sweep_publisher.run())
         tasks.append(sweep_worker.run())
@@ -129,7 +151,7 @@ async def main():
 
     elif get_background_enabled():
         # Fallback: traditional polling-based REM worker
-        from .background.rem_worker import REMWorker
+        from .workers.rem_worker import REMWorker
 
         rem_worker = REMWorker(
             handler=handler,
@@ -138,6 +160,7 @@ async def main():
             batch_size=get_background_batch_size(),
             min_episodes=get_background_min_episodes(),
             ontology_store=backends.get("ontology_store"),
+            dragonfly=backends["dragonfly"],
         )
         tasks.append(rem_worker.run())
         logger.info("REM background worker enabled (polling mode)")

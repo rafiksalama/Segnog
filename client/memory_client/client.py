@@ -37,6 +37,7 @@ class MemoryClient:
         self._transport = transport
         self._group_id = group_id
         self._workflow_id = workflow_id
+        self._parent_session_id: Optional[str] = None
         self._transport_type = type(transport).__name__
 
     @classmethod
@@ -70,12 +71,18 @@ class MemoryClient:
         """Close the transport."""
         await self._transport.close()
 
-    def set_scope(self, group_id: str = None, workflow_id: str = None) -> None:
+    def set_scope(
+        self,
+        group_id: str = None,
+        workflow_id: str = None,
+        parent_session_id: str = None,
+    ) -> None:
         """Update scope for subsequent calls."""
         if group_id:
             self._group_id = group_id
         if workflow_id:
             self._workflow_id = workflow_id
+        self._parent_session_id = parent_session_id or None
 
     @property
     def _scope(self) -> Dict[str, str]:
@@ -599,19 +606,19 @@ class MemoryClient:
                 },
             )
         else:
-            resp = await self._transport.post(
-                "/api/v1/memory/observe",
-                {
-                    "session_id": self._workflow_id,
-                    "content": content,
-                    "source": source,
-                    "metadata": metadata,
-                    "read_only": read_only,
-                    "summarize": summarize,
-                    "top_k": top_k,
-                    "minimal": minimal,
-                },
-            )
+            payload: Dict[str, Any] = {
+                "session_id": self._workflow_id,
+                "content": content,
+                "source": source,
+                "metadata": metadata,
+                "read_only": read_only,
+                "summarize": summarize,
+                "top_k": top_k,
+                "minimal": minimal,
+            }
+            if self._parent_session_id:
+                payload["parent_session_id"] = self._parent_session_id
+            resp = await self._transport.post("/api/v1/memory/observe", payload)
         return resp or {}
 
     # =========================================================================
@@ -862,15 +869,15 @@ class MemoryClient:
                 },
             )
         else:
-            return await self._transport.post(
-                "/pipelines/startup",
-                {
-                    "group_id": self._group_id,
-                    "workflow_id": self._workflow_id,
-                    "task": task,
-                    "model": model,
-                },
-            )
+            payload: Dict[str, Any] = {
+                "group_id": self._group_id,
+                "workflow_id": self._workflow_id,
+                "task": task,
+                "model": model,
+            }
+            if self._parent_session_id:
+                payload["parent_session_id"] = self._parent_session_id
+            return await self._transport.post("/pipelines/startup", payload)
 
     async def run_curation(
         self,
