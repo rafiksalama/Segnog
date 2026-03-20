@@ -356,8 +356,8 @@ class DragonflyClient:
             async with self._client.pipeline(transaction=False) as pipe:
                 pipe.sadd("latency:endpoints", endpoint)
                 pipe.lpush(key, sample)
-                pipe.ltrim(key, 0, 199)   # keep last 200 samples
-                pipe.expire(key, 86400)   # 24 h TTL
+                pipe.ltrim(key, 0, 199)  # keep last 200 samples
+                pipe.expire(key, 86400)  # 24 h TTL
                 await pipe.execute()
         except Exception as e:
             logger.debug("record_latency failed (non-critical): %s", e)
@@ -405,16 +405,18 @@ class DragonflyClient:
             recent_raw = sorted(parsed, key=lambda x: x[0])[-60:]
             samples = [{"ts": round(ts, 3), "ms": ms} for ts, ms in recent_raw]
 
-            results.append({
-                "endpoint": ep_str,
-                "count": n,
-                "mean":  round(sum(ms_vals) / n, 1),
-                "p50":   round(ms_vals[max(0, int(n * 0.50) - 1)], 1),
-                "p95":   round(ms_vals[max(0, int(n * 0.95) - 1)], 1),
-                "p99":   round(ms_vals[max(0, int(n * 0.99) - 1)], 1),
-                "max":   round(ms_vals[-1], 1),
-                "samples": samples,
-            })
+            results.append(
+                {
+                    "endpoint": ep_str,
+                    "count": n,
+                    "mean": round(sum(ms_vals) / n, 1),
+                    "p50": round(ms_vals[max(0, int(n * 0.50) - 1)], 1),
+                    "p95": round(ms_vals[max(0, int(n * 0.95) - 1)], 1),
+                    "p99": round(ms_vals[max(0, int(n * 0.99) - 1)], 1),
+                    "max": round(ms_vals[-1], 1),
+                    "samples": samples,
+                }
+            )
 
         return sorted(results, key=lambda x: x["count"], reverse=True)
 

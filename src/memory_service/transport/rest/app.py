@@ -15,9 +15,7 @@ from .routers import events, episodes, knowledge, artifacts, state, smart, pipel
 from .dependencies import setup_backends, teardown_backends
 from ...workers.span_aggregator import run_span_aggregator
 
-_UUID_RE = re.compile(
-    r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-)
+_UUID_RE = re.compile(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _API_PREFIX = "/api/v1/memory/"
 
 
@@ -31,11 +29,9 @@ class LatencyMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         if path.startswith(_API_PREFIX) and hasattr(request.app.state, "dragonfly"):
-            short = _UUID_RE.sub("/{id}", path[len(_API_PREFIX):]) or "/"
+            short = _UUID_RE.sub("/{id}", path[len(_API_PREFIX) :]) or "/"
             endpoint = f"{request.method}:{short}"
-            asyncio.create_task(
-                request.app.state.dragonfly.record_latency(endpoint, duration_ms)
-            )
+            asyncio.create_task(request.app.state.dragonfly.record_latency(endpoint, duration_ms))
 
         return response
 
@@ -107,14 +103,14 @@ def create_app() -> FastAPI:
             "docs": "/api/v1/memory/docs",
             "redoc": "/api/v1/memory/redoc",
             "endpoints": {
-                "observe":    "POST /api/v1/memory/observe",
-                "episodes":   "/api/v1/memory/episodes",
-                "knowledge":  "/api/v1/memory/knowledge",
-                "artifacts":  "/api/v1/memory/artifacts",
-                "ontology":   "/api/v1/memory/ui/ontology",
-                "smart":      "/api/v1/memory/smart",
-                "pipelines":  "/api/v1/memory/pipelines",
-                "health":     "/health",
+                "observe": "POST /api/v1/memory/observe",
+                "episodes": "/api/v1/memory/episodes",
+                "knowledge": "/api/v1/memory/knowledge",
+                "artifacts": "/api/v1/memory/artifacts",
+                "ontology": "/api/v1/memory/ui/ontology",
+                "smart": "/api/v1/memory/smart",
+                "pipelines": "/api/v1/memory/pipelines",
+                "health": "/health",
             },
         }
 

@@ -69,7 +69,9 @@ class SearchByEntitiesResponse(BaseModel):
 
 class ObserveRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
-    parent_session_id: Optional[str] = None  # If set, links this session as a child of the given parent
+    parent_session_id: Optional[str] = (
+        None  # If set, links this session as a child of the given parent
+    )
     content: str = Field(..., min_length=1)
     timestamp: Optional[str] = None  # ISO string or epoch, defaults to now
     source: Optional[str] = None  # who/what generated this observation
@@ -77,7 +79,9 @@ class ObserveRequest(BaseModel):
     read_only: bool = False  # If True, return context without writing
     summarize: bool = False  # If True, run LLM summarization; else return raw formatted entries
     top_k: int = Field(100, ge=1, le=1000)  # Max session entries to retrieve and score
-    knowledge_top_k: int = Field(10, ge=1, le=100)  # Max knowledge entries from FalkorDB (read_only augmentation)
+    knowledge_top_k: int = Field(
+        10, ge=1, le=100
+    )  # Max knowledge entries from FalkorDB (read_only augmentation)
     minimal: bool = False  # If True, skip DragonflyDB — only FalkorDB knowledge + 1 recent episode
 
 

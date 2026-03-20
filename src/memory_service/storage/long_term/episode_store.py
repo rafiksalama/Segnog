@@ -141,7 +141,12 @@ class EpisodeStore(BaseStore):
                        WITH p
                        MATCH (c:Session {session_id: $sid})
                        MERGE (p)-[:PARENT_OF]->(c)""",
-                    params={"pid": parent_session_id, "sid": session_id, "ts": ts, "ts_iso": ts_iso},
+                    params={
+                        "pid": parent_session_id,
+                        "sid": session_id,
+                        "ts": ts,
+                        "ts_iso": ts_iso,
+                    },
                 )
         except Exception as e:
             logger.warning("ensure_session failed (non-critical): %s", e)

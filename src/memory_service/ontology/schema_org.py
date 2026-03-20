@@ -54,6 +54,7 @@ def _cache_path(jsonld_path: Path) -> Path:
     model_slug = get_embedding_model().replace("/", "_").replace(":", "_")
     return jsonld_path.parent / f"class_embeddings_{model_slug}.json"
 
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------

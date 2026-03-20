@@ -39,6 +39,7 @@ class BaseStore:
     async def _embed(self, text: str) -> List[float]:
         """Generate embedding via OpenAI-compatible API with exponential-backoff retry."""
         import asyncio
+
         delay = _EMBED_RETRY_BASE_DELAY
         last_err: Exception = RuntimeError("embedding failed")
         for attempt in range(_EMBED_MAX_RETRIES):
@@ -54,7 +55,10 @@ class BaseStore:
             if attempt < _EMBED_MAX_RETRIES - 1:
                 logger.warning(
                     "_embed attempt %d/%d failed (%s); retrying in %.1fs",
-                    attempt + 1, _EMBED_MAX_RETRIES, last_err, delay,
+                    attempt + 1,
+                    _EMBED_MAX_RETRIES,
+                    last_err,
+                    delay,
                 )
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -63,6 +67,7 @@ class BaseStore:
     async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
         """Batch embedding for multiple entries with exponential-backoff retry."""
         import asyncio
+
         if not texts:
             return []
         delay = _EMBED_RETRY_BASE_DELAY
@@ -80,7 +85,10 @@ class BaseStore:
             if attempt < _EMBED_MAX_RETRIES - 1:
                 logger.warning(
                     "_embed_batch attempt %d/%d failed (%s); retrying in %.1fs",
-                    attempt + 1, _EMBED_MAX_RETRIES, last_err, delay,
+                    attempt + 1,
+                    _EMBED_MAX_RETRIES,
+                    last_err,
+                    delay,
                 )
                 await asyncio.sleep(delay)
                 delay *= 2

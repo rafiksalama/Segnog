@@ -179,9 +179,7 @@ class MemoryServiceHandler:
 
     async def get_artifact(self, req: dict) -> dict:
         group_id, _ = self._scope(req)
-        result = await self._service.get_artifact(
-            group_id=group_id, uuid=req.get("uuid", "")
-        )
+        result = await self._service.get_artifact(group_id=group_id, uuid=req.get("uuid", ""))
         return {"artifact": result, "found": result is not None}
 
     async def list_recent_artifacts(self, req: dict) -> dict:
@@ -193,9 +191,7 @@ class MemoryServiceHandler:
 
     async def delete_artifact(self, req: dict) -> dict:
         group_id, _ = self._scope(req)
-        existed = await self._service.delete_artifact(
-            group_id=group_id, uuid=req.get("uuid", "")
-        )
+        existed = await self._service.delete_artifact(group_id=group_id, uuid=req.get("uuid", ""))
         return {"existed": existed}
 
     # =========================================================================
@@ -246,9 +242,7 @@ class MemoryServiceHandler:
     async def get_memory_context(self, req: dict) -> dict:
         group_id, workflow_id = self._scope(req)
         self._service._dragonfly.set_scope(group_id=group_id, workflow_id=workflow_id)
-        events = await self._service._dragonfly.get_recent_events(
-            count=req.get("event_limit", 5)
-        )
+        events = await self._service._dragonfly.get_recent_events(count=req.get("event_limit", 5))
         lines = []
         for e in reversed(events):
             etype = e.get("type", "")
@@ -266,9 +260,7 @@ class MemoryServiceHandler:
     async def reinterpret_task(self, req: dict) -> dict:
         from ...intelligence.evaluation.reinterpret import reinterpret_task
 
-        result = await reinterpret_task(
-            task=req.get("task", ""), model=req.get("model") or None
-        )
+        result = await reinterpret_task(task=req.get("task", ""), model=req.get("model") or None)
         return {
             "search_labels": result.get("search_labels", []),
             "search_query": result.get("search_query", ""),

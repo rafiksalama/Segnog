@@ -32,9 +32,9 @@ import time
 logger = logging.getLogger(__name__)
 
 _TIMING_STREAM = "timing:spans"
-_POLL_INTERVAL = 0.2       # seconds between polls when stream is empty
-_STALE_SPAN_TTL = 60.0     # seconds before an unmatched start is discarded
-_BATCH_SIZE = 200          # events read per poll
+_POLL_INTERVAL = 0.2  # seconds between polls when stream is empty
+_STALE_SPAN_TTL = 60.0  # seconds before an unmatched start is discarded
+_BATCH_SIZE = 200  # events read per poll
 
 
 async def run_span_aggregator(dragonfly) -> None:
@@ -44,7 +44,7 @@ async def run_span_aggregator(dragonfly) -> None:
         dragonfly: Connected :class:`~memory_service.storage.short_term.dragonfly.DragonflyClient`
     """
     pending: dict[str, dict] = {}  # span_id → {operation, step, ts_start}
-    last_id = "0-0"                # stream cursor (exclusive lower bound)
+    last_id = "0-0"  # stream cursor (exclusive lower bound)
 
     logger.info("SpanAggregator started — reading %s", _TIMING_STREAM)
 
@@ -72,9 +72,7 @@ async def run_span_aggregator(dragonfly) -> None:
             # Prune stale unmatched starts (prevents unbounded memory growth)
             now = time.time()
             stale = [
-                sid
-                for sid, info in pending.items()
-                if now - info["ts_start"] > _STALE_SPAN_TTL
+                sid for sid, info in pending.items() if now - info["ts_start"] > _STALE_SPAN_TTL
             ]
             for sid in stale:
                 logger.debug("SpanAggregator: pruning stale span %s.%s", sid, pending[sid]["step"])
@@ -90,6 +88,7 @@ async def run_span_aggregator(dragonfly) -> None:
 
 def _process_span_event(fields: dict, pending: dict, dragonfly) -> None:
     """Match a single stream event against pending starts; fire record_latency on match."""
+
     # Redis stream values are bytes or str depending on decode_responses setting
     def _get(key: str) -> str:
         v = fields.get(key, b"")

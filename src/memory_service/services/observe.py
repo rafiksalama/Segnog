@@ -35,6 +35,7 @@ def _retrieval_params() -> dict:
 def _knowledge_params() -> dict:
     return {"top_k": get_retrieval_knowledge_top_k(), "min_score": get_retrieval_min_score()}
 
+
 _PROPER_NOUN_SKIP = {
     "What",
     "When",
@@ -248,7 +249,9 @@ async def _hydrate_knowledge(
             for (kid, kn), emb in zip(needs_embed, batch_embs):
                 kn["embedding"] = emb
         except Exception as e:
-            logger.warning(f"Knowledge batch embed failed during hydration: {e}")  # entries without embeddings will be skipped below
+            logger.warning(
+                f"Knowledge batch embed failed during hydration: {e}"
+            )  # entries without embeddings will be skipped below
 
     hydrated = 0
     for kn_id, kn in to_hydrate:
@@ -306,7 +309,9 @@ async def _hydrate_ontology_nodes(
             for (i, key, content), emb in zip(needs_embed, batch_embs):
                 to_hydrate[i] = (key, content, emb)
         except Exception as e:
-            logger.warning(f"Ontology batch embed failed during hydration: {e}")  # entries without embeddings will be skipped below
+            logger.warning(
+                f"Ontology batch embed failed during hydration: {e}"
+            )  # entries without embeddings will be skipped below
 
     hydrated = 0
     for key, content, emb in to_hydrate:
@@ -413,7 +418,10 @@ async def _reinforce_hebbian(episode_store, episode_uuid: str, episodes, knowled
     if not get_hebbian_enabled() or not episodes:
         return
 
-    from ..storage.retrieval.hebbian import reinforce_co_activations, reinforce_knowledge_activations
+    from ..storage.retrieval.hebbian import (
+        reinforce_co_activations,
+        reinforce_knowledge_activations,
+    )
 
     ep_uuids = [r["uuid"] for r in episodes if r.get("uuid") and r["uuid"] != episode_uuid]
     if ep_uuids:
@@ -468,8 +476,13 @@ async def _cold_start_prefill(
         await _hydrate_episodes(episode_store, dragonfly, session_id, episodes, episode_uuid)
         await _hydrate_knowledge(episode_store, dragonfly, session_id, knowledge)
         await _search_and_hydrate_ontology(
-            ontology_store, episode_store, dragonfly, session_id,
-            embedding, ontology_top_k, pipeline,
+            ontology_store,
+            episode_store,
+            dragonfly,
+            session_id,
+            embedding,
+            ontology_top_k,
+            pipeline,
             log_prefix="Cold start ontology hydration",
         )
         logger.info(f"Cold start pre-fill done for session {session_id[:8]}")
@@ -563,7 +576,9 @@ async def background_hydrate(
             # 1b. Extract and store knowledge from this observation
             if pipeline.extract_knowledge:
                 try:
-                    from ..intelligence.extract.knowledge import extract_knowledge as _extract_knowledge
+                    from ..intelligence.extract.knowledge import (
+                        extract_knowledge as _extract_knowledge,
+                    )
 
                     mission_data = {
                         "task": metadata.get("source", "observe"),
@@ -630,8 +645,13 @@ async def background_hydrate(
                     knowledge,
                 )
                 onto_count = await _search_and_hydrate_ontology(
-                    ontology_store, episode_store, dragonfly, session_id,
-                    embedding, ontology_top_k, pipeline,
+                    ontology_store,
+                    episode_store,
+                    dragonfly,
+                    session_id,
+                    embedding,
+                    ontology_top_k,
+                    pipeline,
                     log_prefix="Background ontology hydration",
                 )
                 logger.info(
@@ -758,9 +778,7 @@ async def _observe_core_inner(
 
     # Persist session node + parent link (fire-and-forget, idempotent MERGE)
     if not read_only:
-        asyncio.create_task(
-            episode_store.ensure_session(session_id, parent_session_id)
-        )
+        asyncio.create_task(episode_store.ensure_session(session_id, parent_session_id))
 
     if minimal:
         # Fast path: knowledge + ontology nodes + 1 most relevant episode, no DragonflyDB
@@ -857,6 +875,7 @@ async def _observe_core_inner(
     pipeline = load_pipeline_config()
 
     from ..intelligence.timing import SpanTracer
+
     tracer = SpanTracer(dragonfly, "observe", session_id)
 
     episode_uuid = ""

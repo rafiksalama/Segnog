@@ -102,9 +102,7 @@ class MemoryService:
     async def search_episodes_by_entities(
         self, group_id: str, entity_names: List[str], top_k: int = 10
     ) -> List[Dict[str, Any]]:
-        return await self._ep(group_id).search_by_entities(
-            entity_names=entity_names, top_k=top_k
-        )
+        return await self._ep(group_id).search_by_entities(entity_names=entity_names, top_k=top_k)
 
     async def link_episodes(
         self,
@@ -200,14 +198,10 @@ class MemoryService:
             min_score=min_score,
         )
 
-    async def get_artifact(
-        self, group_id: str, uuid: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_artifact(self, group_id: str, uuid: str) -> Optional[Dict[str, Any]]:
         return await self._art(group_id).get_by_uuid(uuid)
 
-    async def list_recent_artifacts(
-        self, group_id: str, limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    async def list_recent_artifacts(self, group_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         return await self._art(group_id).list_recent(limit=limit)
 
     async def delete_artifact(self, group_id: str, uuid: str) -> bool:
