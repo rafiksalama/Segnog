@@ -1,6 +1,6 @@
 """Smart operation request DTOs."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 

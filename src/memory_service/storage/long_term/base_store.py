@@ -9,7 +9,6 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from ...ontology.names import normalize_name  # canonical entity key format
 
 logger = logging.getLogger(__name__)
 
