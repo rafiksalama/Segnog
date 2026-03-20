@@ -595,16 +595,16 @@ class MemoryClient:
     ) -> Dict[str, Any]:
         """Unified observe: store observation + retrieve relevant context."""
         if self._is_grpc:
-            resp = await self._transport.call(
-                "Observe",
-                {
-                    "scope": self._scope,
-                    "session_id": self._workflow_id,
-                    "content": content,
-                    "source": source or "",
-                    "metadata": metadata or {},
-                },
-            )
+            grpc_payload: Dict[str, Any] = {
+                "scope": self._scope,
+                "session_id": self._workflow_id,
+                "content": content,
+                "source": source or "",
+                "metadata": metadata or {},
+            }
+            if self._parent_session_id:
+                grpc_payload["parent_session_id"] = self._parent_session_id
+            resp = await self._transport.call("Observe", grpc_payload)
         else:
             payload: Dict[str, Any] = {
                 "session_id": self._workflow_id,
@@ -860,14 +860,14 @@ class MemoryClient:
     ) -> Dict[str, Any]:
         """Run full startup pipeline."""
         if self._is_grpc:
-            return await self._transport.call(
-                "StartupPipeline",
-                {
-                    "scope": self._scope,
-                    "task": task,
-                    "model": model or "",
-                },
-            )
+            grpc_payload: Dict[str, Any] = {
+                "scope": self._scope,
+                "task": task,
+                "model": model or "",
+            }
+            if self._parent_session_id:
+                grpc_payload["parent_session_id"] = self._parent_session_id
+            return await self._transport.call("StartupPipeline", grpc_payload)
         else:
             payload: Dict[str, Any] = {
                 "group_id": self._group_id,

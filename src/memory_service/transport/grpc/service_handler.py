@@ -364,6 +364,7 @@ class MemoryServiceHandler:
             timestamp=req.get("timestamp"),
             source=req.get("source", ""),
             metadata=dict(req.get("metadata") or {}),
+            parent_session_id=req.get("parent_session_id") or None,
         )
 
     # =========================================================================
@@ -377,6 +378,7 @@ class MemoryServiceHandler:
             workflow_id=workflow_id,
             task=req.get("task", ""),
             model=req.get("model") or None,
+            parent_session_id=req.get("parent_session_id") or None,
         )
 
     async def run_curation(self, req: dict) -> dict:

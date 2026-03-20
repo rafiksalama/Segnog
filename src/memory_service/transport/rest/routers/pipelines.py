@@ -23,6 +23,7 @@ async def startup_pipeline(body: dict, request: Request):
         workflow_id=body.get("workflow_id", "default"),
         task=body.get("task", ""),
         model=body.get("model"),
+        parent_session_id=body.get("parent_session_id") or None,
     )
 
 
