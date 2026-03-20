@@ -332,6 +332,7 @@ class MemoryService:
         workflow_id: str = "default",
         task: str = "",
         model: Optional[str] = None,
+        parent_session_id: Optional[str] = None,
     ) -> dict:
         """
         Full startup pipeline — replaces 7-step startup sequence.
@@ -349,7 +350,13 @@ class MemoryService:
         kn_store = self._kn(group_id)
         art_store = self._art(group_id)
 
-        # Step 0: Task reinterpretation
+        # Persist session node + parent link (idempotent MERGE)
+        if parent_session_id:
+            import asyncio
+
+            asyncio.create_task(ep_store.ensure_session(group_id, parent_session_id))
+
+        # Step 1: Task reinterpretation
         search_labels: List[str] = []
         search_query = task
         try:
