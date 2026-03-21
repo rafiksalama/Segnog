@@ -253,10 +253,16 @@ class KnowledgeStore(BaseStore):
             ",\n                k.embedding AS embedding" if include_embedding else ""
         )
 
-        # Inherited scope: search across current session + ancestor sessions
+        # Determine group filter mode:
+        # 1. Inherited scope (ancestor sessions): IN $group_ids
+        # 2. Global search (_group_id is None): no group filter
+        # 3. Normal: = $group_id
         use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
+        global_search = not use_scope and self._group_id is None
         if use_scope:
             group_filter = "k.group_id IN $group_ids"
+        elif global_search:
+            group_filter = "true"
         else:
             group_filter = "k.group_id = $group_id"
 
@@ -287,7 +293,7 @@ class KnowledgeStore(BaseStore):
         }
         if use_scope:
             params["group_ids"] = self._scope_group_ids
-        else:
+        elif not global_search:
             params["group_id"] = self._group_id
         if knowledge_type:
             params["knowledge_type"] = knowledge_type

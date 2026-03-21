@@ -37,7 +37,7 @@ class KnowledgeRecord(BaseModel):
 
 
 class SearchKnowledgeRequest(BaseModel):
-    group_id: str = "default"
+    group_id: Optional[str] = None
     query: str = Field(..., min_length=1)
     labels: List[str] = Field(default_factory=list)
     top_k: int = Field(10, ge=1, le=1000)

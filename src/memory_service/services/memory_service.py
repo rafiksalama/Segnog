@@ -47,8 +47,8 @@ class MemoryService:
         s._group_id = group_id
         return s
 
-    def _kn(self, group_id: str):
-        """Return a request-scoped KnowledgeStore."""
+    def _kn(self, group_id: Optional[str]):
+        """Return a request-scoped KnowledgeStore. group_id=None → global search."""
         s = copy.copy(self._knowledge_store)
         s._group_id = group_id
         return s
@@ -140,7 +140,7 @@ class MemoryService:
 
     async def search_knowledge(
         self,
-        group_id: str,
+        group_id: Optional[str],
         query: str,
         labels: Optional[List[str]] = None,
         top_k: int = 10,
