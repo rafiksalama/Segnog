@@ -834,6 +834,7 @@ const GraphPage = () => {
   const drawRef          = useRef(null);      // shared so edge-effect can redraw
   const prevLayoutRef    = useRef(null);
   const prevNodeCountRef = useRef(0);
+  const prevEdgeCountRef = useRef(-1);  // -1 forces first layout run
   // Debounce: coalesce node + edge data so the layout fires once with everything
   const stableRef   = useRef({ nodes: [], edges: [], cooccur: [] });
   const debounceRef = useRef(null);
@@ -930,6 +931,12 @@ const GraphPage = () => {
       });
     }
 
+    // Gate hub repositioning: only reposition when structure changed, not on every poll
+    const newEdgeCount = edgesRef.current.length;
+    const edgeCountChanged = newEdgeCount !== prevEdgeCountRef.current;
+    if (edgeCountChanged) prevEdgeCountRef.current = newEdgeCount;
+    const needsReposition = nodeCountChanged || layoutChanged || edgeCountChanged;
+
     const nodes = nodesRef.current;
     const edges = edgesRef.current;
     const types = [...new Set(nodes.map(n => n.data.schema_type || "Thing"))].sort();
@@ -943,7 +950,7 @@ const GraphPage = () => {
     // ── Layout positioning ───────────────────────────────────────────────
     nodes.forEach(n => { n.vx = 0; n.vy = 0; n.fixed = false; });
 
-    if (layout === "hub") {
+    if (layout === "hub" && needsReposition) {
       nodes.forEach(n => { n.isHub = false; n.community = -1; n.isSingleton = false; });
 
       // ── Build adjacency ────────────────────────────────────────────────
@@ -1187,7 +1194,7 @@ const GraphPage = () => {
     }
 
     // ── Auto-fit: zoom + pan to fill viewport after layout ───────────────
-    if (layout !== "force" && layout !== "spiral" && nodes.length > 0) {
+    if (needsReposition && layout !== "force" && layout !== "spiral" && nodes.length > 0) {
       // In hub layout: fit only to real-community nodes so the singleton
       // grid below doesn't force the camera to zoom way out
       const fitNodes = (layout === "hub")
