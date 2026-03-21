@@ -38,4 +38,6 @@ async def observe(body: ObserveRequest, request: Request):
         context=result["context"],
         search_labels=result.get("search_labels", []),
         search_query=result.get("search_query", ""),
+        session_id=result.get("session_id", body.session_id),
+        parent_session_id=result.get("parent_session_id", body.parent_session_id),
     )

@@ -91,3 +91,5 @@ class ObserveResponse(BaseModel):
     context: str = ""  # LLM-generated context summary
     search_labels: List[str] = []  # populated on cold start (reinterpreted)
     search_query: str = ""  # populated on cold start (optimized query)
+    session_id: str = ""  # echoed back from request
+    parent_session_id: Optional[str] = None  # echoed back; None if root session

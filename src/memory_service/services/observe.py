@@ -863,6 +863,8 @@ async def _observe_core_inner(
             "is_cold": False,
             "search_labels": [],
             "search_query": content,
+            "session_id": session_id,
+            "parent_session_id": parent_session_id,
         }
 
     metadata = dict(metadata or {})
@@ -902,6 +904,8 @@ async def _observe_core_inner(
                 "is_cold": False,
                 "search_labels": [],
                 "search_query": "",
+                "session_id": session_id,
+                "parent_session_id": parent_session_id,
             }
         episode_uuid = str(uuid4())
 
@@ -1133,4 +1137,6 @@ async def _observe_core_inner(
         "is_cold": is_cold,
         "search_labels": search_labels,
         "search_query": search_query,
+        "session_id": session_id,
+        "parent_session_id": parent_session_id,
     }
