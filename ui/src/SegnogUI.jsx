@@ -905,21 +905,24 @@ const GraphPage = () => {
     const hasEdge = new Set();
     if (rawEdges.length > 0 || rawCooccur.length > 0) {
       const merged = [];
-      rawEdges.forEach(e => {
-        const a = uuidIdx[e.source], b = uuidIdx[e.target];
-        if (a === undefined || b === undefined || a === b) return;
-        const key = `${Math.min(a,b)},${Math.max(a,b)}`;
-        if (hasEdge.has(key)) return;
-        hasEdge.add(key);
-        merged.push([a, b, 0]);   // 0 = RELATES (solid)
-      });
+      // rawCooccur = semantic RELATES edges (knows, worksFor, memberOf…) — solid, always shown
+      // rawEdges   = Hebbian activation-weight edges — dashed, shown only between communities
+      // Process semantic edges first so they take dedup precedence
       rawCooccur.forEach(e => {
         const a = uuidIdx[e.source], b = uuidIdx[e.target];
         if (a === undefined || b === undefined || a === b) return;
         const key = `${Math.min(a,b)},${Math.max(a,b)}`;
         if (hasEdge.has(key)) return;
         hasEdge.add(key);
-        merged.push([a, b, 1]);   // 1 = co-occurrence (dashed)
+        merged.push([a, b, 0]);   // 0 = RELATES semantic (solid)
+      });
+      rawEdges.forEach(e => {
+        const a = uuidIdx[e.source], b = uuidIdx[e.target];
+        if (a === undefined || b === undefined || a === b) return;
+        const key = `${Math.min(a,b)},${Math.max(a,b)}`;
+        if (hasEdge.has(key)) return;
+        hasEdge.add(key);
+        merged.push([a, b, 1]);   // 1 = Hebbian weight (dashed, inter-community only in hub)
       });
       edgesRef.current = merged;
     } else if (edgesRef.current.length === 0) {
