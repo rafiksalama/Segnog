@@ -71,7 +71,9 @@ The primary endpoint. Call it at every agent turn — it stores the observation,
   "observation_type": "observe",
   "context": "In Q3, the v2.3 deployment caused a memory leak...",
   "search_labels": ["deployment", "incident", "memory-leak"],
-  "search_query": "deployment incident memory leak v2.3"
+  "search_query": "deployment incident memory leak v2.3",
+  "session_id": "my-agent-42",
+  "parent_session_id": null
 }
 ```
 
@@ -82,6 +84,8 @@ The primary endpoint. Call it at every agent turn — it stores the observation,
 | `context` | Ready-to-use memory passage. Inject this directly into your system prompt. |
 | `search_labels` | Labels generated on cold-start reinterpretation. |
 | `search_query` | Optimised query used for cold-start FalkorDB search. |
+| `session_id` | Echoed back from the request — confirms which session was used. |
+| `parent_session_id` | Echoed back from the request. `null` for root sessions. |
 
 ### Hierarchical Sessions
 

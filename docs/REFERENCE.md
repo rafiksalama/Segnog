@@ -36,7 +36,9 @@ Every interaction with memory is a POST to `/observe`. The only required fields 
 ```json
 {
   "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "context": "..."
+  "context": "...",
+  "session_id": "my-agent-42",
+  "parent_session_id": null
 }
 ```
 

@@ -38,7 +38,9 @@ curl -X POST http://localhost:9000/api/v1/memory/observe \
 ```json
 {
   "episode_uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "context": "In Q3, the v2.3 deployment on October 14th caused a memory leak in the worker pool. It was patched in v2.3.1 the following morning after Caroline identified the root cause in the session logs..."
+  "context": "In Q3, the v2.3 deployment on October 14th caused a memory leak in the worker pool. It was patched in v2.3.1 the following morning after Caroline identified the root cause in the session logs...",
+  "session_id": "agent-session-42",
+  "parent_session_id": null
 }
 ```
 
