@@ -236,7 +236,7 @@ Store knowledge entries directly.
 
 ### `POST /knowledge/search`
 
-Vector search over knowledge nodes.
+Vector search over knowledge nodes. `group_id` is optional — omit it to search across **all sessions** (global search).
 
 ```json
 {
@@ -250,7 +250,24 @@ Vector search over knowledge nodes.
 }
 ```
 
-`labels` narrows to knowledge tagged with any of the provided labels. `start_date` / `end_date` filter by `event_date` (ISO date strings).
+Global search (no `group_id`):
+
+```json
+{
+  "query": "who approved the deployment",
+  "top_k": 10
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group_id` | string\|null | `null` | Session to search. Omit or set `null` for global search across all sessions. |
+| `query` | string | **required** | Natural-language search query. |
+| `labels` | string[] | `[]` | Narrow results to knowledge with matching labels. |
+| `top_k` | int | `10` | Maximum results to return. |
+| `min_score` | float | `0.50` | Minimum cosine similarity threshold. |
+| `start_date` | string\|null | `null` | Filter by `event_date` ≥ this ISO date (`YYYY-MM-DD`). |
+| `end_date` | string\|null | `null` | Filter by `event_date` ≤ this ISO date. |
 
 **Response:** `{"entries": [{"uuid", "content", "knowledge_type", "labels", "confidence", "score", ...}]}`
 
@@ -652,16 +669,50 @@ Composite operations that replace multi-step sequences with a single call.
 
 Full agent startup pipeline. Runs: reinterpret → search episodes → search knowledge/artifacts (parallel) → filter → tool stats → infer state → synthesize background.
 
+`group_id` is optional. When omitted, Segnog auto-generates a UUID `session_id` and registers the session. The caller should use the returned `session_id` for all subsequent `/observe` calls in this session.
+
+```json
+{
+  "task": "Fix the authentication bug in the login flow"
+}
+```
+
+With an explicit session ID (e.g. from your orchestrator):
+
 ```json
 {
   "group_id": "my-agent-42",
   "workflow_id": "run-001",
   "task": "Fix the authentication bug in the login flow",
-  "model": null
+  "parent_session_id": "project-x"
 }
 ```
 
-**Response:** `{"background": "...", "state_description": "...", "search_labels": [...], ...}`
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group_id` | string\|null | `null` | Session identifier. Omit to auto-generate a UUID. |
+| `workflow_id` | string | `"default"` | Workflow scope (passed to storage, not used for search). |
+| `task` | string | `""` | Task description used for memory search and synthesis. |
+| `model` | string\|null | `null` | Override the LLM model for this call. |
+| `parent_session_id` | string\|null | `null` | Link this session as a child of another. |
+
+**Response:**
+
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "background_narrative": "...",
+  "inferred_state": "...",
+  "long_term_context": "...",
+  "knowledge_context": "...",
+  "artifacts_context": "...",
+  "tool_stats_context": "...",
+  "search_labels": ["auth", "token"],
+  "search_query": "authentication bug login flow"
+}
+```
+
+`session_id` is always present — use it to associate all subsequent `/observe` calls with this session.
 
 ---
 

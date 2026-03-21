@@ -192,6 +192,27 @@ Open `http://localhost:9000` → **Observe** page. Type any message, click **Sen
 
 ---
 
+### Session identity
+
+The simplest way to start a new session is to call `/pipelines/startup` without a `group_id`. Segnog generates a UUID, registers the session, and returns it so you can use it for every subsequent `/observe` call.
+
+```bash
+# Start a session — get back a UUID
+SESSION=$(curl -s -X POST http://localhost:9000/api/v1/memory/pipelines/startup \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Fix the authentication bug in the login flow"}' \
+  | jq -r '.session_id')
+
+# Use that UUID for every observe call in this session
+curl -X POST http://localhost:9000/api/v1/memory/observe \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\": \"$SESSION\", \"content\": \"Found the bug in auth/token.py line 42\"}"
+```
+
+If you already have a meaningful identifier (e.g. a workflow ID from your orchestrator), pass it as `group_id` and it will be echoed back as `session_id`.
+
+---
+
 ### Hierarchical sessions
 
 Sessions can be nested — a child session automatically inherits memory from all its ancestors at query time. The agent in `subtask-1a` sees everything from `task-1` and `project-x` without any extra logic.
@@ -219,6 +240,24 @@ curl -X POST http://localhost:9000/api/v1/memory/observe \
 ```
 
 Session links are created lazily on first write — no pre-registration needed. The hierarchy is visible in the dashboard Sessions page as a collapsible tree.
+
+---
+
+### Global knowledge search
+
+`/knowledge/search` can search across **all sessions** by omitting `group_id`. Useful for cross-session discovery or building a retrieval layer on top of the full knowledge base.
+
+```bash
+# Scoped to one session
+curl -X POST http://localhost:9000/api/v1/memory/knowledge/search \
+  -H "Content-Type: application/json" \
+  -d '{"group_id": "my-agent-42", "query": "rate limit policy", "top_k": 5}'
+
+# Global — searches all knowledge nodes regardless of session
+curl -X POST http://localhost:9000/api/v1/memory/knowledge/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "rate limit policy", "top_k": 5}'
+```
 
 ---
 
