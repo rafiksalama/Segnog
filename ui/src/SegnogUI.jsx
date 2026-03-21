@@ -824,8 +824,8 @@ const GraphPage = () => {
   const { data: epData }       = useFetch(`${API}/ui/episodes?limit=50`,              [], 20000);
   const { data: knData }       = useFetch(`${API}/ui/knowledge?limit=50`,              [], 20000);
   const { data: ontoData }     = useFetch(`${API}/ui/ontology`,                        [], 20000);
-  const { data: ontoEdgeData }    = useFetch(`${API}/ui/ontology/edges?limit=400`,        [], 20000);
-  const { data: ontoCooccurData } = useFetch(`${API}/ui/ontology/cooccurrence?limit=400`, [], 20000);
+  const { data: ontoEdgeData }    = useFetch(`${API}/ui/ontology/edges?limit=2000`,        [], 20000);
+  const { data: ontoCooccurData } = useFetch(`${API}/ui/ontology/cooccurrence?limit=2000`, [], 20000);
   const canvasRef        = useRef(null);
   const nodesRef         = useRef([]);
   const edgesRef         = useRef([]);
@@ -839,6 +839,8 @@ const GraphPage = () => {
   const stableRef   = useRef({ nodes: [], edges: [], cooccur: [] });
   const debounceRef = useRef(null);
   const [layoutKey, setLayoutKey] = useState(0);
+  const [showSingletons, setShowSingletons] = useState(false);
+  const [singletonCount, setSingletonCount] = useState(0);
   const [selectedNode, setSelectedNode] = useState(null);
   const [popupPos, setPopupPos]         = useState({ x: 0, y: 0 });
   const setSelectedNodeRef = useRef(setSelectedNode);
@@ -1001,6 +1003,7 @@ const GraphPage = () => {
       });
       const realComms    = Object.values(commMap).filter(c => c.hub);
       const singletonNodes = nodes.filter(n => n.isSingleton);
+      setSingletonCount(singletonNodes.length);
 
       // ── Adaptive ring geometry ─────────────────────────────────────────
       const maxOrbit = Math.min(w, h) * 0.07;
@@ -1074,8 +1077,8 @@ const GraphPage = () => {
           });
         });
 
-        // Singletons: compact grid below actual cluster bounds
-        if (singletonNodes.length > 0) {
+        // Singletons: compact grid below actual cluster bounds (only when shown)
+        if (showSingletons && singletonNodes.length > 0) {
           let maxRealY = h / 2 + (nC === 1 ? maxOrbit : hubRing + maxOrbit);
           realComms.forEach(c => {
             const r = orbitR(c);
@@ -1371,8 +1374,9 @@ const GraphPage = () => {
         ctx.setLineDash([]);
       });
 
-      // Nodes
+      // Nodes (skip singletons in hub layout when hidden)
       nodes.forEach(n => {
+        if (layout === "hub" && n.isSingleton && !showSingletons) return;
         const isHubNode = n.isHub && layout === "hub";
         // Outer glow (larger for hubs)
         ctx.beginPath(); ctx.arc(n.x, n.y, n.r + (isHubNode ? 14 : 8), 0, Math.PI * 2);
@@ -1621,7 +1625,7 @@ const GraphPage = () => {
       canvas.removeEventListener("wheel",      onWheel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutKey, layout, p]);
+  }, [layoutKey, layout, p, showSingletons]);
 
   // Derived for the side panel (not used in canvas)
   const episodes  = epData?.episodes  || [];
@@ -1657,6 +1661,16 @@ const GraphPage = () => {
             backdropFilter: "blur(8px)",
           }}>{l.label}</button>
         ))}
+        {layout === "hub" && singletonCount > 0 && (
+          <button onClick={() => { setShowSingletons(v => !v); setLayoutKey(k => k + 1); }} style={{
+            padding: "5px 12px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
+            border: `1px solid ${showSingletons ? p.warm : p.border}`,
+            background: showSingletons ? p.warm + "22" : p.surface + "dd",
+            color: showSingletons ? p.warm : p.textMuted,
+            fontSize: 11, fontWeight: 600, fontFamily: MONO,
+            backdropFilter: "blur(8px)",
+          }}>{showSingletons ? "Hide" : "Show"} {singletonCount} isolated</button>
+        )}
       </div>
 
       {/* Bottom-left legend — derived from actual node types */}
