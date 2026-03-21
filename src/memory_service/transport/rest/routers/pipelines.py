@@ -19,7 +19,7 @@ async def startup_pipeline(body: dict, request: Request):
     """
     svc = get_service(request)
     return await svc.startup_pipeline(
-        group_id=body.get("group_id", "default"),
+        group_id=body.get("group_id") or None,
         workflow_id=body.get("workflow_id", "default"),
         task=body.get("task", ""),
         model=body.get("model"),

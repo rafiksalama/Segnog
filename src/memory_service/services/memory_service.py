@@ -10,6 +10,7 @@ import copy
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +329,7 @@ class MemoryService:
 
     async def startup_pipeline(
         self,
-        group_id: str,
+        group_id: Optional[str] = None,
         workflow_id: str = "default",
         task: str = "",
         model: Optional[str] = None,
@@ -336,6 +337,9 @@ class MemoryService:
     ) -> dict:
         """
         Full startup pipeline — replaces 7-step startup sequence.
+
+        group_id is optional. When omitted, a UUID session_id is auto-generated
+        and returned in the response so callers can use it for subsequent observe calls.
 
         Steps:
           0. Reinterpret task (DSPy) → search labels + optimized query
@@ -346,15 +350,13 @@ class MemoryService:
           5. Infer initial state
           6. Synthesize background narrative
         """
-        ep_store = self._ep(group_id)
-        kn_store = self._kn(group_id)
-        art_store = self._art(group_id)
+        session_id = group_id or str(uuid4())
+        ep_store = self._ep(session_id)
+        kn_store = self._kn(session_id)
+        art_store = self._art(session_id)
 
         # Persist session node + parent link (idempotent MERGE)
-        if parent_session_id:
-            import asyncio
-
-            asyncio.create_task(ep_store.ensure_session(group_id, parent_session_id))
+        asyncio.create_task(ep_store.ensure_session(session_id, parent_session_id))
 
         # Step 1: Task reinterpretation
         search_labels: List[str] = []
@@ -521,6 +523,7 @@ class MemoryService:
             logger.warning(f"Background synthesis failed (non-critical): {e}")
 
         return {
+            "session_id": session_id,
             "background_narrative": background_narrative,
             "inferred_state": inferred_state,
             "long_term_context": long_term_context,

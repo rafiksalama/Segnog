@@ -372,7 +372,9 @@ class MemoryServiceHandler:
     # =========================================================================
 
     async def startup_pipeline(self, req: dict) -> dict:
-        group_id, workflow_id = self._scope(req)
+        scope = req.get("scope", {})
+        group_id = scope.get("group_id") or None  # None → auto-generate UUID
+        workflow_id = scope.get("workflow_id", "default")
         return await self._service.startup_pipeline(
             group_id=group_id,
             workflow_id=workflow_id,
