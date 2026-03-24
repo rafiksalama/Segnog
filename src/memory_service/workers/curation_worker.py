@@ -196,11 +196,43 @@ class CurationWorker:
                 all_knowledge_extracted = all(row[2] for row in result.result_set if row[0])
                 combined = "\n---\n".join(episode_contents.get(uuid, "") for uuid in source_uuids)
 
+                # Pull tool events from DragonflyDB to enrich knowledge extraction
+                tool_context = ""
+                if self._dragonfly:
+                    try:
+                        raw_events = await self._dragonfly.get_events_for_group(
+                            group_id=group_id,
+                            count=100,
+                            event_types=["tool_call", "tool_result", "observation", "tool_use"],
+                        )
+                        if raw_events:
+                            raw_events.sort(key=lambda e: e.get("timestamp", 0))
+                            lines = []
+                            for e in raw_events:
+                                etype = e.get("type", "event")
+                                data = e.get("data", {})
+                                if etype == "tool_call":
+                                    tool = data.get("tool", data.get("tool_name", "unknown"))
+                                    inp = str(data.get("input", data.get("args", "")))[:300]
+                                    lines.append(f"[tool_call] {tool}: {inp}")
+                                elif etype == "tool_result":
+                                    tool = data.get("tool", data.get("tool_name", "unknown"))
+                                    out = str(data.get("output", data.get("result", "")))[:500]
+                                    ok = "ok" if data.get("success", True) else "FAILED"
+                                    lines.append(f"[tool_result:{ok}] {tool}: {out}")
+                                else:
+                                    content = str(data.get("content", str(data)))[:300]
+                                    lines.append(f"[{etype}] {content}")
+                            tool_context = "\n".join(lines)
+                    except Exception as exc:
+                        logger.warning("Could not fetch tool events for '%s': %s", group_id, exc)
+
                 mission_data = {
                     "task": f"Extract knowledge from conversation episodes in group '{group_id}'",
                     "status": "completed",
                     "run_id": f"nats_{group_id}_{int(time.time())}",
                     "output": combined,
+                    "context": tool_context,
                     "data_source_type": "conversation",
                     "iterations": 1,
                     "state": {

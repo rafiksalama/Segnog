@@ -32,10 +32,13 @@ dependencies = [
     "httpx>=0.27.0",
     # Event bus
     "nats-py>=2.7.0",
+    # MCP (Model Context Protocol)
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]
 memory-service = "memory_service.main:cli"
+memory-service-mcp = "memory_service.transport.mcp.server:cli"
 
 [project.optional-dependencies]
 dev = [

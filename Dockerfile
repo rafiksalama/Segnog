@@ -81,7 +81,7 @@ logfile=/var/log/supervisor/supervisord.log
 pidfile=/var/run/supervisord.pid
 
 [program:dragonfly]
-command=dragonfly --port 6381 --dir /data/dragonfly --dbfilename dump --snapshot_cron "* * * * *"
+command=dragonfly --port 6381 --dbfilename ""
 autostart=true
 autorestart=true
 stdout_logfile=/var/log/supervisor/dragonfly.log

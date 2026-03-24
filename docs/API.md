@@ -1,6 +1,14 @@
-# Segnog REST API Reference
+# Segnog API Reference
 
-All endpoints are served under the prefix `/api/v1/memory`. Base URL: `http://localhost:9000/api/v1/memory`
+Segnog exposes three protocols on the same container, sharing a single service instance:
+
+| Protocol | Endpoint | Use case |
+|---|---|---|
+| **REST** | `http://localhost:9000/api/v1/memory` | HTTP clients, curl, agent frameworks |
+| **gRPC** | `localhost:50051` | High-throughput agents, binary clients |
+| **MCP** | `http://localhost:9000/mcp/sse` | Claude Desktop, Claude Code, MCP clients |
+
+REST endpoints are documented below. For MCP tools see [MCP](#mcp) at the bottom.
 
 ## API Exploration
 
@@ -10,6 +18,8 @@ All endpoints are served under the prefix `/api/v1/memory`. Base URL: `http://lo
 | `GET /api/v1/memory/openapi.json` | Full OpenAPI 3.x spec (machine-readable JSON) |
 | `GET /api/v1/memory/docs` | Swagger UI — interactive browser exploration |
 | `GET /api/v1/memory/redoc` | ReDoc — alternative rendered documentation |
+| `GET /api/v1/memory/mcp/tools` | All MCP tool schemas as plain JSON — no MCP client required |
+| `GET /mcp/sse` | MCP SSE stream (Model Context Protocol) |
 
 ---
 
@@ -24,6 +34,7 @@ All endpoints are served under the prefix `/api/v1/memory`. Base URL: `http://lo
 - [Smart](#smart) — LLM-powered operations
 - [Pipelines](#pipelines) — composite multi-step operations
 - [UI / Dashboard](#ui--dashboard) — read-only queries for the dashboard
+- [MCP](#mcp) — Model Context Protocol tools
 
 ---
 
@@ -896,3 +907,150 @@ Per-endpoint latency statistics with recent timestamped samples for realtime cha
 ```json
 {"status": "ok", "service": "agent-memory-service"}
 ```
+
+---
+
+## MCP
+
+Segnog implements the [Model Context Protocol](https://modelcontextprotocol.io) via SSE transport, mounted on the same port as the REST API. The MCP server shares the same `MemoryService` instance as REST and gRPC — there is no separate process.
+
+### Endpoints
+
+| URL | Description |
+|---|---|
+| `GET /mcp/sse` | MCP SSE stream — connect an MCP client here |
+| `GET /api/v1/memory/mcp/tools` | REST listing of all MCP tools with schemas (no MCP client needed) |
+
+```bash
+# Inspect MCP tools without an MCP client
+curl http://localhost:9000/api/v1/memory/mcp/tools | python3 -m json.tool
+```
+
+### Client configuration
+
+**Claude Desktop** (`~/.claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "url": "http://localhost:9000/mcp/sse",
+      "type": "sse"
+    }
+  }
+}
+```
+
+**Claude Code** (`settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "url": "http://localhost:9000/mcp/sse",
+      "type": "sse"
+    }
+  }
+}
+```
+
+### Tools
+
+#### `memory_startup`
+
+Initialise a session and retrieve synthesised background context. Call once at the start of a task.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task` | string | yes | Task description — used for memory search and synthesis. |
+| `session_id` | string | no | Session identifier. Auto-generates a UUID if omitted. |
+| `parent_session_id` | string | no | Link this session as a child of another. Child sessions inherit ancestor memory. |
+| `workflow_id` | string | no | Workflow scope. Default: `"default"`. |
+
+Returns: JSON object with `session_id`, `background_narrative`, `long_term_context`, `knowledge_context`, `search_labels`, `search_query`.
+
+---
+
+#### `memory_observe`
+
+Store a turn and retrieve relevant memories. The core per-turn operation.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | yes | Session to write to / search within. |
+| `content` | string | yes | Observation text to store and/or use as search query. |
+| `read_only` | bool | no | If `true`, only retrieves memories without writing. Default: `false`. |
+| `parent_session_id` | string | no | Set (or reconfirm) the parent session link on this call. |
+| `top_k` | int | no | Max episode results to retrieve. Default: `10`. |
+
+Returns: JSON object with `episode_uuid`, `context`, `session_id`, `parent_session_id`.
+
+---
+
+#### `memory_search_knowledge`
+
+Semantic search over the knowledge base. Omit `session_id` to search globally across all sessions.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `query` | string | yes | Natural-language search query. |
+| `session_id` | string | no | Scope to this session. Omit for global search. |
+| `top_k` | int | no | Max results. Default: `10`. |
+| `min_score` | float | no | Minimum similarity threshold. Default: `0.50`. |
+| `start_date` | string | no | ISO 8601 date lower bound (`YYYY-MM-DD`). |
+| `end_date` | string | no | ISO 8601 date upper bound. |
+
+Returns: JSON array of knowledge records ordered by score.
+
+---
+
+#### `memory_search_episodes`
+
+Semantic search over raw episode history for a session.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | yes | Session to search within. |
+| `query` | string | yes | Natural-language search query. |
+| `top_k` | int | no | Max results. Default: `10`. |
+| `min_score` | float | no | Minimum similarity threshold. Default: `0.40`. |
+
+Returns: JSON array of episode records ordered by score.
+
+---
+
+#### `memory_store_knowledge`
+
+Directly persist structured knowledge entries for a session.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | yes | Session to store knowledge in. |
+| `entries` | array | yes | List of knowledge entry objects (see below). |
+| `source_mission` | string | yes | Brief description of the task that produced this knowledge. |
+
+Each entry in `entries`:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `content` | string | **required** | The knowledge content. |
+| `knowledge_type` | string | `"fact"` | `fact`, `pattern`, `insight`, `preference`, or `procedure`. |
+| `labels` | string[] | `[]` | Semantic labels / tags. |
+| `confidence` | float | `0.8` | Confidence score (0–1). |
+| `event_date` | string | `null` | ISO 8601 date the event occurred (`YYYY-MM-DD`). |
+
+Returns: `{"uuids": ["..."]}`.
+
+---
+
+#### `memory_run_curation`
+
+Trigger LLM-powered memory curation for a session. Reflects on recent episodes, extracts knowledge, and compresses events.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | yes | Session to curate. |
+| `mission_summary` | string | no | Brief description of what was accomplished. |
+| `mission_status` | string | no | `"success"`, `"partial"`, or `"failed"`. Default: `"success"`. |
+
+Returns: curation summary with `knowledge_uuids`, `artifact_uuids`, `reflection`.

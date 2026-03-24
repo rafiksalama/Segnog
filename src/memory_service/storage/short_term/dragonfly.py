@@ -125,6 +125,39 @@ class DragonflyClient:
             logger.error(f"Failed to log event: {e}")
             return None
 
+    async def get_events_for_group(
+        self,
+        group_id: str,
+        count: int = 100,
+        event_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent events across all workflow streams for a given group_id.
+
+        Scans all ``events:{group_id}:*`` keys so the caller doesn't need to
+        know which workflow_id was used when the events were logged.
+        """
+        if not self.connected:
+            return []
+        try:
+            keys = await self._client.keys(f"events:{group_id}:*")
+            if not keys:
+                return []
+
+            all_events: List[Dict[str, Any]] = []
+            per_key = max(count, 20)
+            for key in keys:
+                entries = await self._client.xrevrange(key, "+", "-", count=per_key)
+                for stream_id, data in entries:
+                    all_events.append(self._parse_event(stream_id, data))
+
+            all_events.sort(key=lambda e: e.get("timestamp", 0), reverse=True)
+            if event_types:
+                all_events = [e for e in all_events if e.get("type") in event_types]
+            return all_events[:count]
+        except Exception as e:
+            logger.error("get_events_for_group(%s) failed: %s", group_id, e)
+            return []
+
     async def get_recent_events(
         self,
         count: int = 100,

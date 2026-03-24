@@ -286,11 +286,31 @@ async def list_ontology(
             """,
             params=params,
         )
+        # Compute top-level category for each schema_type using Schema.org hierarchy.
+        # Category = child of Thing in ancestor chain (e.g., Hospital → Organization)
+        onto = onto_store._ontology
+        _cat_cache: dict = {}
+
+        def _category(schema_type: str) -> str:
+            if schema_type in _cat_cache:
+                return _cat_cache[schema_type]
+            chain = onto.ancestors(schema_type) if onto else [schema_type]
+            # chain = [type, parent, grandparent, ..., Thing]
+            # We want the element just before "Thing" (or the type itself)
+            cat = schema_type
+            for i, anc in enumerate(chain):
+                if anc == "Thing" and i > 0:
+                    cat = chain[i - 1]
+                    break
+            _cat_cache[schema_type] = cat
+            return cat
+
         nodes = [
             {
                 "uuid": row[0],
                 "name": row[1],
                 "schema_type": row[2],
+                "category": _category(row[2] or "Thing"),
                 "display_name": row[3] or row[1],
                 "source_count": row[4] or 0,
                 "updated_at": row[5],
@@ -371,9 +391,13 @@ async def list_ontology_cooccurrence(request: Request, limit: int = 400):
     try:
         result = await onto_store._graph.ro_query(
             """
+            MATCH (a:OntologyNode)-[:RELATES]-()
+            WITH collect(DISTINCT a.uuid) AS connected
             MATCH (ep:Episode)-[:ABOUT]->(a:OntologyNode),
                   (ep)-[:ABOUT]->(b:OntologyNode)
             WHERE a.uuid < b.uuid
+              AND a.uuid IN connected
+              AND b.uuid IN connected
             RETURN a.uuid AS source, b.uuid AS target, count(ep) AS weight
             ORDER BY weight DESC
             LIMIT $limit

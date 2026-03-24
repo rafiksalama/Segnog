@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe, ui
 from .dependencies import setup_backends, teardown_backends
 from ...workers.span_aggregator import run_span_aggregator
+from ..mcp.server import mcp as mcp_server, set_service as mcp_set_service
 
 _UUID_RE = re.compile(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _API_PREFIX = "/api/v1/memory/"
@@ -40,6 +41,8 @@ class LatencyMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     await setup_backends(app)
+    # Share the already-initialised service with the MCP transport.
+    mcp_set_service(app.state.service)
     # Start the span aggregator as a background task — reads timing:spans stream,
     # joins start/end pairs, and records per-step durations to the latency system.
     aggregator_task = asyncio.create_task(
@@ -111,14 +114,36 @@ def create_app() -> FastAPI:
                 "smart": "/api/v1/memory/smart",
                 "pipelines": "/api/v1/memory/pipelines",
                 "health": "/health",
+                "mcp_sse": "/mcp/sse",
+                "mcp_tools": "GET /api/v1/memory/mcp/tools",
             },
         }
+
+    @app.get("/api/v1/memory/mcp/tools", tags=["mcp"])
+    async def list_mcp_tools():
+        """List all MCP tools exposed at /mcp/sse — schema, description, and parameters."""
+        tools = mcp_server._tool_manager.list_tools()
+        return {
+            "transport": "/mcp/sse",
+            "protocol": "MCP JSON-RPC 2.0 over SSE",
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                }
+                for t in tools
+            ],
+        }
+
+    # MCP SSE transport — mounted at /mcp (SSE stream at /mcp/sse).
+    app.mount("/mcp", mcp_server.sse_app())
 
     # Serve the built UI. In Docker the package is installed to site-packages so
     # we check a list of candidate paths rather than walking up from __file__.
     for _candidate in [
         Path("/app/ui/dist"),  # Docker
-        Path(__file__).parent.parent.parent.parent / "ui" / "dist",  # editable install
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "ui" / "dist",  # editable install
     ]:
         if _candidate.exists():
             app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="ui")

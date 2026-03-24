@@ -843,6 +843,12 @@ const GraphPage = () => {
   const [singletonCount, setSingletonCount] = useState(0);
   const [selectedNode, setSelectedNode] = useState(null);
   const [popupPos, setPopupPos]         = useState({ x: 0, y: 0 });
+  const [showLabels, setShowLabels]     = useState(true);
+  const [sidebarOpen, setSidebarOpen]   = useState(true);
+  const [legendOpen, setLegendOpen]     = useState(false);
+  const [typeFilter, setTypeFilter]     = useState(null);       // null = all types
+  const [showRelates, setShowRelates]   = useState(true);       // type 0 edges
+  const [showCooccur, setShowCooccur]   = useState(true);       // type 1 edges
   const setSelectedNodeRef = useRef(setSelectedNode);
   const setPopupPosRef     = useRef(setPopupPos);
 
@@ -893,7 +899,7 @@ const GraphPage = () => {
       nodesRef.current = sorted.map(n => ({
         x: w / 2, y: h / 2, vx: 0, vy: 0,
         r: Math.min(28, 11 + (n.source_count || 1) * 2.5),
-        color: typeColor(n.schema_type),
+        color: typeColor(n.category || n.schema_type),
         label: (n.display_name || n.name || "").slice(0, 14),
         data: n, fixed: false, isHub: false,
       }));
@@ -905,10 +911,10 @@ const GraphPage = () => {
     const hasEdge = new Set();
     if (rawEdges.length > 0 || rawCooccur.length > 0) {
       const merged = [];
-      // rawCooccur = semantic RELATES edges (knows, worksFor, memberOf…) — solid, always shown
-      // rawEdges   = Hebbian activation-weight edges — dashed, shown only between communities
+      // rawEdges   = semantic RELATES edges (knows, worksFor, memberOf…) — solid, always shown
+      // rawCooccur = co-occurrence edges (shared episode context) — dashed, shown only between communities in hub
       // Process semantic edges first so they take dedup precedence
-      rawCooccur.forEach(e => {
+      rawEdges.forEach(e => {
         const a = uuidIdx[e.source], b = uuidIdx[e.target];
         if (a === undefined || b === undefined || a === b) return;
         const key = `${Math.min(a,b)},${Math.max(a,b)}`;
@@ -916,13 +922,13 @@ const GraphPage = () => {
         hasEdge.add(key);
         merged.push([a, b, 0]);   // 0 = RELATES semantic (solid)
       });
-      rawEdges.forEach(e => {
+      rawCooccur.forEach(e => {
         const a = uuidIdx[e.source], b = uuidIdx[e.target];
         if (a === undefined || b === undefined || a === b) return;
         const key = `${Math.min(a,b)},${Math.max(a,b)}`;
         if (hasEdge.has(key)) return;
         hasEdge.add(key);
-        merged.push([a, b, 1]);   // 1 = Hebbian weight (dashed, inter-community only in hub)
+        merged.push([a, b, 1]);   // 1 = co-occurrence (dashed, inter-community only in hub)
       });
       edgesRef.current = merged;
     } else if (edgesRef.current.length === 0) {
@@ -958,71 +964,41 @@ const GraphPage = () => {
     if (layout === "hub" && needsReposition) {
       nodes.forEach(n => { n.isHub = false; n.community = -1; n.isSingleton = false; });
 
-      // ── Build adjacency ────────────────────────────────────────────────
+      // ── Group nodes by category (top-level Schema.org superclass) ──────
+      const catMap = {};  // category → { nodes: [], subTypes: { type → [nodes] } }
+      nodes.forEach(n => {
+        const cat = n.data.category || n.data.schema_type || "Thing";
+        const stype = n.data.schema_type || "Thing";
+        if (!catMap[cat]) catMap[cat] = { nodes: [], subTypes: {} };
+        catMap[cat].nodes.push(n);
+        if (!catMap[cat].subTypes[stype]) catMap[cat].subTypes[stype] = [];
+        catMap[cat].subTypes[stype].push(n);
+      });
+      // Sort categories by node count (largest first)
+      const categories = Object.entries(catMap)
+        .sort((a, b) => b[1].nodes.length - a[1].nodes.length);
+
+      // Mark singletons: categories with only 1 node and no edges
       const deg = new Array(nodes.length).fill(0);
-      const adj = Array.from({length: nodes.length}, () => []);
-      edges.forEach(([a, b]) => {
-        if (a == null || b == null || a === b) return;
-        deg[a]++; deg[b]++;
-        adj[a].push(b); adj[b].push(a);
+      edges.forEach(([a, b]) => { if (a != null && b != null && a !== b) { deg[a]++; deg[b]++; } });
+      const singletonNodes = [];
+      categories.forEach(([, catData]) => {
+        catData.nodes.forEach(n => {
+          const idx = nodes.indexOf(n);
+          if (catData.nodes.length === 1 && idx >= 0 && deg[idx] === 0) {
+            n.isSingleton = true;
+            singletonNodes.push(n);
+          }
+        });
       });
-
-      // ── Connected components via BFS (one community per component) ─────
-      const visited = new Array(nodes.length).fill(false);
-      const components = [];
-      nodes.forEach((_, start) => {
-        if (visited[start] || deg[start] === 0) return;
-        const comp = [];
-        const q = [start]; visited[start] = true; let head = 0;
-        while (head < q.length) {
-          const cur = q[head++]; comp.push(cur);
-          adj[cur].forEach(nb => { if (!visited[nb]) { visited[nb] = true; q.push(nb); } });
-        }
-        components.push(comp);
-      });
-
-      // Assign community IDs; hub = highest-degree node in each component
-      components.forEach((comp, cid) => {
-        const hubIdx = comp.reduce((best, i) => deg[i] > deg[best] ? i : best, comp[0]);
-        comp.forEach(i => { nodes[i].community = cid; });
-        nodes[hubIdx].isHub = true;
-      });
-
-      // Singletons: nodes with no edges at all
-      let nextCid = components.length;
-      nodes.forEach(n => {
-        if (n.community === -1) { n.community = nextCid++; n.isHub = true; n.isSingleton = true; }
-      });
-
-      // Build community objects (real comms only — exclude singletons)
-      const commMap = {};
-      nodes.forEach(n => {
-        if (n.isSingleton) return;
-        const c = n.community;
-        if (!commMap[c]) commMap[c] = { hub: null, spokes: [], size: 0 };
-        commMap[c].size++;
-        if (n.isHub && !commMap[c].hub) commMap[c].hub = n;
-        else commMap[c].spokes.push(n);
-      });
-      const realComms    = Object.values(commMap).filter(c => c.hub);
-      const singletonNodes = nodes.filter(n => n.isSingleton);
       setSingletonCount(singletonNodes.length);
 
-      // ── Adaptive ring geometry ─────────────────────────────────────────
-      const maxOrbit = Math.min(w, h) * 0.07;
-      const orbitR   = c => Math.min(maxOrbit, 16 + c.spokes.length * 6);
-      const nC       = realComms.length;
-      // Pairwise minSep: use actual orbit radii of adjacent community pairs,
-      // not a uniform maxOrbit — avoids over-spacing small communities
-      let maxPairSep = 0;
-      if (nC >= 2) {
-        const byOrbit = [...realComms].sort((a, b) => orbitR(b) - orbitR(a));
-        for (let i = 0; i < nC; i++)
-          maxPairSep = Math.max(maxPairSep, orbitR(byOrbit[i]) + orbitR(byOrbit[(i+1) % nC]) + 28);
-      }
-      const minRing  = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
-      const hubRing  = nC <= 1 ? 0 : Math.min(Math.min(w, h) * 0.26, Math.max(minRing, 36));
+      // Filter to non-singleton categories for layout
+      const realCats = categories.filter(([, d]) =>
+        d.nodes.some(n => !n.isSingleton)
+      ).map(([cat, d]) => [cat, { ...d, nodes: d.nodes.filter(n => !n.isSingleton) }]);
 
+      const nC = realCats.length;
       if (nC === 0) {
         // All singletons — centered grid
         const cellSize = 50;
@@ -1035,67 +1011,93 @@ const GraphPage = () => {
           n.vx = 0; n.vy = 0;
         });
       } else {
-        // Place hubs: center if 1 component, ring if multiple
-        realComms.forEach((c, i) => {
-          if (nC === 1) { c.hub.x = w / 2; c.hub.y = h / 2; }
-          else {
-            const a = (i / nC) * Math.PI * 2 - Math.PI / 2;
-            c.hub.x = w / 2 + hubRing * Math.cos(a);
-            c.hub.y = h / 2 + hubRing * Math.sin(a);
-          }
-          c.hub.vx = 0; c.hub.vy = 0;
+        // Assign community IDs by category (for edge rendering)
+        realCats.forEach(([, catData], cid) => {
+          catData.nodes.forEach(n => { n.community = cid; });
         });
 
-        // Circular force simulation (repulsion + radial spring) — nC≥2 only
+        // ── Position categories on ring ─────────────────────────────────
+        const maxCluster = Math.min(w, h) * 0.08;
+        const clusterR = ([, d]) => Math.min(maxCluster, 14 + Math.sqrt(d.nodes.length) * 7);
+        let maxPairSep = 0;
         if (nC >= 2) {
-          for (let iter = 0; iter < 320; iter++) {
-            const damp = iter < 160 ? 0.88 : 0.68;
-            realComms.forEach((ca, i) => {
-              ca.hub.vx *= damp; ca.hub.vy *= damp;
-              realComms.forEach((cb, j) => {
-                if (i === j) return;
-                const dx = ca.hub.x - cb.hub.x, dy = ca.hub.y - cb.hub.y;
-                const d2 = Math.max(1600, dx * dx + dy * dy);
-                const f  = (Math.sqrt(ca.size) + Math.sqrt(cb.size)) * 300 / d2;
-                ca.hub.vx += dx * f; ca.hub.vy += dy * f;
+          const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
+          for (let i = 0; i < nC; i++)
+            maxPairSep = Math.max(maxPairSep, clusterR(byCR[i]) + clusterR(byCR[(i + 1) % nC]) + 40);
+        }
+        const minRing = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
+        const catRing = nC <= 1 ? 0 : Math.min(Math.min(w, h) * 0.34, Math.max(minRing, 50));
+
+        // Category center positions
+        const catCenters = [];
+        realCats.forEach(([cat, catData], ci) => {
+          let cx, cy;
+          if (nC === 1) { cx = w / 2; cy = h / 2; }
+          else {
+            const a = (ci / nC) * Math.PI * 2 - Math.PI / 2;
+            cx = w / 2 + catRing * Math.cos(a);
+            cy = h / 2 + catRing * Math.sin(a);
+          }
+          catCenters.push({ cat, cx, cy, data: catData });
+        });
+
+        // ── Position nodes within each category cluster ──────────────────
+        catCenters.forEach(({ cx, cy, data: catData }) => {
+          const subTypeEntries = Object.entries(catData.subTypes)
+            .map(([t, ns]) => [t, ns.filter(n => !n.isSingleton)])
+            .filter(([, ns]) => ns.length > 0)
+            .sort((a, b) => b[1].length - a[1].length);
+
+          if (subTypeEntries.length === 0) return;
+
+          if (subTypeEntries.length === 1) {
+            // Single sub-type: arrange nodes in a circle around center
+            const ns = subTypeEntries[0][1];
+            if (ns.length === 1) {
+              ns[0].x = cx; ns[0].y = cy; ns[0].vx = 0; ns[0].vy = 0;
+            } else {
+              const r = Math.min(maxCluster, 10 + ns.length * 5);
+              ns.forEach((n, i) => {
+                const a = (i / ns.length) * Math.PI * 2;
+                n.x = cx + r * Math.cos(a); n.y = cy + r * Math.sin(a);
+                n.vx = 0; n.vy = 0;
               });
-              const dx = ca.hub.x - w / 2, dy = ca.hub.y - h / 2;
-              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              const rf = (dist - hubRing) * 0.03;
-              ca.hub.vx -= (dx / dist) * rf;
-              ca.hub.vy -= (dy / dist) * rf;
-              ca.hub.x += ca.hub.vx; ca.hub.y += ca.hub.vy;
+            }
+          } else {
+            // Multiple sub-types: arrange sub-type clusters around category center
+            const stR = Math.min(maxCluster * 0.7, 12 + subTypeEntries.length * 5);
+            subTypeEntries.forEach(([, ns], si) => {
+              const sa = (si / subTypeEntries.length) * Math.PI * 2 - Math.PI / 2;
+              const stCx = cx + stR * Math.cos(sa);
+              const stCy = cy + stR * Math.sin(sa);
+              if (ns.length === 1) {
+                ns[0].x = stCx; ns[0].y = stCy; ns[0].vx = 0; ns[0].vy = 0;
+              } else {
+                const nr = Math.min(maxCluster * 0.4, 8 + ns.length * 3);
+                ns.forEach((n, i) => {
+                  const a = (i / ns.length) * Math.PI * 2;
+                  n.x = stCx + nr * Math.cos(a); n.y = stCy + nr * Math.sin(a);
+                  n.vx = 0; n.vy = 0;
+                });
+              }
             });
           }
-        }
-
-        // Place spokes evenly around settled hub
-        realComms.forEach(c => {
-          const r = orbitR(c);
-          c.spokes.forEach((n, si) => {
-            const a = (si / Math.max(c.spokes.length, 1)) * Math.PI * 2;
-            n.x = c.hub.x + r * Math.cos(a);
-            n.y = c.hub.y + r * Math.sin(a);
-            n.vx = 0; n.vy = 0;
-          });
         });
 
-        // Singletons: compact grid below actual cluster bounds (only when shown)
+        // Store category centers for label rendering
+        nodesRef._catCenters = catCenters;
+
+        // Singletons: compact grid below clusters (only when shown)
         if (showSingletons && singletonNodes.length > 0) {
-          let maxRealY = h / 2 + (nC === 1 ? maxOrbit : hubRing + maxOrbit);
-          realComms.forEach(c => {
-            const r = orbitR(c);
-            maxRealY = Math.max(maxRealY, c.hub.y + r + 24);
-            c.spokes.forEach(n => { maxRealY = Math.max(maxRealY, n.y + 24); });
-          });
+          let maxRealY = 0;
+          catCenters.forEach(({ cy }) => { maxRealY = Math.max(maxRealY, cy + maxCluster + 30); });
           const cellSize = 50;
-          const cols     = Math.ceil(Math.sqrt(singletonNodes.length * 2));
-          const gridW    = cols * cellSize;
-          const gridY    = maxRealY + 40;
+          const cols = Math.ceil(Math.sqrt(singletonNodes.length * 2));
+          const gridW = cols * cellSize;
           singletonNodes.forEach((n, si) => {
             const col = si % cols, row = Math.floor(si / cols);
             n.x = w / 2 - gridW / 2 + col * cellSize + cellSize / 2;
-            n.y = gridY + row * cellSize;
+            n.y = maxRealY + 40 + row * cellSize;
             n.vx = 0; n.vy = 0;
           });
         }
@@ -1232,29 +1234,88 @@ const GraphPage = () => {
       ctx.scale(zoom.z, zoom.z);
 
       // Layout background decorations
+      // Semantic zoom levels for hub:
+      //   < 1.6  → cloud: category blobs with name + count
+      //   1.6–3  → sub-type circles inside category boundaries
+      //   > 3    → individual nodes with labels
+      const zLvl = zoom.z;
       if (layout === "hub") {
-        // Reconstruct communities from node properties — skip singletons
-        const commNodes = {};
-        nodes.forEach(n => {
-          if (n.isSingleton) return;
-          const c = n.community ?? -1;
-          if (c === -1) return;
-          if (!commNodes[c]) commNodes[c] = { hub: null, spokes: [] };
-          if (n.isHub && !commNodes[c].hub) commNodes[c].hub = n;
-          else commNodes[c].spokes.push(n);
-        });
-        const maxOrbit = Math.min(w, h) * 0.10;
-        Object.values(commNodes).filter(c => c.hub && c.spokes.length >= 2).forEach(c => {
-          const r = Math.min(maxOrbit, 22 + c.spokes.length * 8);
-          const col = c.hub.color;
-          // Soft background disc
-          ctx.beginPath(); ctx.arc(c.hub.x, c.hub.y, r + 20, 0, Math.PI * 2);
-          ctx.fillStyle = col + "0d"; ctx.fill();
-          // Dashed orbit ring
-          ctx.beginPath(); ctx.arc(c.hub.x, c.hub.y, r + 8, 0, Math.PI * 2);
-          ctx.setLineDash([3, 7]);
-          ctx.strokeStyle = col + "40"; ctx.lineWidth = 1.2; ctx.stroke();
-          ctx.setLineDash([]);
+        const catCenters = nodesRef._catCenters || [];
+        catCenters.forEach(({ cat, cx, cy, data: catData }) => {
+          const visNodes = catData.nodes.filter(n => !n.isSingleton);
+          if (visNodes.length === 0) return;
+          let maxDist = 0;
+          visNodes.forEach(n => {
+            const d = Math.hypot(n.x - cx, n.y - cy);
+            maxDist = Math.max(maxDist, d + n.r);
+          });
+          const bgR = maxDist + 20;
+          const col = typeColor(cat);
+
+          // Gather sub-type clusters with center + radius
+          const stClusters = Object.entries(catData.subTypes)
+            .map(([st, ns]) => {
+              const vis = ns.filter(n => !n.isSingleton);
+              if (vis.length === 0) return null;
+              const sx = vis.reduce((s, n) => s + n.x, 0) / vis.length;
+              const sy = vis.reduce((s, n) => s + n.y, 0) / vis.length;
+              let sr = 0;
+              vis.forEach(n => { sr = Math.max(sr, Math.hypot(n.x - sx, n.y - sy) + n.r); });
+              return { st, sx, sy, sr: sr + 8, count: vis.length, col: typeColor(st) };
+            }).filter(Boolean);
+
+          if (zLvl < 1.6) {
+            // ── Level 1: Cloud — category blobs ──
+            ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
+            ctx.fillStyle = col + "25"; ctx.fill();
+            ctx.strokeStyle = col + "50"; ctx.lineWidth = 1.5; ctx.stroke();
+            const fontSize = Math.max(10, Math.min(18, bgR * 0.35));
+            ctx.fillStyle = col; ctx.font = `700 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(cat, cx, cy - 4);
+            ctx.fillStyle = col + "99"; ctx.font = `600 ${Math.max(8, fontSize * 0.6)}px ${MONO}`;
+            ctx.fillText(`${visNodes.length}`, cx, cy + fontSize * 0.7);
+
+          } else if (zLvl < 3) {
+            // ── Level 2: Sub-type circles inside category boundary ──
+            // Category boundary (light)
+            ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
+            ctx.fillStyle = col + "08"; ctx.fill();
+            ctx.setLineDash([4, 8]);
+            ctx.strokeStyle = col + "25"; ctx.lineWidth = 0.8; ctx.stroke();
+            ctx.setLineDash([]);
+            // Category label above
+            ctx.fillStyle = col + "bb"; ctx.font = `700 11px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(cat, cx, cy - bgR - 5);
+            // Sub-type bubbles
+            stClusters.forEach(({ st, sx, sy, sr, count, col: stCol }) => {
+              ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+              ctx.fillStyle = stCol + "20"; ctx.fill();
+              ctx.strokeStyle = stCol + "55"; ctx.lineWidth = 1.2; ctx.stroke();
+              const stFontSize = Math.max(7, Math.min(12, sr * 0.4));
+              ctx.fillStyle = stCol; ctx.font = `700 ${stFontSize}px ${FONT}`; ctx.textAlign = "center";
+              ctx.fillText(st, sx, sy - 2);
+              ctx.fillStyle = stCol + "88"; ctx.font = `600 ${Math.max(6, stFontSize * 0.7)}px ${MONO}`;
+              ctx.fillText(`${count}`, sx, sy + stFontSize * 0.65);
+            });
+
+          } else {
+            // ── Level 3: Detail — soft boundaries + sub-type labels ──
+            ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
+            ctx.fillStyle = col + "06"; ctx.fill();
+            ctx.setLineDash([4, 8]);
+            ctx.strokeStyle = col + "20"; ctx.lineWidth = 0.6; ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = col + "bb"; ctx.font = `700 10px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(cat, cx, cy - bgR - 4);
+            // Faint sub-type boundaries
+            stClusters.forEach(({ st, sx, sy, sr, col: stCol }) => {
+              ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+              ctx.strokeStyle = stCol + "20"; ctx.lineWidth = 0.6; ctx.stroke();
+              const minY = sy - sr;
+              ctx.fillStyle = stCol + "88"; ctx.font = `600 7px ${MONO}`; ctx.textAlign = "center";
+              ctx.fillText(st, sx, minY - 3);
+            });
+          }
         });
       } else if (layout === "spiral") {
         const B = 16, STEP = 0.42, tMax = (nodes.length - 1) * STEP + 0.01;
@@ -1344,61 +1405,57 @@ const GraphPage = () => {
         });
       }
 
-      // Hub layout: draw spoke→hub connector lines first (behind everything)
-      if (layout === "hub") {
-        nodes.forEach(n => {
-          if (n.isSingleton || n.isHub || n.community === -1) return;
-          // Find hub of this community
-          const hub = nodes.find(h => h.isHub && !h.isSingleton && h.community === n.community);
-          if (!hub) return;
-          ctx.beginPath(); ctx.moveTo(hub.x, hub.y); ctx.lineTo(n.x, n.y);
-          ctx.setLineDash([2, 5]);
-          ctx.strokeStyle = n.color + "35"; ctx.lineWidth = 0.8; ctx.stroke();
+      // ── Edges (hidden in hub cloud/sub-type view, visible at detail zoom) ──
+      const hubCloud = layout === "hub" && zLvl < 3;
+      if (!hubCloud) {
+        edges.forEach(([a, b, etype]) => {
+          if (!nodes[a] || !nodes[b]) return;
+          if (layout === "hub" && !showSingletons && (nodes[a].isSingleton || nodes[b].isSingleton)) return;
+          if (etype === 0 && !showRelates) return;
+          if (etype === 1 && !showCooccur) return;
+          if (typeFilter && (nodes[a].data.schema_type || "Thing") !== typeFilter && (nodes[b].data.schema_type || "Thing") !== typeFilter) return;
+          if (layout === "hub" && etype === 1) {
+            if (nodes[a].community !== undefined && nodes[a].community === nodes[b].community) return;
+          }
+          const interComm = layout === "hub" && nodes[a].community !== undefined && nodes[a].community !== nodes[b].community;
+          ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y);
+          if (etype === 1) {
+            ctx.setLineDash([3, 6]);
+            ctx.strokeStyle = p.textMuted + (interComm ? "70" : "30");
+            ctx.lineWidth = interComm ? 1.4 : 0.8;
+          } else {
+            ctx.setLineDash([]);
+            ctx.strokeStyle = p.accent + (interComm ? "aa" : "60");
+            ctx.lineWidth = interComm ? 2 : 1.2;
+          }
+          ctx.stroke();
           ctx.setLineDash([]);
         });
       }
 
-      // Edges: type 0 = RELATES (solid, accent-tinted), type 1 = co-occurrence (dashed, muted)
-      // In hub layout skip intra-community co-occurrence edges — orbit decoration implies those
-      edges.forEach(([a, b, etype]) => {
-        if (!nodes[a] || !nodes[b]) return;
-        if (layout === "hub" && etype === 1) {
-          if (nodes[a].community !== undefined && nodes[a].community === nodes[b].community) return;
-        }
-        ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y);
-        if (etype === 1) {
-          ctx.setLineDash([3, 6]);
-          ctx.strokeStyle = p.textMuted + "30"; ctx.lineWidth = 0.8;
-        } else {
-          ctx.setLineDash([]);
-          ctx.strokeStyle = p.accent + "60"; ctx.lineWidth = 1.2;
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-      });
-
-      // Nodes (skip singletons in hub layout when hidden)
-      nodes.forEach(n => {
-        if (layout === "hub" && n.isSingleton && !showSingletons) return;
-        const isHubNode = n.isHub && layout === "hub";
-        // Outer glow (larger for hubs)
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r + (isHubNode ? 14 : 8), 0, Math.PI * 2);
-        ctx.fillStyle = n.color + (isHubNode ? "1e" : "12"); ctx.fill();
-        // Hub pulse ring
-        if (isHubNode) {
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 7, 0, Math.PI * 2);
-          ctx.strokeStyle = n.color + "55"; ctx.lineWidth = 1.5; ctx.stroke();
-        }
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = n.fixed ? n.color + "70" : n.color + (isHubNode ? "60" : "40");
-        ctx.strokeStyle = n.color; ctx.lineWidth = isHubNode ? 2.5 : (n.fixed ? 2 : 1.5);
-        ctx.fill(); ctx.stroke();
-        // Only draw label when node is large enough on screen (≥7px radius)
-        if (n.r * zoom.z >= 7) {
-          ctx.fillStyle = p.text; ctx.font = `${isHubNode ? "700" : "600"} 10px ${FONT}`; ctx.textAlign = "center";
-          ctx.fillText(n.label, n.x, n.y + n.r + 15);
-        }
-      });
+      // ── Nodes (hidden in hub cloud/sub-type view, visible at detail zoom) ──
+      if (!hubCloud) {
+        nodes.forEach(n => {
+          if (layout === "hub" && n.isSingleton && !showSingletons) return;
+          const nodeType = n.data.schema_type || "Thing";
+          const dimmed = typeFilter && nodeType !== typeFilter;
+          const alpha = dimmed ? 0.15 : 1;
+          ctx.globalAlpha = alpha;
+          // At medium zoom (1.6-2.5): small dots, no labels
+          // At high zoom (>2.5): full detail with labels
+          const screenR = n.r * zLvl;
+          ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+          ctx.fillStyle = n.fixed ? n.color + "70" : n.color + "40";
+          ctx.strokeStyle = n.color; ctx.lineWidth = 1.5;
+          ctx.fill(); ctx.stroke();
+          // Labels only at detail zoom
+          if (showLabels && !dimmed && screenR >= 12) {
+            ctx.fillStyle = p.text; ctx.font = `600 10px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(n.label, n.x, n.y + n.r + 15);
+          }
+          ctx.globalAlpha = 1;
+        });
+      }
 
       ctx.restore();
     };
@@ -1628,7 +1685,7 @@ const GraphPage = () => {
       canvas.removeEventListener("wheel",      onWheel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutKey, layout, p, showSingletons]);
+  }, [layoutKey, layout, p, showSingletons, showLabels, showRelates, showCooccur, typeFilter]);
 
   // Derived for the side panel (not used in canvas)
   const episodes  = epData?.episodes  || [];
@@ -1652,55 +1709,133 @@ const GraphPage = () => {
         </div>
       </div>
 
-      {/* Layout buttons — centered in canvas area */}
-      <div style={{ position: "absolute", top: 16, left: 0, right: 340, zIndex: 10, display: "flex", justifyContent: "center", gap: 4, flexWrap: "wrap", padding: "0 160px 0 10px" }}>
-        {LAYOUT_OPTS.map(l => (
-          <button key={l.id} onClick={() => setLayout(l.id)} style={{
-            padding: "5px 12px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
-            border: `1px solid ${layout === l.id ? p.accent : p.border}`,
-            background: layout === l.id ? p.accent + "22" : p.surface + "dd",
-            color: layout === l.id ? p.accent : p.textMuted,
-            fontSize: 11, fontWeight: 600, fontFamily: MONO,
+      {/* Top toolbar — layout buttons + filter controls */}
+      <div style={{ position: "absolute", top: 12, left: 0, right: sidebarOpen ? 340 : 0, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "0 120px 0 10px" }}>
+        {/* Row 1: Layout buttons */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+          {LAYOUT_OPTS.map(l => (
+            <button key={l.id} onClick={() => setLayout(l.id)} style={{
+              padding: "4px 10px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
+              border: `1px solid ${layout === l.id ? p.accent : p.border}`,
+              background: layout === l.id ? p.accent + "22" : p.surface + "dd",
+              color: layout === l.id ? p.accent : p.textMuted,
+              fontSize: 10, fontWeight: 600, fontFamily: MONO,
+              backdropFilter: "blur(8px)",
+            }}>{l.label}</button>
+          ))}
+        </div>
+        {/* Row 2: Filters */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+          {/* Type filter dropdown */}
+          <select
+            value={typeFilter || ""}
+            onChange={e => setTypeFilter(e.target.value || null)}
+            style={{
+              padding: "3px 8px", borderRadius: 12, cursor: "pointer",
+              border: `1px solid ${typeFilter ? p.accent : p.border}`,
+              background: typeFilter ? p.accent + "22" : p.surface + "dd",
+              color: typeFilter ? p.accent : p.textMuted,
+              fontSize: 10, fontWeight: 600, fontFamily: MONO,
+              backdropFilter: "blur(8px)", outline: "none",
+            }}
+          >
+            <option value="">All types</option>
+            {[...new Set(ontology.map(o => o.schema_type || "Thing"))].sort().map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+          {/* Separator */}
+          <span style={{ color: p.textDim, fontSize: 10 }}>|</span>
+          {/* Edge toggles */}
+          <button onClick={() => setShowRelates(v => !v)} style={{
+            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
+            border: `1px solid ${showRelates ? p.accent : p.border}`,
+            background: showRelates ? p.accent + "22" : p.surface + "dd",
+            color: showRelates ? p.accent : p.textMuted,
+            fontSize: 10, fontWeight: 600, fontFamily: MONO,
             backdropFilter: "blur(8px)",
-          }}>{l.label}</button>
-        ))}
-        {layout === "hub" && singletonCount > 0 && (
-          <button onClick={() => { setShowSingletons(v => !v); setLayoutKey(k => k + 1); }} style={{
-            padding: "5px 12px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
-            border: `1px solid ${showSingletons ? p.warm : p.border}`,
-            background: showSingletons ? p.warm + "22" : p.surface + "dd",
-            color: showSingletons ? p.warm : p.textMuted,
-            fontSize: 11, fontWeight: 600, fontFamily: MONO,
+          }}>Semantic</button>
+          <button onClick={() => setShowCooccur(v => !v)} style={{
+            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
+            border: `1px solid ${showCooccur ? p.blue : p.border}`,
+            background: showCooccur ? p.blue + "22" : p.surface + "dd",
+            color: showCooccur ? p.blue : p.textMuted,
+            fontSize: 10, fontWeight: 600, fontFamily: MONO,
             backdropFilter: "blur(8px)",
-          }}>{showSingletons ? "Hide" : "Show"} {singletonCount} isolated</button>
-        )}
+          }}>Co-occur</button>
+          <span style={{ color: p.textDim, fontSize: 10 }}>|</span>
+          {/* Label toggle */}
+          <button onClick={() => setShowLabels(v => !v)} style={{
+            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
+            border: `1px solid ${showLabels ? p.warm : p.border}`,
+            background: showLabels ? p.warm + "22" : p.surface + "dd",
+            color: showLabels ? p.warm : p.textMuted,
+            fontSize: 10, fontWeight: 600, fontFamily: MONO,
+            backdropFilter: "blur(8px)",
+          }}>Labels</button>
+          {/* Singleton toggle */}
+          {layout === "hub" && singletonCount > 0 && (
+            <button onClick={() => { setShowSingletons(v => !v); setLayoutKey(k => k + 1); }} style={{
+              padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
+              border: `1px solid ${showSingletons ? p.warm : p.border}`,
+              background: showSingletons ? p.warm + "22" : p.surface + "dd",
+              color: showSingletons ? p.warm : p.textMuted,
+              fontSize: 10, fontWeight: 600, fontFamily: MONO,
+              backdropFilter: "blur(8px)",
+            }}>{singletonCount} isolated</button>
+          )}
+        </div>
       </div>
 
-      {/* Bottom-left legend — derived from actual node types */}
+      {/* Bottom-left legend — collapsible, click type to filter */}
       {ontology.length > 0 && (() => {
         const types = [...new Set(ontology.map(o => o.schema_type || "Thing"))].sort();
         return (
           <div style={{
-            position: "absolute", bottom: 20, left: 24, zIndex: 10, pointerEvents: "none",
+            position: "absolute", bottom: 20, left: 24, zIndex: 10,
+            maxWidth: 360,
             background: p.surface + "cc", backdropFilter: "blur(8px)",
             border: `1px solid ${p.border}`, borderRadius: 8,
-            padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: "6px 14px", maxWidth: 340,
+            padding: legendOpen ? "8px 12px" : "4px 10px",
           }}>
-            {types.map(t => (
-              <div key={t} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor(t), flexShrink: 0 }} />
-                <span style={{ fontSize: 10, color: p.textMuted, fontFamily: MONO }}>{t}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                 onClick={() => setLegendOpen(v => !v)}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: p.textMuted, fontFamily: MONO }}>
+                {legendOpen ? "Legend" : `Legend (${types.length})`}
+              </span>
+              <span style={{ fontSize: 9, color: p.textDim, transform: legendOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▾</span>
+            </div>
+            {legendOpen && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", maxWidth: 340, maxHeight: 120, overflowY: "auto", marginTop: 6 }}>
+                {types.map(t => (
+                  <div key={t} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", opacity: typeFilter && typeFilter !== t ? 0.35 : 1 }}
+                       onClick={() => setTypeFilter(f => f === t ? null : t)}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor(t), flexShrink: 0 }} />
+                    <span style={{ fontSize: 10, color: p.textMuted, fontFamily: MONO }}>{t}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         );
       })()}
 
-      {/* Right panel — floating overlay */}
+      {/* Sidebar toggle button */}
+      <button onClick={() => setSidebarOpen(v => !v)} style={{
+        position: "absolute", top: 12, right: sidebarOpen ? 348 : 12, zIndex: 20,
+        width: 28, height: 28, borderRadius: 8, cursor: "pointer", transition: "right 0.2s",
+        border: `1px solid ${p.border}`, background: p.surface + "dd",
+        color: p.textMuted, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+        backdropFilter: "blur(8px)",
+      }}>{sidebarOpen ? "›" : "‹"}</button>
+
+      {/* Right panel — floating overlay, collapsible */}
       <div style={{
         position: "absolute", top: 0, right: 0, bottom: 0, width: 340, zIndex: 10,
         background: p.surface + "f0", backdropFilter: "blur(12px)",
         borderLeft: `1px solid ${p.border}`, display: "flex", flexDirection: "column",
+        transform: sidebarOpen ? "translateX(0)" : "translateX(100%)",
+        transition: "transform 0.2s ease",
       }}>
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${p.border}` }}>

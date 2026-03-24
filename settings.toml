@@ -23,7 +23,7 @@ base_url = "https://openrouter.ai/api/v1"
 
 # LLM (for smart operations)
 [default.llm]
-flash_model = "x-ai/grok-4.1-fast"
+flash_model = "google/gemini-2.5-flash-lite"
 base_url = "https://openrouter.ai/api/v1"
 
 # Session (short-term memory in DragonflyDB)

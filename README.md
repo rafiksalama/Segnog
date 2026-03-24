@@ -12,7 +12,7 @@ The trick it uses, is very simple, short memory fast, using Redis cache and embe
 
 ## How it stays simple
 
-**One container holds everything.** DragonflyDB (session cache), FalkorDB (long-term graph), NATS (event bus), REST server, gRPC server, and background workers all run inside a single Docker container managed by supervisord. There is no external cluster to operate.
+**One container holds everything.** DragonflyDB (session cache), FalkorDB (long-term graph), NATS (event bus), REST server, gRPC server, MCP server, and background workers all run inside a single Docker container managed by supervisord. There is no external cluster to operate.
 
 **One endpoint does everything.** `/observe` stores the current observation, searches for related memory, and returns a formatted context passage — all in a single call. Reading and writing are not separate operations.
 
@@ -157,6 +157,60 @@ The response `context` field is a ready-to-use passage — inject it directly in
 
 ---
 
+### From Claude / any MCP client
+
+Segnog exposes all its tools over the [Model Context Protocol](https://modelcontextprotocol.io) via SSE. The MCP endpoint runs on the same port as the REST API — no extra process, no extra port.
+
+Add it to your Claude Desktop config (`~/.claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "url": "http://localhost:9000/mcp/sse",
+      "type": "sse"
+    }
+  }
+}
+```
+
+Or in Claude Code (`settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "url": "http://localhost:9000/mcp/sse",
+      "type": "sse"
+    }
+  }
+}
+```
+
+Six tools are available once connected:
+
+| Tool | Description |
+|---|---|
+| `memory_startup` | Initialise a session and get background context. Returns `session_id`. |
+| `memory_observe` | Store a turn and retrieve relevant memories. Core per-turn operation. |
+| `memory_search_knowledge` | Semantic search over knowledge. Omit `session_id` for global cross-session search. |
+| `memory_search_episodes` | Semantic search over raw episode history. |
+| `memory_store_knowledge` | Directly persist structured knowledge entries. |
+| `memory_run_curation` | Trigger LLM curation and memory consolidation for a session. |
+
+You can inspect all tool schemas without an MCP client:
+
+```bash
+curl http://localhost:9000/api/v1/memory/mcp/tools | python3 -m json.tool
+```
+
+**Typical usage pattern for a Claude agent:**
+1. Call `memory_startup` with the task description → get `session_id` and background context
+2. Call `memory_observe(session_id, content)` at each turn → get relevant memories to inject into context
+3. Call `memory_run_curation(session_id)` at the end of the task → consolidate memories for future sessions
+
+---
+
 ### From your agent — Python client
 
 ```python
@@ -265,7 +319,15 @@ curl -X POST http://localhost:9000/api/v1/memory/knowledge/search \
 
 ## API Specification
 
-Segnog publishes a machine-readable OpenAPI 3.x spec and interactive docs at the API prefix, so any service or agent can discover its capabilities programmatically:
+Segnog exposes three protocols — all on the same port, all sharing the same service instance:
+
+| Protocol | URL / address | Clients |
+|---|---|---|
+| **REST** | `http://localhost:9000/api/v1/memory` | curl, HTTP clients, agent frameworks |
+| **gRPC** | `localhost:50051` | high-throughput agents, Python/Go/Rust gRPC clients |
+| **MCP** | `http://localhost:9000/mcp/sse` | Claude Desktop, Claude Code, any MCP-compatible LLM client |
+
+REST discovery and docs:
 
 | URL | What it serves |
 |---|---|
@@ -283,7 +345,7 @@ curl http://localhost:9000/api/v1/memory/openapi.json | python3 -m json.tool | h
 
 → **[Full reference documentation](docs/REFERENCE.md)** — architecture, memory layers, observe sequence, 3D scoring, ontology, REM consolidation, configuration reference, benchmark results.
 
-→ **[REST API reference](docs/API.md)** — every endpoint with request/response shapes and examples.
+→ **[API reference](docs/API.md)** — REST endpoints, MCP tools, and gRPC — every operation with request/response shapes and examples.
 
 
 
