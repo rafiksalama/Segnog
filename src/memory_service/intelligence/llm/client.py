@@ -10,7 +10,6 @@ per-group buffer for downstream metacognition.
 
 import logging
 import re
-import threading
 from collections import defaultdict
 from typing import Any, List, Dict, Optional
 
@@ -25,8 +24,9 @@ _client: Optional[AsyncOpenAI] = None
 
 # ── Reasoning trace buffer (per group_id) ─────────────────────────────
 # Each entry: {"caller": <function name>, "prompt_snippet": ..., "reasoning": ...}
+# Buffer is safe without locks: asyncio is single-threaded, and all
+# operations (append, pop) are non-yielding within a single event loop tick.
 _reasoning_buffer: Dict[str, List[Dict[str, str]]] = defaultdict(list)
-_reasoning_lock = threading.Lock()
 
 _THINK_RE = re.compile(r"<think>([\s\S]*?)</think>")
 _MAX_TRACES_PER_GROUP = 200
@@ -38,28 +38,24 @@ def capture_reasoning(group_id: str, caller: str, prompt_snippet: str, raw_text:
     if matches:
         reasoning = "\n".join(m.strip() for m in matches if m.strip())
         if reasoning:
-            with _reasoning_lock:
-                buf = _reasoning_buffer[group_id]
-                if len(buf) < _MAX_TRACES_PER_GROUP:
-                    buf.append({
-                        "caller": caller,
-                        "prompt_snippet": prompt_snippet[:200],
-                        "reasoning": reasoning,
-                    })
+            buf = _reasoning_buffer[group_id]
+            if len(buf) < _MAX_TRACES_PER_GROUP:
+                buf.append({
+                    "caller": caller,
+                    "prompt_snippet": prompt_snippet[:200],
+                    "reasoning": reasoning,
+                })
     return _THINK_RE.sub("", raw_text).strip()
 
 
 def get_reasoning_traces(group_id: str) -> List[Dict[str, str]]:
     """Return and clear buffered reasoning traces for a group."""
-    with _reasoning_lock:
-        traces = list(_reasoning_buffer.pop(group_id, []))
-    return traces
+    return list(_reasoning_buffer.pop(group_id, []))
 
 
 def clear_reasoning_traces(group_id: str) -> None:
     """Discard buffered reasoning traces for a group."""
-    with _reasoning_lock:
-        _reasoning_buffer.pop(group_id, None)
+    _reasoning_buffer.pop(group_id, None)
 
 
 def get_llm_client() -> AsyncOpenAI:
@@ -125,21 +121,26 @@ async def llm_call(
             "reasoning_effort": reasoning_effort,
         }
 
-    response = await client.chat.completions.create(**kwargs)
+    import asyncio as _asyncio
+    # Timeout: 120s for high-reasoning calls, 60s for normal
+    _timeout = 120.0 if reasoning_effort else 60.0
+    response = await _asyncio.wait_for(
+        client.chat.completions.create(**kwargs),
+        timeout=_timeout,
+    )
 
     raw = response.choices[0].message.content or ""
 
     # Capture reasoning from extra_body split (returned as reasoning_content)
     reasoning_content = getattr(response.choices[0].message, "reasoning_content", None) or ""
     if group_id and reasoning_content:
-        with _reasoning_lock:
-            buf = _reasoning_buffer[group_id]
-            if len(buf) < _MAX_TRACES_PER_GROUP:
-                buf.append({
-                    "caller": caller or "llm_call",
-                    "prompt_snippet": prompt[:200],
-                    "reasoning": reasoning_content,
-                })
+        buf = _reasoning_buffer[group_id]
+        if len(buf) < _MAX_TRACES_PER_GROUP:
+            buf.append({
+                "caller": caller or "llm_call",
+                "prompt_snippet": prompt[:200],
+                "reasoning": reasoning_content,
+            })
 
     if group_id:
         return capture_reasoning(group_id, caller or "llm_call", prompt[:200], raw)

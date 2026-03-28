@@ -50,10 +50,13 @@ class BaseStore:
         last_err: Exception = RuntimeError("embedding failed")
         for attempt in range(_EMBED_MAX_RETRIES):
             try:
-                response = await self._client.embeddings.create(
-                    model=self._model,
-                    input=text,
-                    encoding_format="float",
+                response = await asyncio.wait_for(
+                    self._client.embeddings.create(
+                        model=self._model,
+                        input=text,
+                        encoding_format="float",
+                    ),
+                    timeout=30.0,
                 )
                 return response.data[0].embedding
             except Exception as e:
@@ -80,10 +83,13 @@ class BaseStore:
         last_err: Exception = RuntimeError("batch embedding failed")
         for attempt in range(_EMBED_MAX_RETRIES):
             try:
-                response = await self._client.embeddings.create(
-                    model=self._model,
-                    input=texts,
-                    encoding_format="float",
+                response = await asyncio.wait_for(
+                    self._client.embeddings.create(
+                        model=self._model,
+                        input=texts,
+                        encoding_format="float",
+                    ),
+                    timeout=60.0,
                 )
                 return [item.embedding for item in response.data]
             except Exception as e:

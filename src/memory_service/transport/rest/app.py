@@ -95,7 +95,25 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "service": "agent-memory-service"}
+        checks = {}
+        # FalkorDB
+        try:
+            r = await app.state.episode_store._graph.ro_query("RETURN 1")
+            checks["falkordb"] = bool(r.result_set)
+        except Exception:
+            checks["falkordb"] = False
+        # DragonflyDB
+        try:
+            checks["dragonfly"] = await app.state.dragonfly._client.ping()
+        except Exception:
+            checks["dragonfly"] = False
+
+        all_ok = all(checks.values())
+        return {
+            "status": "ok" if all_ok else "degraded",
+            "service": "agent-memory-service",
+            "checks": checks,
+        }
 
     @app.get("/api/v1/memory", include_in_schema=False)
     async def api_discovery():
