@@ -103,6 +103,10 @@ async def llm_call(
     """
     client = get_llm_client()
     model = model or get_flash_model()
+    # Strip provider prefixes (e.g. "minimax/MiniMax-M2.7" → "MiniMax-M2.7")
+    # MiniMax API expects bare model name, not prefixed
+    if "/" in model:
+        model = model.split("/", 1)[-1]
 
     messages: List[Dict[str, str]] = []
     if system_prompt:
