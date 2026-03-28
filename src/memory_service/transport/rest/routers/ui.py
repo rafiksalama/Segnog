@@ -292,19 +292,24 @@ async def list_ontology(
             conditions.append("n.schema_type = $schema_type")
             params["schema_type"] = schema_type
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        # Deduplicate by name: same entity across different groups → single node
+        # Keep the most recent uuid, sum source_counts
         result = await onto_store._graph.ro_query(
             f"""
             MATCH (n:OntologyNode)
             {where}
-            RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
-                   n.display_name AS display_name, n.source_count AS source_count,
-                   n.updated_at AS updated_at
-            ORDER BY n.updated_at DESC
+            WITH n.name AS name,
+                 collect(n) AS dupes
+            WITH name, dupes,
+                 dupes[0] AS best
+            RETURN best.uuid AS uuid, name, best.schema_type AS schema_type,
+                   best.display_name AS display_name,
+                   reduce(s = 0, d IN dupes | s + coalesce(d.source_count, 0)) AS source_count,
+                   best.updated_at AS updated_at
+            ORDER BY source_count DESC
             """,
             params=params,
         )
-        # Compute top-level category for each schema_type using Schema.org hierarchy.
-        # Category = child of Thing in ancestor chain (e.g., Hospital → Organization)
         onto = onto_store._ontology
         _cat_cache: dict = {}
 
@@ -312,8 +317,6 @@ async def list_ontology(
             if schema_type in _cat_cache:
                 return _cat_cache[schema_type]
             chain = onto.ancestors(schema_type) if onto else [schema_type]
-            # chain = [type, parent, grandparent, ..., Thing]
-            # We want the element just before "Thing" (or the type itself)
             cat = schema_type
             for i, anc in enumerate(chain):
                 if anc == "Thing" and i > 0:
@@ -514,18 +517,22 @@ async def list_ontology_edges(request: Request, limit: int = 300):
     """Return RELATES edges between OntologyNodes."""
     onto_store = get_ontology_store(request)
     try:
+        # Use name as ID (matches deduped node list) and deduplicate edges
         result = await onto_store._graph.ro_query(
             """
             MATCH (a:OntologyNode)-[r:RELATES]->(b:OntologyNode)
-            RETURN a.uuid AS source, b.uuid AS target, r.predicate AS predicate
+            RETURN DISTINCT a.name AS source, b.name AS target, r.predicate AS predicate
             LIMIT $limit
             """,
             params={"limit": limit},
         )
-        edges = [
-            {"source": row[0], "target": row[1], "predicate": row[2] or ""}
-            for row in result.result_set
-        ]
+        seen = set()
+        edges = []
+        for row in result.result_set:
+            key = f"{row[0]}|{row[1]}|{row[2]}"
+            if key not in seen:
+                seen.add(key)
+                edges.append({"source": row[0], "target": row[1], "predicate": row[2] or ""})
         return {"edges": edges}
     except Exception as e:
         logger.warning(f"Ontology edges query failed: {e}")
@@ -543,21 +550,25 @@ async def list_ontology_cooccurrence(request: Request, limit: int = 400):
         result = await onto_store._graph.ro_query(
             """
             MATCH (a:OntologyNode)-[:RELATES]-()
-            WITH collect(DISTINCT a.uuid) AS connected
+            WITH collect(DISTINCT a.name) AS connected
             MATCH (ep:Episode)-[:ABOUT]->(a:OntologyNode),
                   (ep)-[:ABOUT]->(b:OntologyNode)
-            WHERE a.uuid < b.uuid
-              AND a.uuid IN connected
-              AND b.uuid IN connected
-            RETURN a.uuid AS source, b.uuid AS target, count(ep) AS weight
+            WHERE a.name < b.name
+              AND a.name IN connected
+              AND b.name IN connected
+            RETURN DISTINCT a.name AS source, b.name AS target, count(ep) AS weight
             ORDER BY weight DESC
             LIMIT $limit
             """,
             params={"limit": limit},
         )
-        edges = [
-            {"source": row[0], "target": row[1], "weight": int(row[2])} for row in result.result_set
-        ]
+        seen = set()
+        edges = []
+        for row in result.result_set:
+            key = f"{row[0]}|{row[1]}"
+            if key not in seen:
+                seen.add(key)
+                edges.append({"source": row[0], "target": row[1], "weight": int(row[2])})
         return {"edges": edges}
     except Exception as e:
         logger.warning(f"Co-occurrence query failed: {e}")

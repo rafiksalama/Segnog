@@ -35,9 +35,10 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     if (!nodes || nodes.length === 0) return { nodes: [], links: [] };
 
     // Build index and degree
+    // Use name as node ID (deduped across groups by backend)
     const idxMap = {};
     const degree = {};
-    nodes.forEach((n, i) => { idxMap[n.uuid] = i; degree[n.uuid] = 0; });
+    nodes.forEach((n, i) => { idxMap[n.name] = i; degree[n.name] = 0; });
 
     const links = [];
     const seen = new Set();
@@ -57,7 +58,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       degree[e.target] = (degree[e.target] || 0) + 1;
     });
 
-    // Co-occurrence edges
+    // Co-occurrence edges (source/target are names now)
     (cooccur || []).forEach(e => {
       if (!e.source || !e.target) return;
       if (!(e.source in idxMap) || !(e.target in idxMap)) return;
@@ -78,13 +79,13 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
 
     // Enrich nodes
     const graphNodes = nodes
-      .filter(n => (degree[n.uuid] || 0) > 0) // hide isolates
+      .filter(n => (degree[n.name] || 0) > 0) // hide isolates
       .map(n => {
-        const deg = degree[n.uuid] || 0;
+        const deg = degree[n.name] || 0;
         const isHub = deg >= hubThreshold;
         const sc = n.source_count || 1;
         return {
-          id: n.uuid,
+          id: n.name,  // name is unique after backend dedup
           name: n.display_name || n.name,
           type: n.schema_type || "Thing",
           category: n.category || n.schema_type || "Thing",
