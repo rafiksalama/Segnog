@@ -39,6 +39,7 @@ async def update_group_ontology(
     group_id: str,
     episodes: List[Dict[str, Any]],
     combined_text: str,
+    causal_store=None,
 ) -> None:
     """
     Run the full ontology update for a consolidated episode batch.
@@ -196,3 +197,46 @@ async def update_group_ontology(
 
     if about_count:
         logger.info("Ontology 8d: created %d ABOUT edge(s) for group '%s'", about_count, group_id)
+
+    # ----------------------------------------------------------------
+    # 8e. Extract causal claims → CausalClaim nodes + entity edges
+    # ----------------------------------------------------------------
+    if causal_store is not None:
+        try:
+            from ..extract.causals import extract_causal_claims
+
+            causal_claims = await extract_causal_claims(combined_text)
+            stored_claims = 0
+            for claim in causal_claims:
+                try:
+                    await causal_store.upsert_claim(
+                        cause_summary=claim["cause"],
+                        effect_summary=claim["effect"],
+                        mechanism=claim.get("mechanism", ""),
+                        confidence=claim.get("confidence", 0.8),
+                        cause_entity=claim.get("cause_norm"),
+                        effect_entity=claim.get("effect_norm"),
+                        group_id=group_id,
+                    )
+                    stored_claims += 1
+                except Exception as e:
+                    logger.debug(
+                        "Ontology 8e: upsert_claim failed (%s → %s): %s",
+                        claim.get("cause"),
+                        claim.get("effect"),
+                        e,
+                    )
+
+            if causal_claims:
+                logger.info(
+                    "Ontology 8e: stored %d/%d causal claims for group '%s'",
+                    stored_claims,
+                    len(causal_claims),
+                    group_id,
+                )
+
+            # Revise belief confidences after new evidence
+            await causal_store.revise_beliefs(group_id)
+
+        except Exception as e:
+            logger.warning("Ontology 8e: causal extraction failed for '%s': %s", group_id, e)

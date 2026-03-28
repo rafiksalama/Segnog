@@ -40,7 +40,7 @@ async def infer_state(
                 prompt,
                 model=model,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=196000,
                 system_prompt=system,
             )
             # Take the first non-empty line

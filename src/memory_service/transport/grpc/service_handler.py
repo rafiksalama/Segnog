@@ -310,7 +310,8 @@ class MemoryServiceHandler:
         mission_data = req.get("mission_data_json", "{}")
         if isinstance(mission_data, str):
             mission_data = json.loads(mission_data)
-        result = await generate_reflection(mission_data, model=req.get("model"))
+        group_id = req.get("group_id") or mission_data.get("group_id")
+        result = await generate_reflection(mission_data, model=req.get("model"), group_id=group_id)
         return {"reflection": result}
 
     async def extract_knowledge_op(self, req: dict) -> dict:

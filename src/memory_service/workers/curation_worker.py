@@ -92,6 +92,7 @@ class CurationWorker:
         max_wait_seconds: float = 30.0,
         max_concurrent: int = 2,
         ontology_store=None,
+        causal_store=None,
         dragonfly=None,
     ):
         self._nats = nats_client
@@ -99,6 +100,7 @@ class CurationWorker:
         self._episode_store = episode_store
         self._publisher = publisher
         self._ontology_store = ontology_store
+        self._causal_store = causal_store
         self._dragonfly = dragonfly
         self._accumulator = GroupAccumulator(min_episodes, max_wait_seconds)
         self._max_wait = max_wait_seconds
@@ -274,6 +276,7 @@ class CurationWorker:
                             group_id=group_id,
                             episodes=episodes_with_uuid,
                             combined_text=combined,
+                            causal_store=self._causal_store,
                         )
                     except Exception as e:
                         logger.error(

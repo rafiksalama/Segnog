@@ -54,7 +54,7 @@ If nothing is truly relevant, return exactly: "No relevant past experience found
 """
 
     try:
-        result = await llm_call(prompt, model=model, temperature=0.1, max_tokens=4096)
+        result = await llm_call(prompt, model=model, temperature=0.1)
         logger.info(f"Memory filter returned {len(result)} chars")
         return result
     except Exception as e:

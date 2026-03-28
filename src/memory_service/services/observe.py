@@ -704,6 +704,7 @@ async def observe_core(
     minimal: bool = False,
     ontology_store=None,
     ontology_top_k: int = 5,
+    causal_store=None,
     parent_session_id: str = None,
 ) -> dict:
     """Core observe logic — store, summarize, return context.
@@ -750,6 +751,7 @@ async def observe_core(
             minimal=minimal,
             ontology_store=ontology_store,
             ontology_top_k=ontology_top_k,
+            causal_store=causal_store,
             parent_session_id=parent_session_id,
         )
     finally:
@@ -773,6 +775,7 @@ async def _observe_core_inner(
     minimal: bool = False,
     ontology_store=None,
     ontology_top_k: int = 5,
+    causal_store=None,
     parent_session_id: str = None,
 ) -> dict:
 
@@ -830,6 +833,7 @@ async def _observe_core_inner(
                 "content": kn.get("content", ""),
                 "source_type": "hydrated_knowledge",
                 "created_at": 0,
+                "rank": kn.get("score", 0.75),
             }
         for node in ontology_results or []:
             node_uuid = node.get("uuid", "")
@@ -840,6 +844,7 @@ async def _observe_core_inner(
                     "content": f"{display}: {summary}" if display else summary,
                     "source_type": "ontology_node",
                     "created_at": 0,
+                    "rank": node.get("score", 0.85),
                 }
         for ep in relevant_episodes:
             ep_uuid = ep.get("uuid", "")
@@ -847,6 +852,7 @@ async def _observe_core_inner(
                 "content": ep.get("content", ""),
                 "source_type": "relevant_episode",
                 "created_at": ep.get("created_at", 0),
+                "rank": ep.get("score", 0.0),
             }
         from ..intelligence.synthesis.summarize_context import _format_entries
 
@@ -973,6 +979,9 @@ async def _observe_core_inner(
             half_life=get_episode_half_life(),
         )
         tracer.end(_sid, "score_3dim", _t0)
+        # Propagate 3D composite score as rank for context ordering
+        for r in search_results:
+            r["rank"] = r.get("score", 0.0)
         entries = {r["uuid"]: r for r in search_results}
 
         # Standard warm path: augment with OntologyNode summaries from FalkorDB.
@@ -996,9 +1005,41 @@ async def _observe_core_inner(
                                 "content": f"{display}: {summary}" if display else summary,
                                 "source_type": "ontology_node",
                                 "created_at": 0,
+                                "rank": node.get("score", 0.85),
                             }
             except Exception as e:
                 logger.warning(f"OntologyNode warm-path search failed: {e}")
+
+        # Augment with causal beliefs from CausalClaimStore
+        if causal_store is not None:
+            try:
+                causal_results = await causal_store.search_claims(
+                    embedding=embedding,
+                    top_k=3,
+                    group_id=session_id,
+                    min_score=0.4,
+                )
+                for claim in causal_results:
+                    claim_uuid = claim.get("uuid", "")
+                    if claim_uuid:
+                        key = f"causal_{claim_uuid}"
+                        if key not in entries:
+                            conf = claim.get("confidence", 0.0)
+                            mech = claim.get("mechanism", "")
+                            content_str = (
+                                f"[Causal, confidence={conf:.2f}] "
+                                f"{claim.get('cause_summary', '')} → {claim.get('effect_summary', '')}"
+                            )
+                            if mech:
+                                content_str += f" ({mech})"
+                            entries[key] = {
+                                "content": content_str,
+                                "source_type": "causal_claim",
+                                "created_at": 0,
+                                "rank": claim.get("score", 0.80),
+                            }
+            except Exception as e:
+                logger.warning(f"CausalClaim warm-path search failed: {e}")
     else:
         # Fallback: recency cap (no embedding available)
         entries = await dragonfly.session_get_all(session_id)
@@ -1059,6 +1100,7 @@ async def _observe_core_inner(
                         "content": ep.get("content", ""),
                         "source_type": "hydrated",
                         "created_at": ep.get("created_at", 0),
+                        "rank": ep.get("score", 0.0),
                     }
             for kn in kn_results:
                 kn_uuid = kn.get("uuid", "")
@@ -1068,6 +1110,7 @@ async def _observe_core_inner(
                         "content": kn.get("content", ""),
                         "source_type": "hydrated_knowledge",
                         "created_at": 0,
+                        "rank": kn.get("score", 0.75),
                     }
             for node in onto_results:
                 node_uuid = node.get("uuid", "")
@@ -1080,6 +1123,7 @@ async def _observe_core_inner(
                             "content": f"{display}: {summary}" if display else summary,
                             "source_type": "ontology_node",
                             "created_at": 0,
+                            "rank": node.get("score", 0.85),
                         }
             logger.info(
                 f"read_only augment: {len(ep_results)} episodes + "

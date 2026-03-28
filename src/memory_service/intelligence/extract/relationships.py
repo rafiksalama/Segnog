@@ -58,7 +58,7 @@ async def extract_relationships(
     onto = _get_ontology()
 
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.1, max_tokens=4096)
+        lm = configure_dspy_lm(model=model, temperature=0.1)
         predictor = dspy.Predict(RelationshipExtractionSignature)
 
         with dspy.context(lm=lm, adapter=adapter):

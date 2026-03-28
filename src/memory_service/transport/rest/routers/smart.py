@@ -93,7 +93,8 @@ async def generate_reflection_endpoint(body: GenerateReflectionRequest):
     mission_data = body.mission_data_json
     if isinstance(mission_data, str):
         mission_data = json.loads(mission_data)
-    result = await generate_reflection(mission_data, model=body.model)
+    group_id = getattr(body, "group_id", None) or mission_data.get("group_id")
+    result = await generate_reflection(mission_data, model=body.model, group_id=group_id)
     return {"reflection": result}
 
 

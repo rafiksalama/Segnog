@@ -30,13 +30,15 @@ class MemoryService:
         knowledge_store,
         artifact_store,
         ontology_store,
-        dragonfly,
-        short_term,
+        causal_store=None,
+        dragonfly=None,
+        short_term=None,
     ):
         self._episode_store = episode_store
         self._knowledge_store = knowledge_store
         self._artifact_store = artifact_store
         self._ontology_store = ontology_store
+        self._causal_store = causal_store
         self._dragonfly = dragonfly
         self._short_term = short_term
 
@@ -243,6 +245,7 @@ class MemoryService:
             top_k=top_k,
             knowledge_top_k=knowledge_top_k,
             minimal=minimal,
+            causal_store=self._causal_store,
             parent_session_id=parent_session_id,
         )
 
@@ -570,7 +573,7 @@ class MemoryService:
         try:
             from ..intelligence.synthesis.reflect import generate_reflection
 
-            reflection = await generate_reflection(mission_data, model=model)
+            reflection = await generate_reflection(mission_data, model=model, group_id=group_id)
             logger.info(f"Generated reflection: {len(reflection)} chars")
         except Exception as e:
             logger.warning(f"Reflection generation failed (non-critical): {e}")
@@ -678,10 +681,39 @@ class MemoryService:
         except Exception as e:
             logger.warning(f"Event compression failed (non-critical): {e}")
 
+        # Step 7b: Extract and store causal claims
+        causal_count = 0
+        causal_source = mission_data.get("output", "")
+        if self._causal_store and causal_source:
+            try:
+                from ..intelligence.extract.causals import extract_causal_claims
+
+                causal_claims = await extract_causal_claims(causal_source)
+                for claim in causal_claims:
+                    try:
+                        await self._causal_store.upsert_claim(
+                            cause_summary=claim["cause"],
+                            effect_summary=claim["effect"],
+                            mechanism=claim.get("mechanism", ""),
+                            confidence=claim.get("confidence", 0.8),
+                            cause_entity=claim.get("cause_norm"),
+                            effect_entity=claim.get("effect_norm"),
+                            group_id=group_id,
+                        )
+                        causal_count += 1
+                    except Exception:
+                        pass
+                if causal_count:
+                    await self._causal_store.revise_beliefs(group_id)
+                    logger.info(f"Stored {causal_count} causal claims")
+            except Exception as e:
+                logger.warning(f"Causal extraction failed (non-critical): {e}")
+
         return {
             "reflection": reflection,
             "reflection_uuid": reflection_uuid,
             "knowledge_count": knowledge_count,
             "artifact_count": artifact_count,
+            "causal_count": causal_count,
             "events_compressed": events_compressed,
         }

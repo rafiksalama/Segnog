@@ -32,6 +32,7 @@ async def setup_backends(app: FastAPI) -> None:
     app.state.knowledge_store = backends["knowledge_store"]
     app.state.artifact_store = backends["artifact_store"]
     app.state.ontology_store = backends["ontology_store"]
+    app.state.causal_store = backends.get("causal_store")
     app.state.openai_client = backends["openai_client"]
     app.state.nats_client = backends.get("nats_client")
     app.state.service = MemoryService(
@@ -39,6 +40,7 @@ async def setup_backends(app: FastAPI) -> None:
         knowledge_store=backends["knowledge_store"],
         artifact_store=backends["artifact_store"],
         ontology_store=backends.get("ontology_store"),
+        causal_store=backends.get("causal_store"),
         dragonfly=backends["dragonfly"],
         short_term=backends["short_term"],
     )

@@ -21,7 +21,7 @@ from .evaluation.reinterpret import reinterpret_task
 from .evaluation.filter import filter_memory_results
 from .evaluation.infer_state import infer_state
 from .synthesis.synthesize import synthesize_background
-from .synthesis.reflect import generate_reflection
+from .synthesis.reflect import generate_reflection, generate_metacognition
 from .extract.knowledge import extract_knowledge
 from .extract.artifacts import extract_artifacts
 from .synthesis.compress import compress_events
@@ -32,6 +32,7 @@ __all__ = [
     "infer_state",
     "synthesize_background",
     "generate_reflection",
+    "generate_metacognition",
     "extract_knowledge",
     "extract_artifacts",
     "compress_events",

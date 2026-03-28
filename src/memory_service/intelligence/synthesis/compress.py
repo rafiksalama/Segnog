@@ -65,7 +65,7 @@ async def compress_events(
             f"Summarize these agent execution events into a concise paragraph:{context_hint}\n\n{events_text}\n\nSummary:",
             model=model,
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=196000,
         )
 
         episode_uuid = await episode_store.store_episode(

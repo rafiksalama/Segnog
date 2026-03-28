@@ -23,6 +23,7 @@ from .long_term.episode_store import EpisodeStore, create_episode_store
 from .long_term.knowledge_store import KnowledgeStore
 from .long_term.artifact_store import ArtifactStore
 from .long_term.ontology_store import OntologyStore
+from .long_term.causal_store import CausalClaimStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ __all__ = [
     "KnowledgeStore",
     "ArtifactStore",
     "OntologyStore",
+    "CausalClaimStore",
     "init_backends",
 ]
 
@@ -110,6 +112,9 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology)
     await ontology_store.ensure_indexes()
 
+    causal_store = CausalClaimStore(graph, openai_client, embedding_model)
+    await causal_store.ensure_indexes()
+
     logger.info("All storage backends initialized")
 
     return {
@@ -119,5 +124,6 @@ async def init_backends(session_ttl: int = 3600) -> dict:
         "knowledge_store": knowledge_store,
         "artifact_store": artifact_store,
         "ontology_store": ontology_store,
+        "causal_store": causal_store,
         "openai_client": openai_client,
     }

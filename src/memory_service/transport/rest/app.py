@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe, ui
+from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe, ui, causal
 from .dependencies import setup_backends, teardown_backends
 from ...workers.span_aggregator import run_span_aggregator
 from ..mcp.server import mcp as mcp_server, set_service as mcp_set_service
@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(pipelines.router, prefix=prefix, tags=["pipelines"])
     app.include_router(observe.router, prefix=prefix, tags=["observe"])
     app.include_router(ui.router, prefix=prefix, tags=["ui"])
+    app.include_router(causal.router, prefix=prefix, tags=["causal"])
 
     @app.get("/health")
     async def health():

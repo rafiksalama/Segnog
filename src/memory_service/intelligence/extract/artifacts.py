@@ -96,7 +96,7 @@ async def extract_artifacts(
         full_report = full_report[:MAX_REPORT] + "\n\n... [truncated]"
 
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.2, max_tokens=4096)
+        lm = configure_dspy_lm(model=model, temperature=0.2)
         predictor = dspy.Predict(ArtifactExtractionSignature)
 
         with dspy.context(lm=lm, adapter=adapter):

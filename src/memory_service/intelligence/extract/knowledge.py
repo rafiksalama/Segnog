@@ -144,7 +144,7 @@ async def extract_knowledge(
         return valid
 
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.3, max_tokens=4096)
+        lm = configure_dspy_lm(model=model, temperature=0.3)
         predictor = dspy.Predict(KnowledgeExtractionSignature)
 
         try:

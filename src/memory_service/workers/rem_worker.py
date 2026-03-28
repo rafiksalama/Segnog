@@ -29,6 +29,7 @@ class REMWorker:
         batch_size: int = 5,
         min_episodes: int = 3,
         ontology_store=None,
+        causal_store=None,
         dragonfly=None,
     ):
         self._handler = handler
@@ -37,6 +38,7 @@ class REMWorker:
         self._batch_size = batch_size
         self._min_episodes = min_episodes
         self._ontology_store = ontology_store
+        self._causal_store = causal_store
         self._dragonfly = dragonfly
         self._running = False
         self._last_sweep_ts: float = 0.0  # Unix timestamp of last completed sweep
@@ -274,6 +276,7 @@ class REMWorker:
             group_id=group_id,
             episodes=unique_episodes,
             combined_text=combined_text,
+            causal_store=self._causal_store,
         )
 
     async def _find_similar_consolidated(

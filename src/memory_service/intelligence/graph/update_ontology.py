@@ -45,7 +45,7 @@ async def update_ontology_summary(
         new_episode_text = new_episode_text[:MAX_INPUT]
 
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.2, max_tokens=4096)
+        lm = configure_dspy_lm(model=model, temperature=0.2)
         predictor = dspy.Predict(OntologyNodeUpdateSignature)
 
         with dspy.context(lm=lm, adapter=adapter):

@@ -53,7 +53,7 @@ async def extract_entities(
         # Retrieve top-60 Schema.org classes most relevant to this text via embedding
         relevant_classes = await retrieve_relevant_classes(content, onto, top_k=60)
 
-        lm = configure_dspy_lm(model=model, temperature=0.1, max_tokens=4096)
+        lm = configure_dspy_lm(model=model, temperature=0.1)
         predictor = dspy.Predict(EntityExtractionSignature)
 
         with dspy.context(lm=lm, adapter=adapter):

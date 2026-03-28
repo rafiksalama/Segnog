@@ -96,6 +96,7 @@ async def main():
         knowledge_store=backends["knowledge_store"],
         artifact_store=backends["artifact_store"],
         ontology_store=backends.get("ontology_store"),
+        causal_store=backends.get("causal_store"),
         dragonfly=backends["dragonfly"],
         short_term=backends["short_term"],
     )
@@ -128,6 +129,7 @@ async def main():
             max_wait_seconds=get_nats_curation_max_wait(),
             max_concurrent=get_nats_curation_max_concurrent(),
             ontology_store=backends.get("ontology_store"),
+            causal_store=backends.get("causal_store"),
             dragonfly=backends["dragonfly"],
         )
         tasks.append(curation_worker.run())
@@ -143,6 +145,7 @@ async def main():
             batch_size=get_background_batch_size(),
             min_episodes=1,
             ontology_store=backends.get("ontology_store"),
+            causal_store=backends.get("causal_store"),
             dragonfly=backends["dragonfly"],
         )
         tasks.append(sweep_publisher.run())
@@ -160,6 +163,7 @@ async def main():
             batch_size=get_background_batch_size(),
             min_episodes=get_background_min_episodes(),
             ontology_store=backends.get("ontology_store"),
+            causal_store=backends.get("causal_store"),
             dragonfly=backends["dragonfly"],
         )
         tasks.append(rem_worker.run())

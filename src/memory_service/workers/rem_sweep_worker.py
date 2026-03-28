@@ -62,6 +62,7 @@ class REMSweepWorker:
         batch_size: int = 5,
         min_episodes: int = 1,
         ontology_store=None,
+        causal_store=None,
         dragonfly=None,
     ):
         self._nats = nats_client
@@ -70,6 +71,7 @@ class REMSweepWorker:
         self._batch_size = batch_size
         self._min_episodes = min_episodes
         self._ontology_store = ontology_store
+        self._causal_store = causal_store
         self._dragonfly = dragonfly
         self._running = False
 
@@ -117,6 +119,7 @@ class REMSweepWorker:
             batch_size=self._batch_size,
             min_episodes=self._min_episodes,
             ontology_store=self._ontology_store,
+            causal_store=self._causal_store,
         )
         t0 = _time.perf_counter()
         await temp_worker._run_cycle()

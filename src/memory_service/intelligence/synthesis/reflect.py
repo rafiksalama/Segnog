@@ -1,32 +1,112 @@
 """
-Reflection Generation — LLM-powered post-mission reflection.
+Reflection & Metacognition — LLM-powered post-mission analysis.
 
-Generates a structured reflection from completed mission data that becomes
-a high-quality retrieval target — denser and more useful than raw traces.
+Generates:
+1. Structured reflection from completed mission data
+2. Metacognition section that analyses the system's reasoning process,
+   decision-making quality, and cognitive patterns
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from ..llm.client import llm_call
+from ..llm.client import llm_call, get_reasoning_traces
 from ...config import get_flash_model
 
 logger = logging.getLogger(__name__)
 
 
-async def generate_reflection(
-    mission_data: Dict[str, Any],
+async def generate_metacognition(
+    task: str,
+    reflection: str,
+    reasoning_traces: Optional[List[Dict[str, str]]] = None,
     model: Optional[str] = None,
 ) -> str:
     """
-    Generate a structured reflection from a completed mission.
+    Generate metacognitive analysis of the system's reasoning process.
+
+    Examines *how* the system reasoned — cognitive patterns, assumptions,
+    biases, dead-ends, breakthroughs — using the reflection output and
+    any captured reasoning traces.
+    """
+    model = model or get_flash_model()
+
+    # Format reasoning traces if available
+    traces_section = ""
+    if reasoning_traces:
+        trace_lines = []
+        for i, t in enumerate(reasoning_traces, 1):
+            trace_lines.append(
+                f"### Trace {i} ({t['caller']})\n"
+                f"Prompt context: {t['prompt_snippet']}\n"
+                f"Reasoning:\n{t['reasoning']}\n"
+            )
+        traces_text = "\n".join(trace_lines)
+        if len(traces_text) > 100_000:
+            traces_text = traces_text[:100_000] + "\n\n[...truncated...]"
+        traces_section = f"\n## Internal Reasoning Traces\n{traces_text}"
+
+    prompt = f"""You are a metacognitive analyst. Analyse HOW the AI system reasoned
+about this task — not what it produced, but the quality and patterns of its thinking.
+
+## Task
+{task[:500]}
+
+## Reflection (system's self-assessment)
+{reflection[:5000]}
+{traces_section}
+
+## Instructions
+Produce a structured metacognition report covering:
+
+1. **Reasoning Patterns**: What cognitive strategies were used? (decomposition, analogy, elimination, chain-of-thought, etc.)
+2. **Assumptions Made**: What did the system assume without verification? Were assumptions valid?
+3. **Decision Points**: Key moments where the reasoning branched — what was chosen and why?
+4. **Dead Ends & Corrections**: Where did reasoning go wrong? How was it corrected?
+5. **Confidence Calibration**: Was the system appropriately confident/uncertain? Any overconfidence?
+6. **Information Gaps**: What information was missing that would have helped?
+7. **Cognitive Biases**: Any signs of anchoring, confirmation bias, availability bias, etc.?
+8. **Reasoning Quality Score**: Rate 1-10 with brief justification.
+9. **Improvement Suggestions**: How could the reasoning process be improved next time?
+
+Be concise but specific. Reference actual content from the reflection and traces.
+"""
+
+    try:
+        metacognition = await llm_call(
+            prompt, model=model, temperature=0.3,
+            max_tokens=16000, reasoning_effort="high",
+        )
+        logger.info(
+            "Generated metacognition: %d chars (traces: %d)",
+            len(metacognition),
+            len(reasoning_traces) if reasoning_traces else 0,
+        )
+        return metacognition
+    except Exception as e:
+        logger.error("Metacognition generation failed: %s", e)
+        return ""
+
+
+async def generate_reflection(
+    mission_data: Dict[str, Any],
+    model: Optional[str] = None,
+    group_id: Optional[str] = None,
+) -> str:
+    """
+    Generate a structured reflection with metacognition from a completed mission.
+
+    Always produces two sections:
+    1. **Reflection** — what happened, what worked, what didn't
+    2. **Metacognition** — analysis of the reasoning process itself
 
     Args:
         mission_data: Dict with run_id, task, status, output, state, iterations, plan.
         model: Model to use (defaults to flash model).
+        group_id: Group ID to retrieve any buffered reasoning traces.
 
     Returns:
-        Structured reflection text.
+        Structured reflection text with metacognition section.
     """
     model = model or get_flash_model()
 
@@ -84,9 +164,28 @@ Produce a concise reflection covering:
 """
 
     try:
-        reflection = await llm_call(prompt, model=model, temperature=0.3, max_tokens=4096)
-        logger.info(f"Generated reflection: {len(reflection)} chars")
-        return reflection
+        reflection = await llm_call(
+            prompt, model=model, temperature=0.3,
+            max_tokens=16000, reasoning_effort="high",
+            group_id=group_id, caller="generate_reflection",
+        )
+        logger.info("Generated reflection: %d chars", len(reflection))
     except Exception as e:
-        logger.error(f"Reflection generation failed: {e}")
+        logger.error("Reflection generation failed: %s", e)
         return f"Mission completed with status={status}. Reflection generation failed: {e}"
+
+    # ── Metacognition: always run, using reflection + any buffered traces ──
+    traces = get_reasoning_traces(group_id) if group_id else []
+    metacognition = await generate_metacognition(
+        task=task,
+        reflection=reflection,
+        reasoning_traces=traces or None,
+        model=model,
+    )
+
+    # ── Assemble final output ────────────────────────────────────────
+    sections = [reflection]
+    if metacognition:
+        sections.append(f"\n\n---\n\n## Metacognition\n\n{metacognition}")
+
+    return "".join(sections)

@@ -36,7 +36,7 @@ adapter = DirectJSONAdapter()
 def configure_dspy_lm(
     model: Optional[str] = None,
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int = 196000,
     api_key: Optional[str] = None,
 ) -> dspy.LM:
     """
@@ -49,15 +49,16 @@ def configure_dspy_lm(
     model = model or get_flash_model()
     base_url = get_llm_base_url()
 
-    # LiteLLM needs the openrouter/ prefix
-    if not model.startswith("openrouter/"):
-        litellm_model = f"openrouter/{model}"
+    # LiteLLM routing: openrouter needs openrouter/ prefix,
+    # other OpenAI-compatible APIs use openai/ prefix
+    if "openrouter" in (base_url or ""):
+        litellm_model = model if model.startswith("openrouter/") else f"openrouter/{model}"
     else:
-        litellm_model = model
+        litellm_model = model if "/" in model else f"openai/{model}"
 
     # Reasoning models require temperature=1.0 and higher max_tokens
     _REASONING_PREFIXES = ("openai/o1", "openai/o3", "openai/gpt-5")
-    base_model = model.removeprefix("openrouter/")
+    base_model = model.split("/", 1)[-1] if "/" in model else model
     if any(base_model.startswith(p) for p in _REASONING_PREFIXES):
         temperature = 1.0
         max_tokens = max(max_tokens, 16000)

@@ -18,22 +18,49 @@ _SOURCE_LABELS = {
     "hydrated_knowledge": "Knowledge",
     "ontology_node": "Entity Profile",
     "relevant_episode": "Related Memory",
+    "reflection": "Reflection",
+    "causal_claim": "Causal Belief",
+}
+
+# Default rank for source types without a 3D score.
+# Higher = shown first.  Entity profiles and knowledge are stable facts
+# so they get a baseline above zero; observations/episodes rely on their
+# computed rank from semantic + temporal + Hebbian scoring.
+_DEFAULT_RANK = {
+    "ontology_node": 0.85,
+    "hydrated_knowledge": 0.75,
+    "causal_claim": 0.80,
+    "reflection": 0.70,
+    "local": 0.50,
+    "hydrated": 0.0,        # should have a real rank from 3D scoring
+    "relevant_episode": 0.0,
 }
 
 
 def _format_entries(entries: Dict[str, Any]) -> str:
-    """Format session entries as numbered text for the LLM prompt."""
+    """Format session entries ranked by 3D score (semantic + temporal + Hebbian).
+
+    Each entry may carry a ``rank`` field set by the observe pipeline.
+    Entries without an explicit rank use a source-type default.
+    Output is ordered highest-rank first, grouped by source type within
+    equal-rank tiers.
+    """
     items = []
     for uuid, entry in entries.items():
+        source_type = entry.get("source_type", "local")
+        # rank = 3D composite score when available, else source-type default
+        rank = entry.get("rank", entry.get("score", _DEFAULT_RANK.get(source_type, 0.0)))
         items.append(
             {
                 "content": entry.get("content", ""),
-                "source_type": entry.get("source_type", "local"),
+                "source_type": source_type,
                 "created_at": entry.get("created_at", 0),
+                "rank": rank,
             }
         )
 
-    items.sort(key=lambda x: x["created_at"])
+    # Primary: rank descending. Secondary: created_at ascending (older first within same rank).
+    items.sort(key=lambda x: (-x["rank"], x["created_at"]))
 
     lines = []
     for i, item in enumerate(items, 1):
@@ -42,7 +69,8 @@ def _format_entries(entries: Dict[str, Any]) -> str:
         if item["created_at"] > 0:
             ts = datetime.fromtimestamp(item["created_at"]).strftime("%H:%M:%S")
             ts = f" [{ts}]"
-        lines.append(f"{i}. [{label}]{ts} {item['content']}")
+        rank_str = f" (rank:{item['rank']:.2f})" if item["rank"] > 0 else ""
+        lines.append(f"{i}. [{label}]{ts}{rank_str} {item['content']}")
 
     return "\n".join(lines)
 
@@ -72,7 +100,7 @@ async def summarize_context(
         lm = configure_dspy_lm(
             model=model,
             temperature=0.2,
-            max_tokens=20000,
+            max_tokens=196000,
         )
         predictor = dspy.Predict(ContextSummarizationSignature)
 
