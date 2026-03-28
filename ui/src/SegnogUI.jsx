@@ -544,6 +544,7 @@ const ReportingPage = () => {
         <StatCard label="Active Groups"     value={stats?.active_groups}                           sub="distinct group IDs"        color={p.accent} icon={icons.sessions} />
         <StatCard label="Episodes Stored"   value={stats ? stats.episodes.toLocaleString() : null} sub="in FalkorDB"               color={p.blue}   icon={icons.brain}   />
         <StatCard label="Knowledge Nodes"   value={stats?.knowledge_nodes}                         sub="facts, patterns, insights" color={p.warm}   icon={icons.zap}     />
+        <StatCard label="Causal Beliefs"    value={stats?.causal_claims}                           sub={`${stats?.causes_edges || 0} chains, ${stats?.supports_edges || 0} evidence`} color={p.coral}  icon={icons.graph}   />
         <StatCard label="Ontology Entities" value={stats?.ontology_entities}                       sub="Schema.org typed"          color={p.purple} icon={icons.graph}   />
       </div>
 
