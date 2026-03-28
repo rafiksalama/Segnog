@@ -36,6 +36,7 @@ async def observe(body: ObserveRequest, request: Request):
         episode_uuid=result["episode_uuid"],
         observation_type=result["observation_type"],
         context=result["context"],
+        context_sources=result.get("context_sources", {}),
         search_labels=result.get("search_labels", []),
         search_query=result.get("search_query", ""),
         session_id=result.get("session_id", body.session_id),

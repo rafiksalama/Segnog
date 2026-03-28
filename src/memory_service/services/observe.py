@@ -1174,10 +1174,17 @@ async def _observe_core_inner(
         f"cold={is_cold}, entries={len(entries)}"
     )
 
+    # Compute context source summary for the client
+    source_counts = {}
+    for e in entries.values():
+        st = e.get("source_type", "unknown")
+        source_counts[st] = source_counts.get(st, 0) + 1
+
     return {
         "episode_uuid": episode_uuid,
         "observation_type": "observe",
         "context": context,
+        "context_sources": source_counts,
         "is_cold": is_cold,
         "search_labels": search_labels,
         "search_query": search_query,

@@ -89,6 +89,7 @@ class ObserveResponse(BaseModel):
     episode_uuid: str = ""
     observation_type: str = "chat"
     context: str = ""  # LLM-generated context summary
+    context_sources: Dict[str, int] = {}  # count of entries by source_type
     search_labels: List[str] = []  # populated on cold start (reinterpreted)
     search_query: str = ""  # populated on cold start (optimized query)
     session_id: str = ""  # echoed back from request
