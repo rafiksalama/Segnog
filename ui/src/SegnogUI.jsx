@@ -1587,22 +1587,41 @@ const GraphPage = () => {
     const FRAMES = (nodeCountChanged || layoutChanged)
       ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 40 : 0)
       : 0;
-    // Hub-specific overlap resolution: push overlapping nodes apart gently
-    // without gravity (preserves cluster structure)
+    // Hub-specific overlap resolution: grid-accelerated push of overlapping nodes
+    // Only processes non-singleton visible nodes. O(n) average with spatial grid.
+    const HUB_CELL = 60;
     const stepHub = () => {
-      const PAD = 4;  // minimum gap between node edges
-      for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].fixed || nodes[i].isSingleton) continue;
-        for (let j = i + 1; j < nodes.length; j++) {
-          if (nodes[j].fixed || nodes[j].isSingleton) continue;
-          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const minDist = nodes[i].r + nodes[j].r + PAD;
-          if (dist < minDist) {
-            const push = (minDist - dist) * 0.3;
-            const ux = dx / dist, uy = dy / dist;
-            nodes[i].x += ux * push; nodes[i].y += uy * push;
-            nodes[j].x -= ux * push; nodes[j].y -= uy * push;
+      const PAD = 4;
+      const grid = {};
+      // Build spatial grid (only visible nodes)
+      nodes.forEach((n, i) => {
+        if (n.fixed || n.isSingleton) return;
+        const gc = Math.floor(n.x / HUB_CELL), gr = Math.floor(n.y / HUB_CELL);
+        const key = `${gc},${gr}`;
+        if (!grid[key]) grid[key] = [];
+        grid[key].push(i);
+      });
+      // Check only neighboring cells
+      for (const key in grid) {
+        const [gc, gr] = key.split(",").map(Number);
+        for (let dc = -1; dc <= 1; dc++) {
+          for (let dr = -1; dr <= 1; dr++) {
+            const nb = grid[`${gc + dc},${gr + dr}`];
+            if (!nb) continue;
+            for (const i of grid[key]) {
+              for (const j of nb) {
+                if (j <= i) continue;
+                const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const minDist = nodes[i].r + nodes[j].r + PAD;
+                if (dist < minDist) {
+                  const push = (minDist - dist) * 0.3;
+                  const ux = dx / dist, uy = dy / dist;
+                  nodes[i].x += ux * push; nodes[i].y += uy * push;
+                  nodes[j].x -= ux * push; nodes[j].y -= uy * push;
+                }
+              }
+            }
           }
         }
       }
