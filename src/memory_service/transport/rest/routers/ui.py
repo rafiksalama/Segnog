@@ -85,13 +85,30 @@ async def get_stats(request: Request, group_id: Optional[str] = None):
     except Exception:
         pass
 
+    causal_count = causes_edges = supports_edges = 0
+    try:
+        svc = get_service(request)
+        if svc._causal_store:
+            g = svc._causal_store._graph
+            r = await g.ro_query(f"MATCH (c:CausalClaim {gid_filter}) RETURN count(c) AS n")
+            causal_count = r.result_set[0][0] if r.result_set else 0
+            r = await g.ro_query("MATCH ()-[r:CAUSES]->() RETURN count(r) AS n")
+            causes_edges = r.result_set[0][0] if r.result_set else 0
+            r = await g.ro_query("MATCH ()-[r:SUPPORTS]->() RETURN count(r) AS n")
+            supports_edges = r.result_set[0][0] if r.result_set else 0
+    except Exception:
+        pass
+
     return {
         "episodes": ep_count,
         "knowledge_nodes": kn_count,
         "ontology_entities": onto_count,
+        "causal_claims": causal_count,
         "active_groups": grp_count,
         "pending_episodes": pending_count,
         "hebbian_edges": hebbian_count,
+        "causes_edges": causes_edges,
+        "supports_edges": supports_edges,
     }
 
 
