@@ -110,8 +110,14 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     const hubThreshold = degrees[Math.min(Math.floor(degrees.length * 0.03), 30)] || 3;
 
     // Enrich nodes
-    const graphNodes = activeNodes
-      .filter(n => (degree[n.name] || 0) > 0) // hide isolates
+    // Cap total nodes for performance (keep all connected + top isolated by source_count)
+    const connected = activeNodes.filter(n => (degree[n.name] || 0) > 0);
+    const isolated = activeNodes.filter(n => (degree[n.name] || 0) === 0)
+      .sort((a, b) => (b.source_count || 0) - (a.source_count || 0))
+      .slice(0, Math.max(0, 2000 - connected.length));
+    const visibleNodes = [...connected, ...isolated];
+
+    const graphNodes = visibleNodes
       .map(n => {
         const deg = degree[n.name] || 0;
         const isHub = deg >= hubThreshold;
@@ -124,8 +130,10 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
           color: typeColor(n.category || n.schema_type || "Thing"),
           deg,
           isHub,
-          // Size: log scale so high-degree nodes don't dominate
-          val: isHub ? 6 + Math.log2(1 + deg) * 4 : 2 + Math.log2(1 + deg) * 2,
+          // Size: hubs large, spokes medium, isolates tiny
+          val: isHub ? 6 + Math.log2(1 + deg) * 4
+             : deg > 0 ? 2 + Math.log2(1 + deg) * 2
+             : 0.5,  // isolated: tiny dot
           sourceCount: sc,
         };
       });

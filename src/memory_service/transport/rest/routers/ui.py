@@ -113,7 +113,7 @@ async def get_stats(request: Request, group_id: Optional[str] = None):
 
 
 @router.get("/ui/sessions")
-async def list_sessions(request: Request, limit: int = 200):
+async def list_sessions(request: Request, limit: int = 5000):
     """List group_ids with episode counts, latest timestamp, and parent_session_id."""
     ep_store = get_episode_store(request)
     try:
