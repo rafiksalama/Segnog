@@ -1020,9 +1020,9 @@ const GraphPage = () => {
         });
 
         // ── Position categories on ring ─────────────────────────────────
-        // Scale cluster radius with canvas size — larger for bigger displays
-        const maxCluster = Math.min(w, h) * 0.14;
-        const clusterR = ([, d]) => Math.min(maxCluster, 14 + Math.sqrt(d.nodes.length) * 7);
+        // Log-scaled cluster radius — prevents large categories from dominating
+        const maxCluster = Math.min(w, h) * 0.12;
+        const clusterR = ([, d]) => Math.min(maxCluster, 20 + Math.log2(1 + d.nodes.length) * 15);
         let maxPairSep = 0;
         if (nC >= 2) {
           const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
@@ -1030,20 +1030,43 @@ const GraphPage = () => {
             maxPairSep = Math.max(maxPairSep, clusterR(byCR[i]) + clusterR(byCR[(i + 1) % nC]) + 40);
         }
         const minRing = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
-        // Scale ring radius with category count: more categories → larger ring to avoid overlap
-        const ringScale = nC > 10 ? 0.42 : nC > 6 ? 0.38 : 0.34;
-        const catRing = nC <= 1 ? 0 : Math.max(minRing, Math.min(Math.min(w, h) * ringScale, Math.max(minRing, 50)));
+        // Scale ring radius — use most of the canvas
+        const ringScale = nC > 12 ? 0.44 : nC > 8 ? 0.40 : 0.36;
+        const catRing = nC <= 1 ? 0 : Math.max(minRing, Math.min(w, h) * ringScale);
 
-        // Category center positions
+        // Category center positions — packed layout (largest central, spiral out)
+        // Sort by node count descending so biggest categories get best positions
+        const sortedCats = [...realCats].sort((a, b) => b[1].nodes.length - a[1].nodes.length);
         const catCenters = [];
-        realCats.forEach(([cat, catData], ci) => {
+        const placed = []; // {cx, cy, r} for collision avoidance
+
+        sortedCats.forEach(([cat, catData], ci) => {
+          const r = clusterR([cat, catData]);
           let cx, cy;
-          if (nC === 1) { cx = w / 2; cy = h / 2; }
-          else {
-            const a = (ci / nC) * Math.PI * 2 - Math.PI / 2;
-            cx = w / 2 + catRing * Math.cos(a);
-            cy = h / 2 + catRing * Math.sin(a);
+          if (ci === 0) {
+            // Largest category at center
+            cx = w / 2; cy = h / 2;
+          } else {
+            // Spiral placement: try angles at increasing distance until no overlap
+            let bestX = w / 2, bestY = h / 2, found = false;
+            for (let dist = r + 20; dist < Math.min(w, h) * 0.48 && !found; dist += 12) {
+              for (let a = 0; a < Math.PI * 2; a += 0.3) {
+                const tx = w / 2 + dist * Math.cos(a + ci * 0.7);
+                const ty = h / 2 + dist * Math.sin(a + ci * 0.7);
+                // Check overlap with already-placed categories
+                let overlap = false;
+                for (const p of placed) {
+                  if (Math.hypot(tx - p.cx, ty - p.cy) < r + p.r + 15) { overlap = true; break; }
+                }
+                // Check bounds
+                if (!overlap && tx > r + 10 && tx < w - r - 10 && ty > r + 10 && ty < h - r - 10) {
+                  bestX = tx; bestY = ty; found = true; break;
+                }
+              }
+            }
+            cx = bestX; cy = bestY;
           }
+          placed.push({ cx, cy, r });
           catCenters.push({ cat, cx, cy, data: catData });
         });
 
@@ -1255,7 +1278,10 @@ const GraphPage = () => {
             const d = Math.hypot(n.x - cx, n.y - cy);
             maxDist = Math.max(maxDist, d + n.r);
           });
-          const bgR = maxDist + 20;
+          // Log-scaled visual radius for cloud view — prevents huge categories from dominating
+          // Actual node extent used for detail view boundaries
+          const cloudR = 30 + Math.log2(1 + visNodes.length) * 22;
+          const bgR = zLvl < 1.6 ? cloudR : maxDist + 20;
           const col = typeColor(cat);
 
           // Gather sub-type clusters with center + radius
