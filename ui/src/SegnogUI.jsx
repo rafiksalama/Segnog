@@ -846,6 +846,20 @@ const GraphPage = () => {
   const [singletonCount, setSingletonCount] = useState(0);
   const [selectedNode, setSelectedNode] = useState(null);
   const [popupPos, setPopupPos]         = useState({ x: 0, y: 0 });
+  // Fetch summary on demand when a node is selected
+  useEffect(() => {
+    if (!selectedNode || selectedNode.summary) return;
+    const uuid = selectedNode.uuid;
+    if (!uuid) return;
+    fetch(`${API}/ui/ontology/${uuid}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.summary) {
+          setSelectedNode(prev => prev && prev.uuid === uuid ? { ...prev, summary: data.summary } : prev);
+        }
+      })
+      .catch(() => {});
+  }, [selectedNode?.uuid]);
   const [showLabels, setShowLabels]     = useState(true);
   const [sidebarOpen, setSidebarOpen]   = useState(true);
   const [legendOpen, setLegendOpen]     = useState(false);
