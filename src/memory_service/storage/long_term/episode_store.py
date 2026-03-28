@@ -213,7 +213,7 @@ class EpisodeStore(BaseStore):
 
         consolidation_status = (
             "consolidated"
-            if episode_type in ("reflection", "compressed", "narrative")
+            if episode_type in ("reflection", "metacognition", "causal_reflection", "compressed", "narrative")
             else "pending"
         )
 
