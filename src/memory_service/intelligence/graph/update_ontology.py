@@ -9,12 +9,22 @@ existing facts. Called once per entity per REM cycle.
 import logging
 from typing import Optional
 
-import dspy
-
-from ..llm.dspy_adapter import configure_dspy_lm, adapter
-from ..signatures.ontology_update_signature import OntologyNodeUpdateSignature
+from ..llm.client import llm_call
 
 logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = """You are a knowledge integration specialist. Maintain a living prose summary of a single entity by integrating new information.
+
+RULES:
+1. PRESERVE every fact in the existing summary — never remove or contradict them
+2. ADD facts from the episode text that mention this entity
+3. NEVER invent facts not present in the inputs
+4. Write in neutral, factual third-person style (present tense for states, past tense for events)
+5. Be SPECIFIC: full names, dates, titles, locations
+6. If existing summary is empty, create a fresh summary from episode text
+7. If entity is NOT mentioned in episode text, return existing summary unchanged
+8. Output ONLY the updated summary — no headers, bullets, or explanations
+9. 2-8 sentences."""
 
 
 async def update_ontology_summary(
@@ -27,15 +37,7 @@ async def update_ontology_summary(
     """
     Update an OntologyNode's prose summary by integrating new episode information.
 
-    Args:
-        entity_name:       Display name of the entity (e.g., 'Caroline').
-        schema_type:       Schema.org class name (e.g., 'Person').
-        existing_summary:  Current prose summary. Empty string if first update.
-        new_episode_text:  New episode content to integrate.
-        model:             Flash model identifier.
-
-    Returns:
-        Updated prose summary string. Falls back to existing_summary on error.
+    Returns updated prose summary string. Falls back to existing_summary on error.
     """
     if not new_episode_text or len(new_episode_text.strip()) < 5:
         return existing_summary
@@ -44,20 +46,25 @@ async def update_ontology_summary(
     if len(new_episode_text) > MAX_INPUT:
         new_episode_text = new_episode_text[:MAX_INPUT]
 
+    prompt = f"""Entity: {entity_name} (type: {schema_type})
+
+Existing summary:
+{existing_summary or "(no existing summary)"}
+
+New episode text:
+{new_episode_text}
+
+Write the updated prose summary for {entity_name}:"""
+
     try:
-        lm = configure_dspy_lm(model=model, temperature=0.2)
-        predictor = dspy.Predict(OntologyNodeUpdateSignature)
-
-        with dspy.context(lm=lm, adapter=adapter):
-            result = await predictor.acall(
-                entity_name=entity_name,
-                schema_type=schema_type,
-                existing_summary=existing_summary or "",
-                new_episode_text=new_episode_text,
-            )
-
-        raw = result.result.updated_summary
-        updated = str(raw).strip() if raw else ""
+        updated = await llm_call(
+            prompt,
+            model=model,
+            temperature=0.2,
+            max_tokens=2000,
+            system_prompt=_SYSTEM_PROMPT,
+        )
+        updated = updated.strip()
         if not updated or len(updated) < 10:
             return existing_summary
 
