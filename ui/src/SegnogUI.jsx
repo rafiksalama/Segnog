@@ -996,10 +996,29 @@ const GraphPage = () => {
       });
       setSingletonCount(singletonNodes.length);
 
-      // Filter to non-singleton categories for layout
-      const realCats = categories.filter(([, d]) =>
+      // Filter to non-singleton categories, merge tiny categories into "Other"
+      const MIN_CAT_SIZE = 10;
+      let rawCats = categories.filter(([, d]) =>
         d.nodes.some(n => !n.isSingleton)
       ).map(([cat, d]) => [cat, { ...d, nodes: d.nodes.filter(n => !n.isSingleton) }]);
+      // Merge small categories
+      const otherNodes = [];
+      const otherSubTypes = {};
+      const realCats = [];
+      rawCats.forEach(([cat, d]) => {
+        if (d.nodes.length < MIN_CAT_SIZE || cat === "Thing") {
+          otherNodes.push(...d.nodes);
+          Object.entries(d.subTypes).forEach(([st, ns]) => {
+            if (!otherSubTypes[st]) otherSubTypes[st] = [];
+            otherSubTypes[st].push(...ns);
+          });
+        } else {
+          realCats.push([cat, d]);
+        }
+      });
+      if (otherNodes.length > 0) {
+        realCats.push(["Other", { nodes: otherNodes, subTypes: otherSubTypes }]);
+      }
 
       const nC = realCats.length;
       if (nC === 0) {
@@ -1022,7 +1041,7 @@ const GraphPage = () => {
         // ── Position categories on ring ─────────────────────────────────
         // Log-scaled cluster radius — prevents large categories from dominating
         const maxCluster = Math.min(w, h) * 0.12;
-        const clusterR = ([, d]) => Math.min(maxCluster, 20 + Math.log2(1 + d.nodes.length) * 15);
+        const clusterR = ([, d]) => Math.min(maxCluster, 25 + Math.log2(1 + d.nodes.length) * 16);
         let maxPairSep = 0;
         if (nC >= 2) {
           const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
@@ -1035,31 +1054,42 @@ const GraphPage = () => {
         const catRing = nC <= 1 ? 0 : Math.max(minRing, Math.min(w, h) * ringScale);
 
         // Category center positions — packed layout (largest central, spiral out)
-        // Sort by node count descending so biggest categories get best positions
-        const sortedCats = [...realCats].sort((a, b) => b[1].nodes.length - a[1].nodes.length);
+        // Merge "Thing" into its largest sibling category (it's the root, not useful as a group)
+        const thingCat = realCats.find(([c]) => c === "Thing");
+        const nonThingCats = realCats.filter(([c]) => c !== "Thing");
+        if (thingCat && nonThingCats.length > 0) {
+          // Redistribute Thing nodes to their schema_type's nearest category
+          thingCat[1].nodes.forEach(n => {
+            n.isSingleton = true;  // hide Thing nodes in cloud view
+          });
+        }
+        const sortedCats = (nonThingCats.length > 0 ? nonThingCats : realCats)
+          .sort((a, b) => b[1].nodes.length - a[1].nodes.length);
+
         const catCenters = [];
         const placed = []; // {cx, cy, r} for collision avoidance
+        const GAP = 25; // minimum gap between bubble edges
 
         sortedCats.forEach(([cat, catData], ci) => {
           const r = clusterR([cat, catData]);
           let cx, cy;
           if (ci === 0) {
-            // Largest category at center
             cx = w / 2; cy = h / 2;
           } else {
-            // Spiral placement: try angles at increasing distance until no overlap
+            // Spiral placement with collision avoidance
             let bestX = w / 2, bestY = h / 2, found = false;
-            for (let dist = r + 20; dist < Math.min(w, h) * 0.48 && !found; dist += 12) {
-              for (let a = 0; a < Math.PI * 2; a += 0.3) {
-                const tx = w / 2 + dist * Math.cos(a + ci * 0.7);
-                const ty = h / 2 + dist * Math.sin(a + ci * 0.7);
-                // Check overlap with already-placed categories
+            for (let dist = r + GAP; dist < Math.max(w, h) * 0.45 && !found; dist += 10) {
+              // Golden angle spiral for even distribution
+              const goldenAngle = ci * 2.399963;
+              for (let da = 0; da < Math.PI * 2; da += 0.25) {
+                const a = goldenAngle + da;
+                const tx = w / 2 + dist * Math.cos(a);
+                const ty = h / 2 + dist * Math.sin(a);
                 let overlap = false;
                 for (const p of placed) {
-                  if (Math.hypot(tx - p.cx, ty - p.cy) < r + p.r + 15) { overlap = true; break; }
+                  if (Math.hypot(tx - p.cx, ty - p.cy) < r + p.r + GAP) { overlap = true; break; }
                 }
-                // Check bounds
-                if (!overlap && tx > r + 10 && tx < w - r - 10 && ty > r + 10 && ty < h - r - 10) {
+                if (!overlap && tx > r + 5 && tx < w - r - 5 && ty > r + 5 && ty < h - r - 5) {
                   bestX = tx; bestY = ty; found = true; break;
                 }
               }
@@ -1280,7 +1310,7 @@ const GraphPage = () => {
           });
           // Log-scaled visual radius for cloud view — prevents huge categories from dominating
           // Actual node extent used for detail view boundaries
-          const cloudR = 30 + Math.log2(1 + visNodes.length) * 22;
+          const cloudR = 25 + Math.log2(1 + visNodes.length) * 16;
           const bgR = zLvl < 1.6 ? cloudR : maxDist + 20;
           const col = typeColor(cat);
 
@@ -1298,14 +1328,15 @@ const GraphPage = () => {
 
           if (zLvl < 1.6) {
             // ── Level 1: Cloud — category blobs ──
+            // Solid fill with moderate opacity + stronger border
             ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
-            ctx.fillStyle = col + "25"; ctx.fill();
-            ctx.strokeStyle = col + "50"; ctx.lineWidth = 1.5; ctx.stroke();
-            const fontSize = Math.max(10, Math.min(18, bgR * 0.35));
+            ctx.fillStyle = col + "35"; ctx.fill();
+            ctx.strokeStyle = col + "80"; ctx.lineWidth = 2; ctx.stroke();
+            const fontSize = Math.max(11, Math.min(16, bgR * 0.30));
             ctx.fillStyle = col; ctx.font = `700 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
-            ctx.fillText(cat, cx, cy - 4);
-            ctx.fillStyle = col + "99"; ctx.font = `600 ${Math.max(8, fontSize * 0.6)}px ${MONO}`;
-            ctx.fillText(`${visNodes.length}`, cx, cy + fontSize * 0.7);
+            ctx.fillText(cat, cx, cy - 2);
+            ctx.fillStyle = col + "bb"; ctx.font = `600 ${Math.max(9, fontSize * 0.65)}px ${MONO}`;
+            ctx.fillText(`${visNodes.length}`, cx, cy + fontSize * 0.65);
 
           } else if (zLvl < 3) {
             // ── Level 2: Sub-type circles inside category boundary ──
