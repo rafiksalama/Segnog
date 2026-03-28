@@ -101,12 +101,13 @@ class OntologyStore(BaseStore):
         now = time.time()
         new_uuid = str(uuid4())
 
-        # MERGE: match on (name, group_id), set all mutable fields
+        # MERGE: match on (name) only — global KG across all sessions
         result = await self._graph.query(
             """
-            MERGE (n:OntologyNode {name: $name, group_id: $group_id})
+            MERGE (n:OntologyNode {name: $name})
             ON CREATE SET
                 n.uuid         = $uuid,
+                n.group_id     = $group_id,
                 n.schema_type  = $schema_type,
                 n.display_name = $display_name,
                 n.summary      = $summary,
@@ -148,7 +149,7 @@ class OntologyStore(BaseStore):
         group_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Fetch an OntologyNode by normalized name and group_id.
+        Fetch an OntologyNode by normalized name (global KG).
         Returns dict with all properties, or None if not found.
         """
         gid = group_id or self._group_id
@@ -156,7 +157,7 @@ class OntologyStore(BaseStore):
 
         result = await self._graph.ro_query(
             """
-            MATCH (n:OntologyNode {name: $name, group_id: $group_id})
+            MATCH (n:OntologyNode {name: $name})
             RETURN
                 n.uuid         AS uuid,
                 n.schema_type  AS schema_type,
@@ -202,7 +203,6 @@ class OntologyStore(BaseStore):
         result = await self._graph.ro_query(
             f"""
             MATCH (n:OntologyNode)
-            WHERE n.group_id = $group_id
             WITH n,
                  (2 - vec.cosineDistance(n.embedding, vecf32($query_vec))) / 2 AS score
             WHERE score >= $min_score
@@ -292,9 +292,9 @@ class OntologyStore(BaseStore):
         try:
             result = await self._graph.query(
                 """
-                MATCH (a:OntologyNode {name: $subject, group_id: $group_id})
-                MATCH (b:OntologyNode {name: $object, group_id: $group_id})
-                MERGE (a)-[r:RELATES {predicate: $predicate, group_id: $group_id}]->(b)
+                MATCH (a:OntologyNode {name: $subject})
+                MATCH (b:OntologyNode {name: $object})
+                MERGE (a)-[r:RELATES {predicate: $predicate}]->(b)
                 ON CREATE SET r.confidence = $confidence, r.created_at = $now
                 ON MATCH SET  r.confidence = CASE
                     WHEN r.confidence < $confidence THEN $confidence
@@ -355,7 +355,7 @@ class OntologyStore(BaseStore):
             await self._graph.query(
                 """
                 MATCH (e:Episode {uuid: $ep_uuid})
-                MATCH (n:OntologyNode {name: $entity_name, group_id: $group_id})
+                MATCH (n:OntologyNode {name: $entity_name})
                 MERGE (e)-[:ABOUT]->(n)
                 """,
                 params={
@@ -377,25 +377,24 @@ class OntologyStore(BaseStore):
         schema_type: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """List OntologyNodes for a group, optionally filtered by schema_type."""
-        gid = group_id or self._group_id
+        """List OntologyNodes (global KG), optionally filtered by schema_type."""
 
         if schema_type:
             result = await self._graph.ro_query(
                 """
-                MATCH (n:OntologyNode {group_id: $group_id, schema_type: $schema_type})
+                MATCH (n:OntologyNode {schema_type: $schema_type})
                 RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
                        n.display_name AS display_name, n.source_count AS source_count,
                        n.updated_at AS updated_at
                 ORDER BY n.updated_at DESC
                 LIMIT $limit
                 """,
-                params={"group_id": gid, "schema_type": schema_type, "limit": limit},
+                params={"schema_type": schema_type, "limit": limit},
             )
         else:
             result = await self._graph.ro_query(
                 """
-                MATCH (n:OntologyNode {group_id: $group_id})
+                MATCH (n:OntologyNode)
                 RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
                        n.display_name AS display_name, n.source_count AS source_count,
                        n.updated_at AS updated_at
