@@ -24,14 +24,38 @@ function typeColor(t) {
   return TYPE_PALETTE[h % TYPE_PALETTE.length];
 }
 
-export default function ForceGraphView({ nodes, edges, cooccur, width, height, theme }) {
+const API = "/api/v1/memory";
+
+// Simple fetch hook
+function useJsonFetch(url) {
+  const [data, setData] = useState(null);
+  const urlRef = useRef("");
+  useEffect(() => {
+    if (url === urlRef.current) return;
+    urlRef.current = url;
+    fetch(url).then(r => r.json()).then(setData).catch(() => {});
+  }, [url]);
+  return data;
+}
+
+export default function ForceGraphView({ nodes, edges, cooccur, width, height, theme, sessions }) {
   const fgRef = useRef();
   const isDark = theme === "dark";
   const [search, setSearch] = useState("");
   const [highlightNode, setHighlightNode] = useState(null);
+  const [selectedSession, setSelectedSession] = useState("__all__");
+
+  // When a session is selected, fetch session-specific data
+  const sessionParam = selectedSession === "__all__" ? "" : `?group_id=${selectedSession}`;
+  const sessionNodes = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology${sessionParam}` : null);
+  const sessionEdges = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology/edges${sessionParam ? sessionParam + "&" : "?"}limit=2000` : null);
+
+  // Use session-specific data if a session is selected, otherwise use global data
+  const activeNodes = selectedSession === "__all__" ? nodes : (sessionNodes?.nodes || []);
+  const activeEdges = selectedSession === "__all__" ? edges : (sessionEdges?.edges || []);
 
   // Stabilize inputs: only recompute when counts actually change
-  const stableKey = `${nodes?.length || 0}-${edges?.length || 0}-${cooccur?.length || 0}`;
+  const stableKey = `${selectedSession}-${activeNodes?.length || 0}-${activeEdges?.length || 0}-${cooccur?.length || 0}`;
   const prevKeyRef = useRef("");
   const prevDataRef = useRef({ nodes: [], links: [] });
 
@@ -42,19 +66,17 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       return prevDataRef.current;
     }
     prevKeyRef.current = stableKey;
-    if (!nodes || nodes.length === 0) return { nodes: [], links: [] };
+    if (!activeNodes || activeNodes.length === 0) return { nodes: [], links: [] };
 
-    // Build index and degree
-    // Use name as node ID (deduped across groups by backend)
     const idxMap = {};
     const degree = {};
-    nodes.forEach((n, i) => { idxMap[n.name] = i; degree[n.name] = 0; });
+    activeNodes.forEach((n, i) => { idxMap[n.name] = i; degree[n.name] = 0; });
 
     const links = [];
     const seen = new Set();
 
     // Semantic RELATES edges
-    (edges || []).forEach(e => {
+    (activeEdges || []).forEach(e => {
       if (!e.source || !e.target) return;
       if (!(e.source in idxMap) || !(e.target in idxMap)) return;
       const key = [e.source, e.target].sort().join("-");
@@ -88,7 +110,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     const hubThreshold = degrees[Math.min(Math.floor(degrees.length * 0.03), 30)] || 3;
 
     // Enrich nodes
-    const graphNodes = nodes
+    const graphNodes = activeNodes
       .filter(n => (degree[n.name] || 0) > 0) // hide isolates
       .map(n => {
         const deg = degree[n.name] || 0;
@@ -133,8 +155,13 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     }
   }, [graphData]);
 
-  // Configure forces and fit — only once when data first loads
+  // Configure forces and fit — once per session change
   const didFit = useRef(false);
+  const prevSession = useRef(selectedSession);
+  if (prevSession.current !== selectedSession) {
+    didFit.current = false;
+    prevSession.current = selectedSession;
+  }
   useEffect(() => {
     if (fgRef.current && graphData.nodes.length > 0 && !didFit.current) {
       didFit.current = true;
@@ -230,18 +257,36 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
 
   return (
     <div style={{ position: "relative", width, height }}>
-      {/* Search box */}
+      {/* Controls: session dropdown + search */}
       <div style={{
         position: "absolute", top: 14, left: 14, zIndex: 20,
-        display: "flex", gap: 6, alignItems: "center",
+        display: "flex", gap: 8, alignItems: "center",
       }}>
+        <select
+          value={selectedSession}
+          onChange={e => { setSelectedSession(e.target.value); didFit.current = false; }}
+          style={{
+            padding: "8px 10px", fontSize: 12, borderRadius: 8,
+            background: isDark ? "#181b24" : "#ffffff",
+            color: isDark ? "#e2e4ea" : "#1c1c1a",
+            border: `1px solid ${isDark ? "#282d3e" : "#dddbd5"}`,
+            fontFamily: "Inter, sans-serif", maxWidth: 200,
+          }}
+        >
+          <option value="__all__">All sessions</option>
+          {(sessions || []).map(s => (
+            <option key={s.group_id} value={s.group_id}>
+              {s.group_id.slice(0, 8)}… ({s.episode_count} eps)
+            </option>
+          ))}
+        </select>
         <input
           type="text"
           value={search}
           onChange={e => handleSearch(e.target.value)}
           placeholder="Search entity..."
           style={{
-            width: 220, padding: "8px 12px", fontSize: 13,
+            width: 180, padding: "8px 12px", fontSize: 13,
             background: isDark ? "#181b24" : "#ffffff",
             color: isDark ? "#e2e4ea" : "#1c1c1a",
             border: `1px solid ${isDark ? "#282d3e" : "#dddbd5"}`,

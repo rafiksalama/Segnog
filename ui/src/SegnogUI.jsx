@@ -830,6 +830,7 @@ const GraphPage = () => {
   const { data: causalData }   = useFetch(`${API}/ui/causal`,                          [], 20000);
   const { data: reflectData }  = useFetch(`${API}/ui/reflections?limit=20`,            [], 20000);
   const { data: ontoEdgeData }    = useFetch(`${API}/ui/ontology/edges?limit=2000`,        [], 20000);
+  const { data: sessionsData }   = useFetch(`${API}/ui/sessions`,                        [], 30000);
   const { data: ontoCooccurData } = useFetch(`${API}/ui/ontology/cooccurrence?limit=2000`, [], 20000);
   const canvasRef        = useRef(null);
   const nodesRef         = useRef([]);
@@ -1782,6 +1783,7 @@ const GraphPage = () => {
               nodes={ontology}
               edges={(ontoEdgeData && ontoEdgeData.edges) || []}
               cooccur={(ontoCooccurData && ontoCooccurData.pairs) || []}
+              sessions={(sessionsData && sessionsData.sessions) || []}
               width={typeof window !== "undefined" ? window.innerWidth - 220 : 1200}
               height={typeof window !== "undefined" ? window.innerHeight : 800}
               theme={p === DARK ? "dark" : "light"}

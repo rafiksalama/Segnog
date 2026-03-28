@@ -280,14 +280,43 @@ async def list_ontology(
     group_id: Optional[str] = None,
     schema_type: Optional[str] = None,
 ):
-    """List ontology nodes — direct Cypher so group_id filter is optional."""
+    """List ontology nodes. If group_id given, show entities mentioned in that session."""
     onto_store = get_ontology_store(request)
     try:
-        conditions = []
         params: dict = {}
+
+        # Session-scoped: find entities via ABOUT edges from session episodes
         if group_id:
-            conditions.append("n.group_id = $group_id")
-            params["group_id"] = group_id
+            result = await onto_store._graph.ro_query(
+                """
+                MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(n:OntologyNode)
+                RETURN DISTINCT n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
+                       n.display_name AS display_name, n.source_count AS source_count,
+                       n.updated_at AS updated_at
+                ORDER BY n.source_count DESC
+                """,
+                params={"group_id": group_id},
+            )
+            onto = onto_store._ontology
+            _cat_cache = {}
+            def _category(st):
+                if st in _cat_cache: return _cat_cache[st]
+                chain = onto.ancestors(st) if onto else [st]
+                cat = st
+                for i, a in enumerate(chain):
+                    if a == "Thing" and i > 0: cat = chain[i-1]; break
+                _cat_cache[st] = cat
+                return cat
+            nodes = [
+                {"uuid": r[0], "name": r[1], "schema_type": r[2],
+                 "category": _category(r[2] or "Thing"),
+                 "display_name": r[3] or r[1], "source_count": r[4] or 0,
+                 "updated_at": r[5]}
+                for r in result.result_set
+            ]
+            return {"nodes": nodes}
+
+        conditions = []
         if schema_type:
             conditions.append("n.schema_type = $schema_type")
             params["schema_type"] = schema_type
