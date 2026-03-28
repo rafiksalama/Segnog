@@ -61,10 +61,15 @@ async def extract_causal_claims(
             system_prompt=_SYSTEM_PROMPT,
         )
 
-        # Parse JSON from response (handle markdown code blocks)
+        # Parse JSON from response (handle markdown code blocks, empty responses)
         raw = raw.strip()
+        if not raw:
+            return []
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        if not raw or raw[0] not in "[{":
+            # Not JSON — LLM returned plain text or empty
+            return []
 
         parsed = json.loads(raw)
         if not isinstance(parsed, list):
