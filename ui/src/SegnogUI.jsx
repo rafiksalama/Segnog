@@ -1056,8 +1056,8 @@ const GraphPage = () => {
         // ── Position categories on ring ─────────────────────────────────
         // Log-scaled cluster radius — prevents large categories from dominating
         const maxCluster = Math.min(w, h) * 0.12;
-        // Sqrt scale — bigger range than log, shows size differences clearly
-        const clusterR = ([, d]) => Math.min(maxCluster, 20 + Math.sqrt(d.nodes.length) * 1.2);
+        // Capped sqrt scale — shows size differences without dominating the view
+        const clusterR = ([, d]) => Math.min(maxCluster, Math.min(90, 18 + Math.sqrt(d.nodes.length) * 0.9));
         let maxPairSep = 0;
         if (nC >= 2) {
           const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
@@ -1288,7 +1288,9 @@ const GraphPage = () => {
       const xs = ref.map(n => n.x), ys = ref.map(n => n.y);
       const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
       const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
-      const fz = Math.min(w / (maxX - minX), h / (maxY - minY), 3.5);
+      // Hub: cap to cloud zoom so initial view shows category bubbles (not sub-types)
+      const maxFitZ = layout === "hub" ? 1.4 : 3.5;
+      const fz = Math.min(w / (maxX - minX), h / (maxY - minY), maxFitZ);
       zoom.z = fz;
       pan.x  = w / 2 - ((minX + maxX) / 2) * fz;
       pan.y  = h / 2 - ((minY + maxY) / 2) * fz;
@@ -1327,7 +1329,8 @@ const GraphPage = () => {
           // Log-scaled visual radius for cloud view — prevents huge categories from dominating
           // Actual node extent used for detail view boundaries
           // Cloud radius: sqrt for wider range (log was too flat for 100-6000 range)
-          const cloudR = 20 + Math.sqrt(visNodes.length) * 1.2;
+          // Cap cloud radius so even 6000-node categories stay manageable
+          const cloudR = Math.min(90, 18 + Math.sqrt(visNodes.length) * 0.9);
           const bgR = zLvl < 1.6 ? cloudR : maxDist + 20;
           const col = typeColor(cat);
 
@@ -1345,10 +1348,9 @@ const GraphPage = () => {
 
           if (zLvl < 1.6) {
             // ── Level 1: Cloud — category blobs ──
-            // Solid fill with moderate opacity + stronger border
             ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
-            ctx.fillStyle = col + "35"; ctx.fill();
-            ctx.strokeStyle = col + "80"; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = col + "45"; ctx.fill();
+            ctx.strokeStyle = col + "aa"; ctx.lineWidth = 2.5; ctx.stroke();
             const fontSize = Math.max(11, Math.min(16, bgR * 0.30));
             ctx.fillStyle = col; ctx.font = `700 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
             ctx.fillText(cat, cx, cy - 2);
