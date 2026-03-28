@@ -509,10 +509,11 @@ const DashboardPage = () => {
             {[
               { label: "Find Groups",       active: true  },
               { label: "Dedup",             active: true  },
-              { label: "Knowledge Extract", active: true  },
-              { label: "Ontology Update",   active: false },
+              { label: "Reflect",           active: true  },
+              { label: "Knowledge",         active: true  },
+              { label: "Causal",            active: true  },
+              { label: "Ontology",          active: true  },
               { label: "Compress",          active: false },
-              { label: "Hebbian Decay",     active: false },
             ].map((step, i, arr) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 3 }}>
                 <div style={{ width: 20, height: 20, borderRadius: "50%", border: `1.5px solid ${step.active ? p.accent : p.border}`, background: step.active ? p.accent + "20" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: step.active ? p.accent : p.textDim, fontFamily: MONO }}>{i + 1}</div>
@@ -2320,11 +2321,11 @@ const REMPage = () => {
         <div style={{ display: "flex", alignItems: "center" }}>
           {[
             { label: "Find Groups",        detail: "≥3 pending episodes",  color: p.textMuted, active: true  },
-            { label: "Dedup Check",        detail: "cosine ≥ 0.90",        color: p.warm,      active: true  },
-            { label: "Knowledge Extract",  detail: "DSPy pipeline",        color: p.accent,    active: true  },
-            { label: "Ontology Update",    detail: "Schema.org entities",  color: p.purple,    active: false },
-            { label: "Temporal Compress",  detail: "≥2 unique → summary",  color: p.blue,      active: false },
-            { label: "Hebbian Decay",      detail: "×(1−0.01) per cycle",  color: p.coral,     active: false },
+            { label: "Reflect",            detail: "reflection + metacog", color: p.warm,      active: true  },
+            { label: "Knowledge",          detail: "DSPy extraction",      color: p.accent,    active: true  },
+            { label: "Causal",             detail: "belief network",       color: p.coral,     active: true  },
+            { label: "Ontology",           detail: "Schema.org entities",  color: p.purple,    active: true  },
+            { label: "Compress",           detail: "≥2 unique → summary",  color: p.blue,      active: false },
           ].map((step, i, arr) => (
             <div key={i} style={{ display: "flex", alignItems: "center", flex: 1 }}>
               <div style={{ textAlign: "center", flex: 1 }}>
@@ -2358,9 +2359,12 @@ const REMPage = () => {
             {[
               { label: "Episodes",               value: stats?.episodes,         color: p.blue   },
               { label: "Knowledge nodes",        value: stats?.knowledge_nodes,  color: p.warm   },
+              { label: "Causal beliefs",         value: stats?.causal_claims,    color: p.coral  },
               { label: "Ontology entities",      value: stats?.ontology_entities, color: p.purple },
-              { label: "Pending consolidation",  value: stats?.pending_episodes, color: p.coral  },
-              { label: "CO_ACTIVATED edges",     value: stats?.hebbian_edges,    color: p.accent },
+              { label: "Pending consolidation",  value: stats?.pending_episodes, color: p.warm   },
+              { label: "CAUSES chains",          value: stats?.causes_edges,     color: p.coral  },
+              { label: "SUPPORTS evidence",      value: stats?.supports_edges,   color: p.accent },
+              { label: "CO_ACTIVATED edges",     value: stats?.hebbian_edges,    color: p.blue   },
             ].map((row, i, arr) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: i < arr.length - 1 ? `1px solid ${p.border}` : "none" }}>
                 <span style={{ fontSize: 13, color: p.textMuted }}>{row.label}</span>
