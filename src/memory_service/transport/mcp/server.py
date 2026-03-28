@@ -282,6 +282,31 @@ async def memory_run_curation(
     return json.dumps(result, indent=2, default=str)
 
 
+@mcp.tool()
+async def memory_search_causal(
+    session_id: str,
+    query: str,
+    top_k: int = 5,
+) -> str:
+    """
+    Search the causal belief network for cause → effect relationships.
+
+    Returns causal claims matching the query, ranked by semantic similarity.
+    Each claim has: cause, effect, mechanism, confidence (0-1), evidence counts.
+
+    Use this when the user asks "why did X happen?", "what caused X?",
+    or "what are the consequences of X?".
+    """
+    svc = await _get_service()
+    if not svc._causal_store:
+        return json.dumps({"claims": [], "note": "Causal store not available"})
+    embedding = await svc._causal_store._embed(query)
+    claims = await svc._causal_store.search_claims(
+        embedding=embedding, top_k=top_k, group_id=session_id, min_score=0.3,
+    )
+    return json.dumps({"claims": claims}, indent=2, default=str)
+
+
 # ── Entrypoints ───────────────────────────────────────────────────────────────
 
 

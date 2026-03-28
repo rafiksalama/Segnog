@@ -1028,7 +1028,9 @@ const GraphPage = () => {
             maxPairSep = Math.max(maxPairSep, clusterR(byCR[i]) + clusterR(byCR[(i + 1) % nC]) + 40);
         }
         const minRing = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
-        const catRing = nC <= 1 ? 0 : Math.min(Math.min(w, h) * 0.34, Math.max(minRing, 50));
+        // Scale ring radius with category count: more categories → larger ring to avoid overlap
+        const ringScale = nC > 10 ? 0.42 : nC > 6 ? 0.38 : 0.34;
+        const catRing = nC <= 1 ? 0 : Math.max(minRing, Math.min(Math.min(w, h) * ringScale, Math.max(minRing, 50)));
 
         // Category center positions
         const catCenters = [];
@@ -1840,7 +1842,7 @@ const GraphPage = () => {
 
       {/* Right panel — floating overlay, collapsible */}
       <div style={{
-        position: "absolute", top: 0, right: 0, bottom: 0, width: 340, zIndex: 10,
+        position: "absolute", top: 0, right: 0, bottom: 0, width: 380, zIndex: 10,
         background: p.surface + "f0", backdropFilter: "blur(12px)",
         borderLeft: `1px solid ${p.border}`, display: "flex", flexDirection: "column",
         transform: sidebarOpen ? "translateX(0)" : "translateX(100%)",
