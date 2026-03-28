@@ -323,6 +323,56 @@ async def list_ontology(
         return {"nodes": []}
 
 
+@router.get("/ui/reflections")
+async def list_ui_reflections(
+    request: Request,
+    group_id: Optional[str] = None,
+    reflection_type: Optional[str] = None,
+    limit: int = 20,
+):
+    """List reflection episodes grouped by type for the UI."""
+    ep_store = get_episode_store(request)
+    valid_types = ("reflection", "metacognition", "causal_reflection")
+
+    types_to_query = [reflection_type] if reflection_type in valid_types else list(valid_types)
+
+    all_reflections = []
+    for rtype in types_to_query:
+        conditions = [f"e.episode_type = '{rtype}'"]
+        params: dict = {"limit": limit}
+        if group_id:
+            conditions.append("e.group_id = $group_id")
+            params["group_id"] = group_id
+        where = "WHERE " + " AND ".join(conditions)
+        try:
+            result = await ep_store._graph.ro_query(
+                f"""
+                MATCH (e:Episode)
+                {where}
+                RETURN e.uuid AS uuid, e.content AS content, e.episode_type AS episode_type,
+                       e.group_id AS group_id, e.created_at AS created_at,
+                       e.created_at_iso AS created_at_iso
+                ORDER BY e.created_at DESC
+                LIMIT $limit
+                """,
+                params=params,
+            )
+            for row in result.result_set:
+                all_reflections.append({
+                    "uuid": row[0],
+                    "content": row[1][:500] if row[1] else "",
+                    "reflection_type": row[2],
+                    "group_id": row[3],
+                    "created_at": row[4],
+                    "created_at_iso": row[5],
+                })
+        except Exception as e:
+            logger.warning(f"UI reflections query failed for {rtype}: {e}")
+
+    all_reflections.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return {"reflections": all_reflections[:limit]}
+
+
 @router.get("/ui/causal")
 async def list_causal_claims(
     request: Request,
