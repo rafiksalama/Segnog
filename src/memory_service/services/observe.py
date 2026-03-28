@@ -1132,6 +1132,13 @@ async def _observe_core_inner(
         except Exception as e:
             logger.warning(f"read_only search failed: {e}")
 
+    # Cap total entries by rank to keep context digestible for LLMs.
+    # Keep top entries across all source types, sorted by rank descending.
+    MAX_CONTEXT_ENTRIES = 30
+    if len(entries) > MAX_CONTEXT_ENTRIES:
+        ranked = sorted(entries.items(), key=lambda x: x[1].get("rank", x[1].get("score", 0)), reverse=True)
+        entries = dict(ranked[:MAX_CONTEXT_ENTRIES])
+
     context = ""
     if entries:
         _sid, _t0 = tracer.start("format")
