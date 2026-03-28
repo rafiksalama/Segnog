@@ -19,6 +19,8 @@ _SOURCE_LABELS = {
     "ontology_node": "Entity Profile",
     "relevant_episode": "Related Memory",
     "reflection": "Reflection",
+    "metacognition": "Metacognition",
+    "causal_reflection": "Causal Reflection",
     "causal_claim": "Causal Belief",
 }
 

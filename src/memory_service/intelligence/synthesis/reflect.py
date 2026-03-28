@@ -1,10 +1,12 @@
 """
 Reflection & Metacognition — LLM-powered post-mission analysis.
 
-Generates:
-1. Structured reflection from completed mission data
-2. Metacognition section that analyses the system's reasoning process,
-   decision-making quality, and cognitive patterns
+Generates separate, independently searchable sections:
+1. Structured reflection — what happened, what worked, what didn't
+2. Metacognition — analysis of the reasoning process itself
+
+Each section is returned separately so callers can store them as
+distinct episodes with their own episode_type.
 """
 
 import logging
@@ -92,21 +94,16 @@ async def generate_reflection(
     mission_data: Dict[str, Any],
     model: Optional[str] = None,
     group_id: Optional[str] = None,
-) -> str:
+) -> Dict[str, str]:
     """
-    Generate a structured reflection with metacognition from a completed mission.
+    Generate structured reflection with metacognition from a completed mission.
 
-    Always produces two sections:
-    1. **Reflection** — what happened, what worked, what didn't
-    2. **Metacognition** — analysis of the reasoning process itself
-
-    Args:
-        mission_data: Dict with run_id, task, status, output, state, iterations, plan.
-        model: Model to use (defaults to flash model).
-        group_id: Group ID to retrieve any buffered reasoning traces.
-
-    Returns:
-        Structured reflection text with metacognition section.
+    Returns a dict with separate sections:
+        {
+            "reflection": "...",       # structured mission analysis
+            "metacognition": "...",    # reasoning quality analysis
+        }
+    Each section can be stored as its own episode_type.
     """
     model = model or get_flash_model()
 
@@ -163,6 +160,7 @@ Produce a concise reflection covering:
 7. **Retrieval key**: One sentence that would help find this experience in the future
 """
 
+    reflection = ""
     try:
         reflection = await llm_call(
             prompt, model=model, temperature=0.3,
@@ -172,7 +170,7 @@ Produce a concise reflection covering:
         logger.info("Generated reflection: %d chars", len(reflection))
     except Exception as e:
         logger.error("Reflection generation failed: %s", e)
-        return f"Mission completed with status={status}. Reflection generation failed: {e}"
+        reflection = f"Mission completed with status={status}. Reflection generation failed: {e}"
 
     # ── Metacognition: always run, using reflection + any buffered traces ──
     traces = get_reasoning_traces(group_id) if group_id else []
@@ -183,9 +181,7 @@ Produce a concise reflection covering:
         model=model,
     )
 
-    # ── Assemble final output ────────────────────────────────────────
-    sections = [reflection]
-    if metacognition:
-        sections.append(f"\n\n---\n\n## Metacognition\n\n{metacognition}")
-
-    return "".join(sections)
+    return {
+        "reflection": reflection,
+        "metacognition": metacognition,
+    }

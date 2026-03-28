@@ -568,28 +568,50 @@ class MemoryService:
         status = mission_data.get("status", "")
         run_id = mission_data.get("run_id", "")
 
-        # Step 1: Generate reflection
-        reflection = ""
+        # Step 1: Generate reflection sections (returns dict with separate parts)
+        reflection_sections = {}
         try:
             from ..intelligence.synthesis.reflect import generate_reflection
 
-            reflection = await generate_reflection(mission_data, model=model, group_id=group_id)
-            logger.info(f"Generated reflection: {len(reflection)} chars")
+            reflection_sections = await generate_reflection(mission_data, model=model, group_id=group_id)
+            logger.info(
+                "Generated reflection sections: %s",
+                {k: len(v) for k, v in reflection_sections.items() if v},
+            )
         except Exception as e:
             logger.warning(f"Reflection generation failed (non-critical): {e}")
-            reflection = f"Mission completed with status={status}."
+            reflection_sections = {"reflection": f"Mission completed with status={status}."}
 
-        # Step 2: Store reflection as episode
+        # Backward compat: combined reflection text for knowledge extraction
+        reflection = reflection_sections.get("reflection", "")
+
+        # Step 2: Store each reflection section as a separate typed episode
         reflection_uuid = ""
-        try:
-            reflection_uuid = await ep_store.store_episode(
-                content=f"Reflection for: {task[:200]}\n\n{reflection}",
-                metadata={"source": "curator", "task": task[:200], "status": status},
-                episode_type="reflection",
-            )
-            logger.info(f"Stored reflection episode: {reflection_uuid}")
-        except Exception as e:
-            logger.warning(f"Failed to store reflection (non-critical): {e}")
+        section_uuids = {}
+        for section_type, content_text in reflection_sections.items():
+            if not content_text:
+                continue
+            try:
+                ep_uuid = await ep_store.store_episode(
+                    content=f"{section_type.replace('_', ' ').title()} for: {task[:200]}\n\n{content_text}",
+                    metadata={
+                        "source": "curator",
+                        "task": task[:200],
+                        "status": status,
+                        "reflection_type": section_type,
+                    },
+                    episode_type=section_type,
+                )
+                section_uuids[section_type] = ep_uuid
+                if section_type == "reflection":
+                    reflection_uuid = ep_uuid
+                logger.info(f"Stored {section_type} episode: {ep_uuid}")
+            except Exception as e:
+                logger.warning(f"Failed to store {section_type} (non-critical): {e}")
+
+        # Use first UUID as reflection_uuid if main reflection failed
+        if not reflection_uuid and section_uuids:
+            reflection_uuid = next(iter(section_uuids.values()))
 
         # Step 2b: Link reflection to source raw episodes (if provided)
         if source_episode_uuids and reflection_uuid:
@@ -706,12 +728,36 @@ class MemoryService:
                 if causal_count:
                     await self._causal_store.revise_beliefs(group_id)
                     logger.info(f"Stored {causal_count} causal claims")
+
+                    # Store causal reflection as a separate episode
+                    causal_lines = []
+                    for claim in causal_claims:
+                        line = f"- {claim['cause']} → {claim['effect']}"
+                        if claim.get("mechanism"):
+                            line += f" ({claim['mechanism'][:100]})"
+                        line += f" [confidence={claim.get('confidence', 0.8):.2f}]"
+                        causal_lines.append(line)
+                    causal_summary = f"Causal beliefs extracted ({causal_count} claims):\n" + "\n".join(causal_lines)
+                    try:
+                        await ep_store.store_episode(
+                            content=f"Causal Reflection for: {task[:200]}\n\n{causal_summary}",
+                            metadata={
+                                "source": "curator",
+                                "task": task[:200],
+                                "reflection_type": "causal_reflection",
+                                "causal_count": causal_count,
+                            },
+                            episode_type="causal_reflection",
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Causal extraction failed (non-critical): {e}")
 
         return {
             "reflection": reflection,
             "reflection_uuid": reflection_uuid,
+            "section_uuids": section_uuids,
             "knowledge_count": knowledge_count,
             "artifact_count": artifact_count,
             "causal_count": causal_count,

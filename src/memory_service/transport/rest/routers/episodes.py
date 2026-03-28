@@ -1,6 +1,6 @@
 """Episodes router — store, search, and link episodes in FalkorDB."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from ..dto.episodes import (
     StoreEpisodeRequest,
@@ -82,6 +82,67 @@ async def search_by_entities(body: SearchByEntitiesRequest, request: Request):
         for r in raw
     ]
     return SearchByEntitiesResponse(episodes=episodes)
+
+
+# Valid reflection types for filtering
+_REFLECTION_TYPES = {"reflection", "metacognition", "causal_reflection"}
+
+
+@router.get("/reflections")
+async def list_reflections(
+    request: Request,
+    group_id: str = Query(...),
+    reflection_type: str = Query(None, description="Filter by type: reflection, metacognition, causal_reflection"),
+    query: str = Query(None, description="Semantic search within reflections"),
+    top_k: int = Query(10, ge=1, le=50),
+):
+    """List or search reflection episodes, optionally filtered by type.
+
+    Reflection types:
+    - reflection: structured mission analysis (what worked, what didn't)
+    - metacognition: reasoning quality analysis (biases, assumptions, score)
+    - causal_reflection: causal beliefs summary (cause → effect chains)
+    """
+    svc = get_service(request)
+
+    # If a specific type is requested, use it directly; otherwise search all reflection types
+    if reflection_type and reflection_type in _REFLECTION_TYPES:
+        types_to_search = [reflection_type]
+    else:
+        types_to_search = list(_REFLECTION_TYPES)
+
+    all_results = []
+    for rtype in types_to_search:
+        if query:
+            raw = await svc.search_episodes(
+                group_id=group_id,
+                query=query,
+                top_k=top_k,
+                episode_type=rtype,
+                min_score=0.3,
+            )
+        else:
+            raw = await svc.search_episodes(
+                group_id=group_id,
+                query=group_id,  # fallback: search by group_id text
+                top_k=top_k,
+                episode_type=rtype,
+                min_score=0.0,
+            )
+        for r in raw:
+            all_results.append({
+                "uuid": r.get("uuid", ""),
+                "reflection_type": rtype,
+                "content": r.get("content", ""),
+                "metadata": r.get("metadata"),
+                "created_at": r.get("created_at", 0.0),
+                "created_at_iso": r.get("created_at_iso"),
+                "score": r.get("score", 0.0),
+            })
+
+    # Sort by score descending, then by created_at descending
+    all_results.sort(key=lambda x: (-x.get("score", 0), -x.get("created_at", 0)))
+    return {"reflections": all_results[:top_k]}
 
 
 @router.post("/episodes/link", response_model=LinkEpisodesResponse)
