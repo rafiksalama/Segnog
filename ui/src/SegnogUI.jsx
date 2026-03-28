@@ -922,7 +922,7 @@ const GraphPage = () => {
         const key = `${Math.min(a,b)},${Math.max(a,b)}`;
         if (hasEdge.has(key)) return;
         hasEdge.add(key);
-        merged.push([a, b, 0]);   // 0 = RELATES semantic (solid)
+        merged.push([a, b, 0, e.predicate || ""]);   // 0 = RELATES semantic (solid), with predicate label
       });
       rawCooccur.forEach(e => {
         const a = uuidIdx[e.source], b = uuidIdx[e.target];
@@ -1410,7 +1410,7 @@ const GraphPage = () => {
       // ── Edges (hidden in hub cloud/sub-type view, visible at detail zoom) ──
       const hubCloud = layout === "hub" && zLvl < 3;
       if (!hubCloud) {
-        edges.forEach(([a, b, etype]) => {
+        edges.forEach(([a, b, etype, predicate]) => {
           if (!nodes[a] || !nodes[b]) return;
           if (layout === "hub" && !showSingletons && (nodes[a].isSingleton || nodes[b].isSingleton)) return;
           if (etype === 0 && !showRelates) return;
@@ -1432,6 +1432,13 @@ const GraphPage = () => {
           }
           ctx.stroke();
           ctx.setLineDash([]);
+          // Show predicate label on semantic edges at high zoom
+          if (predicate && etype === 0 && zLvl >= 4) {
+            const mx = (nodes[a].x + nodes[b].x) / 2;
+            const my = (nodes[a].y + nodes[b].y) / 2;
+            ctx.fillStyle = p.accent + "cc"; ctx.font = `500 7px ${MONO}`; ctx.textAlign = "center";
+            ctx.fillText(predicate, mx, my - 3);
+          }
         });
       }
 
