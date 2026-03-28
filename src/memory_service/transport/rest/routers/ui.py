@@ -285,18 +285,47 @@ async def list_ontology(
     try:
         params: dict = {}
 
-        # Session-scoped: find entities via ABOUT edges from session episodes
+        # Session-scoped: entities from this session + their global neighbors
         if group_id:
-            result = await onto_store._graph.ro_query(
+            # Step 1: Get session's direct entities
+            seed_result = await onto_store._graph.ro_query(
                 """
                 MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(n:OntologyNode)
                 RETURN DISTINCT n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
                        n.display_name AS display_name, n.source_count AS source_count,
                        n.updated_at AS updated_at
-                ORDER BY n.source_count DESC
                 """,
                 params={"group_id": group_id},
             )
+            seed_names = set()
+            rows = []
+            for row in seed_result.result_set:
+                rows.append(row)
+                if row[1]:
+                    seed_names.add(row[1])
+
+            if not seed_names:
+                return {"nodes": []}
+
+            # Step 2: Get RELATES neighbors of seed entities
+            neighbor_rows = []
+            for name in list(seed_names)[:200]:  # cap to avoid huge queries
+                try:
+                    nr = await onto_store._graph.ro_query(
+                        """
+                        MATCH (s:OntologyNode {name: $name})-[:RELATES]-(nb:OntologyNode)
+                        WHERE NOT nb.name = $name
+                        RETURN DISTINCT nb.uuid AS uuid, nb.name AS name, nb.schema_type AS schema_type,
+                               nb.display_name AS display_name, nb.source_count AS source_count,
+                               nb.updated_at AS updated_at
+                        """,
+                        params={"name": name},
+                    )
+                    neighbor_rows.extend(nr.result_set)
+                except Exception:
+                    pass
+
+            # Merge seed + neighbors, deduplicate by name
             onto = onto_store._ontology
             _cat_cache = {}
             def _category(st):
@@ -307,13 +336,20 @@ async def list_ontology(
                     if a == "Thing" and i > 0: cat = chain[i-1]; break
                 _cat_cache[st] = cat
                 return cat
-            nodes = [
-                {"uuid": r[0], "name": r[1], "schema_type": r[2],
-                 "category": _category(r[2] or "Thing"),
-                 "display_name": r[3] or r[1], "source_count": r[4] or 0,
-                 "updated_at": r[5]}
-                for r in result.result_set
-            ]
+
+            seen_names = set()
+            nodes = []
+            for r in rows + neighbor_rows:
+                name = r[1]
+                if not name or name in seen_names:
+                    continue
+                seen_names.add(name)
+                nodes.append({
+                    "uuid": r[0], "name": name, "schema_type": r[2],
+                    "category": _category(r[2] or "Thing"),
+                    "display_name": r[3] or name, "source_count": r[4] or 0,
+                    "updated_at": r[5],
+                })
             return {"nodes": nodes}
 
         conditions = []
@@ -542,11 +578,34 @@ async def get_config():
 
 
 @router.get("/ui/ontology/edges")
-async def list_ontology_edges(request: Request, limit: int = 300):
-    """Return RELATES edges between OntologyNodes."""
+async def list_ontology_edges(
+    request: Request,
+    group_id: Optional[str] = None,
+    limit: int = 2000,
+):
+    """Return RELATES edges. If group_id given, edges touching session entities."""
     onto_store = get_ontology_store(request)
     try:
-        # Use name as ID (matches deduped node list) and deduplicate edges
+        if group_id:
+            # Edges between session entities and their neighbors
+            result = await onto_store._graph.ro_query(
+                """
+                MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(seed:OntologyNode)
+                WITH collect(DISTINCT seed.name) AS seeds
+                MATCH (a:OntologyNode)-[r:RELATES]->(b:OntologyNode)
+                WHERE a.name IN seeds OR b.name IN seeds
+                RETURN DISTINCT a.name AS source, b.name AS target, r.predicate AS predicate
+                LIMIT $limit
+                """,
+                params={"group_id": group_id, "limit": limit},
+            )
+            edges = [
+                {"source": row[0], "target": row[1], "predicate": row[2] or ""}
+                for row in result.result_set
+            ]
+            return {"edges": edges}
+
+        # Global: all edges
         result = await onto_store._graph.ro_query(
             """
             MATCH (a:OntologyNode)-[r:RELATES]->(b:OntologyNode)

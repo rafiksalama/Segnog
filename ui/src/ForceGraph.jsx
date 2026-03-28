@@ -47,8 +47,8 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
 
   // When a session is selected, fetch session-specific data
   const sessionParam = selectedSession === "__all__" ? "" : `?group_id=${selectedSession}`;
-  const sessionNodes = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology${sessionParam}` : null);
-  const sessionEdges = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology/edges${sessionParam ? sessionParam + "&" : "?"}limit=2000` : null);
+  const sessionNodes = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology?group_id=${selectedSession}` : null);
+  const sessionEdges = useJsonFetch(selectedSession !== "__all__" ? `${API}/ui/ontology/edges?group_id=${selectedSession}&limit=2000` : null);
 
   // Use session-specific data if a session is selected, otherwise use global data
   const activeNodes = selectedSession === "__all__" ? nodes : (sessionNodes?.nodes || []);
