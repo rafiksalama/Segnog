@@ -235,8 +235,9 @@ async def update_group_ontology(
                     group_id,
                 )
 
-            # Revise belief confidences after new evidence
+            # Revise belief confidences and auto-chain after new evidence
             await causal_store.revise_beliefs(group_id)
+            await causal_store.auto_chain(group_id)
 
         except Exception as e:
             logger.warning("Ontology 8e: causal extraction failed for '%s': %s", group_id, e)

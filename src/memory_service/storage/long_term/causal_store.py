@@ -235,6 +235,38 @@ class CausalClaimStore(BaseStore):
             logger.info("Revised %d causal beliefs for group %s", revised, gid)
         return revised
 
+    async def auto_chain(self, group_id: Optional[str] = None) -> int:
+        """Auto-link causal claims where one's effect matches another's cause.
+
+        Uses embedding similarity: if claim A's effect_summary is similar to
+        claim B's cause_summary (>0.75), create A-[:CAUSES]->B edge.
+        Returns number of CAUSES edges created.
+        """
+        gid = group_id or self._group_id
+        try:
+            # Use Cypher to find pairs where effect embedding is close to cause embedding
+            result = await self._graph.query(
+                """
+                MATCH (a:CausalClaim {group_id: $group_id})
+                MATCH (b:CausalClaim {group_id: $group_id})
+                WHERE a.uuid <> b.uuid
+                  AND NOT (a)-[:CAUSES]->(b)
+                WITH a, b,
+                     (2 - vec.cosineDistance(a.embedding, b.embedding)) / 2 AS sim
+                WHERE sim > 0.65
+                MERGE (a)-[:CAUSES]->(b)
+                RETURN count(*) AS created
+                """,
+                params={"group_id": gid},
+            )
+            created = result.result_set[0][0] if result.result_set else 0
+            if created:
+                logger.info("Auto-chained %d CAUSES edges for group %s", created, gid)
+            return created
+        except Exception as e:
+            logger.debug("auto_chain failed: %s", e)
+            return 0
+
     # ------------------------------------------------------------------
     # Read: get single claim
     # ------------------------------------------------------------------

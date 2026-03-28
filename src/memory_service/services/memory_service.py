@@ -747,6 +747,7 @@ class MemoryService:
                             logger.debug(f"Auto-linking knowledge to causal claims: {e}")
 
                     await self._causal_store.revise_beliefs(group_id)
+                    await self._causal_store.auto_chain(group_id)
                     logger.info(f"Stored {causal_count} causal claims")
 
                     # Store causal reflection as a separate episode
