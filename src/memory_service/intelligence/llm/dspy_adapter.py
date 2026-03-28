@@ -20,12 +20,15 @@ logger = logging.getLogger(__name__)
 class DirectJSONAdapter(JSONAdapter):
     """JSONAdapter that skips structured output and uses json_object mode directly.
 
-    OpenRouter models don't support structured output (tool/function calling)
-    through the proxy. This adapter goes straight to json_object mode.
+    For MiniMax: skip json_object response_format (causes <minimax:tool_call> tags).
+    For OpenRouter: use json_object mode.
     """
 
     def __call__(self, lm, lm_kwargs, signature, demos, inputs):
-        lm_kwargs["response_format"] = {"type": "json_object"}
+        # MiniMax models don't need json_object — they produce JSON from the prompt
+        model_name = getattr(lm, "model", "") or ""
+        if "minimax" not in model_name.lower():
+            lm_kwargs["response_format"] = {"type": "json_object"}
         return Adapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
 
 
