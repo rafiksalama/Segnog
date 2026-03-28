@@ -1473,7 +1473,10 @@ const GraphPage = () => {
       // ── Edges (hidden in hub cloud/sub-type view, visible at detail zoom) ──
       const hubCloud = layout === "hub" && zLvl < 3;
       if (!hubCloud) {
+        let edgeDrawn = 0;
+        const MAX_EDGES = 200; // cap edges for readability at detail zoom
         edges.forEach(([a, b, etype, predicate]) => {
+          if (edgeDrawn >= MAX_EDGES) return;
           if (!nodes[a] || !nodes[b]) return;
           if (layout === "hub" && !showSingletons && (nodes[a].isSingleton || nodes[b].isSingleton)) return;
           if (etype === 0 && !showRelates) return;
@@ -1486,15 +1489,16 @@ const GraphPage = () => {
           ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y);
           if (etype === 1) {
             ctx.setLineDash([3, 6]);
-            ctx.strokeStyle = p.textMuted + (interComm ? "70" : "30");
-            ctx.lineWidth = interComm ? 1.4 : 0.8;
+            ctx.strokeStyle = p.textMuted + (interComm ? "40" : "18");
+            ctx.lineWidth = interComm ? 1 : 0.5;
           } else {
             ctx.setLineDash([]);
-            ctx.strokeStyle = p.accent + (interComm ? "aa" : "60");
-            ctx.lineWidth = interComm ? 2 : 1.2;
+            ctx.strokeStyle = p.accent + (interComm ? "70" : "35");
+            ctx.lineWidth = interComm ? 1.5 : 0.8;
           }
           ctx.stroke();
           ctx.setLineDash([]);
+          edgeDrawn++;
           // Show predicate label on semantic edges at high zoom
           if (predicate && etype === 0 && zLvl >= 4) {
             const mx = (nodes[a].x + nodes[b].x) / 2;
@@ -1506,28 +1510,41 @@ const GraphPage = () => {
       }
 
       // ── Nodes (hidden in hub cloud/sub-type view, visible at detail zoom) ──
+      // Only draw nodes visible in current viewport to avoid drawing 5000+ circles
       if (!hubCloud) {
-        nodes.forEach(n => {
-          if (layout === "hub" && n.isSingleton && !showSingletons) return;
+        const pan = panRef.current;
+        // Viewport bounds in world coordinates
+        const vx0 = -pan.x / zLvl - 50, vy0 = -pan.y / zLvl - 50;
+        const vx1 = (w - pan.x) / zLvl + 50, vy1 = (h - pan.y) / zLvl + 50;
+        let drawn = 0;
+        const MAX_DRAW = 300; // cap visible nodes for readability
+        // Sort by source_count desc so important nodes are drawn first
+        const sortedNodes = [...nodes].sort((a, b) => (b.data.source_count || 0) - (a.data.source_count || 0));
+        for (const n of sortedNodes) {
+          if (layout === "hub" && n.isSingleton && !showSingletons) continue;
+          // Viewport culling
+          if (n.x < vx0 || n.x > vx1 || n.y < vy0 || n.y > vy1) continue;
+          if (drawn >= MAX_DRAW) break;
+          drawn++;
           const nodeType = n.data.schema_type || "Thing";
           const dimmed = typeFilter && nodeType !== typeFilter;
           const alpha = dimmed ? 0.15 : 1;
           ctx.globalAlpha = alpha;
-          // At medium zoom (1.6-2.5): small dots, no labels
-          // At high zoom (>2.5): full detail with labels
           const screenR = n.r * zLvl;
           ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-          ctx.fillStyle = n.fixed ? n.color + "70" : n.color + "40";
-          ctx.strokeStyle = n.color; ctx.lineWidth = 1.5;
+          ctx.fillStyle = n.fixed ? n.color + "60" : n.color + "20";
+          ctx.strokeStyle = n.color + "90"; ctx.lineWidth = 1;
           ctx.fill(); ctx.stroke();
-          // Labels only when node is big enough on screen to have breathing room
-          if (showLabels && !dimmed && screenR >= 18) {
-            const fontSize = Math.min(10, Math.max(7, screenR * 0.5));
-            ctx.fillStyle = p.text; ctx.font = `600 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
-            ctx.fillText(n.label, n.x, n.y + n.r + 12);
+          // Labels: only for top entities with enough screen space and separation
+          const importance = n.data.source_count || 0;
+          const minImportance = zLvl > 4 ? 3 : 5; // stricter at medium zoom
+          if (showLabels && !dimmed && screenR >= 25 && importance >= minImportance) {
+            const fontSize = Math.min(9, Math.max(6, screenR * 0.3));
+            ctx.fillStyle = p.text + "dd"; ctx.font = `600 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(n.label, n.x, n.y + n.r + 10);
           }
           ctx.globalAlpha = 1;
-        });
+        }
       }
 
       ctx.restore();
