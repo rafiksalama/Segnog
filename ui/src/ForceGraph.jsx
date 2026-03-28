@@ -9,7 +9,7 @@
  *   - d3-force handles all layout physics
  */
 
-import { useRef, useCallback, useMemo, useEffect } from "react";
+import { useRef, useCallback, useMemo, useEffect, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 
 const TYPE_PALETTE = [
@@ -27,6 +27,8 @@ function typeColor(t) {
 export default function ForceGraphView({ nodes, edges, cooccur, width, height, theme }) {
   const fgRef = useRef();
   const isDark = theme === "dark";
+  const [search, setSearch] = useState("");
+  const [highlightNode, setHighlightNode] = useState(null);
 
   // Build graph data: nodes + links
   const graphData = useMemo(() => {
@@ -98,6 +100,26 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     return { nodes: graphNodes, links };
   }, [nodes, edges, cooccur]);
 
+  // Search: find node by name and zoom to it
+  const handleSearch = useCallback((query) => {
+    setSearch(query);
+    if (!query || !fgRef.current || !graphData.nodes.length) {
+      setHighlightNode(null);
+      return;
+    }
+    const q = query.toLowerCase();
+    const match = graphData.nodes.find(n =>
+      n.name.toLowerCase().includes(q)
+    );
+    if (match) {
+      setHighlightNode(match);
+      fgRef.current.centerAt(match.x, match.y, 600);
+      fgRef.current.zoom(3, 600);
+    } else {
+      setHighlightNode(null);
+    }
+  }, [graphData]);
+
   // Configure forces and fit after data loads
   useEffect(() => {
     if (fgRef.current && graphData.nodes.length > 0) {
@@ -117,6 +139,18 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
   const paintNode = useCallback((node, ctx, globalScale) => {
     const r = Math.sqrt(node.val) * 2;
     const screenR = r * globalScale;
+    const isHighlighted = highlightNode && highlightNode.id === node.id;
+
+    // Highlight ring for search result
+    if (isHighlighted) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + 8, 0, Math.PI * 2);
+      ctx.fillStyle = "#ff6b8a40";
+      ctx.fill();
+      ctx.strokeStyle = "#ff6b8a";
+      ctx.lineWidth = 3 / globalScale;
+      ctx.stroke();
+    }
 
     // Glow for hubs
     if (node.isHub) {
@@ -126,13 +160,13 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       ctx.fill();
     }
 
-    // Main circle — darker fill for hubs, lighter for spokes
+    // Main circle
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
     ctx.fillStyle = node.isHub ? node.color + "bb" : node.color + "70";
     ctx.fill();
-    ctx.strokeStyle = node.color;
-    ctx.lineWidth = node.isHub ? 2 / globalScale : 1 / globalScale;
+    ctx.strokeStyle = isHighlighted ? "#ff6b8a" : node.color;
+    ctx.lineWidth = (isHighlighted ? 3 : node.isHub ? 2 : 1) / globalScale;
     ctx.stroke();
 
     // Labels — show when node is big enough on screen
@@ -148,7 +182,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       ctx.textBaseline = "top";
       ctx.fillText(node.name, node.x, node.y + r + 1.5);
     }
-  }, [isDark]);
+  }, [isDark, highlightNode]);
 
   // Link styling
   const linkWidth = useCallback(link => {
@@ -181,28 +215,66 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
   }
 
   return (
-    <ForceGraph2D
-      ref={fgRef}
-      width={width}
-      height={height}
-      graphData={graphData}
-      nodeCanvasObject={paintNode}
-      nodeCanvasObjectMode={() => "replace"}
-      linkWidth={linkWidth}
-      linkColor={linkColor}
-      linkDirectionalParticles={0}
-      nodeRelSize={4}
-      d3VelocityDecay={0.4}
-      d3AlphaDecay={0.015}
-      warmupTicks={100}
-      cooldownTicks={300}
-      d3AlphaMin={0.001}
-      backgroundColor={isDark ? "#0a0b0f" : "#f4f3ef"}
-      onNodeClick={(node) => {
-        // Could emit event to parent for popup
-      }}
-      enableNodeDrag={true}
-      enableZoomPanInteraction={true}
-    />
+    <div style={{ position: "relative", width, height }}>
+      {/* Search box */}
+      <div style={{
+        position: "absolute", top: 14, left: 14, zIndex: 20,
+        display: "flex", gap: 6, alignItems: "center",
+      }}>
+        <input
+          type="text"
+          value={search}
+          onChange={e => handleSearch(e.target.value)}
+          placeholder="Search entity..."
+          style={{
+            width: 220, padding: "8px 12px", fontSize: 13,
+            background: isDark ? "#181b24" : "#ffffff",
+            color: isDark ? "#e2e4ea" : "#1c1c1a",
+            border: `1px solid ${isDark ? "#282d3e" : "#dddbd5"}`,
+            borderRadius: 8, outline: "none",
+            fontFamily: "Inter, sans-serif",
+          }}
+        />
+        {highlightNode && (
+          <span style={{
+            fontSize: 11, padding: "4px 10px", borderRadius: 6,
+            background: "#ff6b8a30", color: "#ff6b8a", fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}>
+            {highlightNode.name}
+          </span>
+        )}
+        {search && !highlightNode && (
+          <span style={{ fontSize: 11, color: isDark ? "#4a4f62" : "#9a9a90" }}>
+            No match
+          </span>
+        )}
+      </div>
+
+      <ForceGraph2D
+        ref={fgRef}
+        width={width}
+        height={height}
+        graphData={graphData}
+        nodeCanvasObject={paintNode}
+        nodeCanvasObjectMode={() => "replace"}
+        linkWidth={linkWidth}
+        linkColor={linkColor}
+        linkDirectionalParticles={0}
+        nodeRelSize={4}
+        d3VelocityDecay={0.4}
+        d3AlphaDecay={0.015}
+        warmupTicks={100}
+        cooldownTicks={300}
+        d3AlphaMin={0.001}
+        backgroundColor={isDark ? "#0a0b0f" : "#f4f3ef"}
+        onNodeClick={(node) => {
+          setHighlightNode(node);
+          setSearch(node.name);
+        }}
+        enableNodeDrag={true}
+        enableZoomPanInteraction={true}
+      />
+    </div>
   );
 }
