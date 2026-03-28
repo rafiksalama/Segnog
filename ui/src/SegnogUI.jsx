@@ -2130,10 +2130,21 @@ const ObservePage = () => {
                     <div style={{ background: p.surfaceAlt, borderRadius: 6, padding: "8px 12px", fontFamily: MONO, fontSize: 12, color: p.accent }}>{response.episode_uuid}</div>
                   </div>
                 )}
+                {response.context_sources && Object.keys(response.context_sources).length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: p.textMuted, fontFamily: MONO, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>context sources</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {Object.entries(response.context_sources).map(([src, count]) => {
+                        const srcColors = { causal_claim: p.coral, hydrated_knowledge: p.warm, ontology_node: p.purple, hydrated: p.blue, local: p.accent, relevant_episode: p.blue };
+                        return <Badge key={src} color={srcColors[src] || p.textMuted}>{src.replace(/_/g, " ")}: {count}</Badge>;
+                      })}
+                    </div>
+                  </div>
+                )}
                 {response.context && (
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, color: p.textMuted, fontFamily: MONO, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>context</div>
-                    <div style={{ background: p.surfaceAlt, borderRadius: 8, padding: "14px 16px", fontSize: 13, color: p.text, lineHeight: 1.6, borderLeft: `3px solid ${p.accent}` }}>{response.context}</div>
+                    <div style={{ background: p.surfaceAlt, borderRadius: 8, padding: "14px 16px", fontSize: 13, color: p.text, lineHeight: 1.6, borderLeft: `3px solid ${p.accent}`, whiteSpace: "pre-wrap", maxHeight: 400, overflowY: "auto" }}>{response.context}</div>
                   </div>
                 )}
                 {!response.context && <div style={{ background: p.bg, borderRadius: 8, padding: 14, marginTop: 12, fontFamily: MONO, fontSize: 11, color: p.textMuted, whiteSpace: "pre-wrap" }}>{JSON.stringify(response, null, 2)}</div>}
