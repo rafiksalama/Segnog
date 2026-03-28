@@ -68,6 +68,20 @@ Write the updated prose summary for {entity_name}:"""
         if not updated or len(updated) < 10:
             return existing_summary
 
+        # Reject responses with LLM meta-commentary or tool calls
+        _REJECT_PATTERNS = [
+            "I cannot", "I don't see", "I'm checking", "I should",
+            "Let me", "I need to", "Action:", "web_search", "```",
+            "I'll run", "Based on the context provided, I don't",
+            "I cannot complete", "two required inputs",
+        ]
+        if any(p in updated for p in _REJECT_PATTERNS):
+            logger.warning(
+                "Ontology summary rejected for '%s': contains LLM meta-commentary",
+                entity_name,
+            )
+            return existing_summary
+
         logger.info(
             "Updated OntologyNode summary for '%s' (%s): %d chars",
             entity_name,

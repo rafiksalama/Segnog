@@ -115,11 +115,19 @@ async def extract_knowledge(
                 else getattr(entry, "event_date", None)
             )
             if ev:
+                ev_str = str(ev).strip()
                 try:
-                    _date.fromisoformat(str(ev))
-                    validated_date = str(ev)
+                    _date.fromisoformat(ev_str)
+                    validated_date = ev_str
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid event_date '{ev}', discarding")
+                    # Accept year-only (e.g. "2024") or year-month (e.g. "2024-03")
+                    import re
+                    if re.match(r"^\d{4}$", ev_str):
+                        validated_date = f"{ev_str}-01-01"
+                    elif re.match(r"^\d{4}-\d{2}$", ev_str):
+                        validated_date = f"{ev_str}-01"
+                    else:
+                        logger.warning(f"Invalid event_date '{ev_str}', discarding")
 
             if isinstance(entry, dict):
                 content = entry.get("content", "")
