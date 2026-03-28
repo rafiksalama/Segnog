@@ -1020,7 +1020,8 @@ const GraphPage = () => {
         });
 
         // ── Position categories on ring ─────────────────────────────────
-        const maxCluster = Math.min(w, h) * 0.08;
+        // Scale cluster radius with canvas size — larger for bigger displays
+        const maxCluster = Math.min(w, h) * 0.14;
         const clusterR = ([, d]) => Math.min(maxCluster, 14 + Math.sqrt(d.nodes.length) * 7);
         let maxPairSep = 0;
         if (nC >= 2) {
@@ -1460,10 +1461,11 @@ const GraphPage = () => {
           ctx.fillStyle = n.fixed ? n.color + "70" : n.color + "40";
           ctx.strokeStyle = n.color; ctx.lineWidth = 1.5;
           ctx.fill(); ctx.stroke();
-          // Labels only at detail zoom
-          if (showLabels && !dimmed && screenR >= 12) {
-            ctx.fillStyle = p.text; ctx.font = `600 10px ${FONT}`; ctx.textAlign = "center";
-            ctx.fillText(n.label, n.x, n.y + n.r + 15);
+          // Labels only when node is big enough on screen to have breathing room
+          if (showLabels && !dimmed && screenR >= 18) {
+            const fontSize = Math.min(10, Math.max(7, screenR * 0.5));
+            ctx.fillStyle = p.text; ctx.font = `600 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(n.label, n.x, n.y + n.r + 12);
           }
           ctx.globalAlpha = 1;
         });
@@ -1583,11 +1585,32 @@ const GraphPage = () => {
     // Skip animation restart if only theme changed (no structural change)
     let frame, settled = 0;
     const FRAMES = (nodeCountChanged || layoutChanged)
-      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : 0)
+      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 40 : 0)
       : 0;
+    // Hub-specific overlap resolution: push overlapping nodes apart gently
+    // without gravity (preserves cluster structure)
+    const stepHub = () => {
+      const PAD = 4;  // minimum gap between node edges
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].fixed || nodes[i].isSingleton) continue;
+        for (let j = i + 1; j < nodes.length; j++) {
+          if (nodes[j].fixed || nodes[j].isSingleton) continue;
+          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const minDist = nodes[i].r + nodes[j].r + PAD;
+          if (dist < minDist) {
+            const push = (minDist - dist) * 0.3;
+            const ux = dx / dist, uy = dy / dist;
+            nodes[i].x += ux * push; nodes[i].y += uy * push;
+            nodes[j].x -= ux * push; nodes[j].y -= uy * push;
+          }
+        }
+      }
+    };
+
     if (FRAMES > 0) {
       const animate = () => {
-        const avgDisp = layout === "force" ? stepCoSE() : step();
+        const avgDisp = layout === "force" ? stepCoSE() : layout === "hub" ? (stepHub(), 0) : step();
         draw();
         settled++;
         // 5. Convergence check every 10 iters: stop if avgDisp/N < threshold
