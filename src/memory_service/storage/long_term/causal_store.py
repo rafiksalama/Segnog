@@ -236,30 +236,57 @@ class CausalClaimStore(BaseStore):
         return revised
 
     async def auto_chain(self, group_id: Optional[str] = None) -> int:
-        """Auto-link causal claims where one's effect matches another's cause.
+        """Auto-link causal claims where A's effect matches B's cause.
 
-        Uses embedding similarity: if claim A's effect_summary is similar to
-        claim B's cause_summary (>0.75), create A-[:CAUSES]->B edge.
+        Embeds each effect_summary and cause_summary separately, then links
+        A→B when cosine(A.effect_embedding, B.cause_embedding) > 0.80.
         Returns number of CAUSES edges created.
         """
         gid = group_id or self._group_id
         try:
-            # Use Cypher to find pairs where effect embedding is close to cause embedding
-            result = await self._graph.query(
-                """
-                MATCH (a:CausalClaim {group_id: $group_id})
-                MATCH (b:CausalClaim {group_id: $group_id})
-                WHERE a.uuid <> b.uuid
-                  AND NOT (a)-[:CAUSES]->(b)
-                WITH a, b,
-                     (2 - vec.cosineDistance(a.embedding, b.embedding)) / 2 AS sim
-                WHERE sim > 0.65
-                MERGE (a)-[:CAUSES]->(b)
-                RETURN count(*) AS created
-                """,
-                params={"group_id": gid},
-            )
-            created = result.result_set[0][0] if result.result_set else 0
+            claims = await self.list_claims(group_id=gid, limit=100)
+            if len(claims) < 2:
+                return 0
+
+            # Embed all effect and cause summaries
+            effects = [c.get("effect_summary", "") for c in claims]
+            causes = [c.get("cause_summary", "") for c in claims]
+            all_texts = effects + causes
+            all_embs = await self._embed_batch(all_texts)
+            effect_embs = all_embs[: len(claims)]
+            cause_embs = all_embs[len(claims) :]
+
+            # Compare each effect to each cause
+            import numpy as np
+
+            created = 0
+            for i, claim_a in enumerate(claims):
+                for j, claim_b in enumerate(claims):
+                    if i == j:
+                        continue
+                    # Cosine similarity between A's effect and B's cause
+                    a_vec = np.array(effect_embs[i])
+                    b_vec = np.array(cause_embs[j])
+                    norm = np.linalg.norm(a_vec) * np.linalg.norm(b_vec)
+                    if norm == 0:
+                        continue
+                    sim = float(np.dot(a_vec, b_vec) / norm)
+                    if sim > 0.80:
+                        try:
+                            await self._graph.query(
+                                """
+                                MATCH (a:CausalClaim {uuid: $a_uuid})
+                                MATCH (b:CausalClaim {uuid: $b_uuid})
+                                MERGE (a)-[:CAUSES]->(b)
+                                """,
+                                params={
+                                    "a_uuid": claim_a["uuid"],
+                                    "b_uuid": claim_b["uuid"],
+                                },
+                            )
+                            created += 1
+                        except Exception:
+                            pass
             if created:
                 logger.info("Auto-chained %d CAUSES edges for group %s", created, gid)
             return created

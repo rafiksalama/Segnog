@@ -107,15 +107,17 @@ async def search_chain(
         result = await store._graph.ro_query(
             """
             MATCH path = (seed:CausalClaim {uuid: $uuid})-[:CAUSES*0..10]->(c:CausalClaim)
-            RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
+            WITH c, length(path) AS depth
+            RETURN DISTINCT c.uuid AS uuid, c.cause_summary AS cause_summary,
                    c.effect_summary AS effect_summary, c.mechanism AS mechanism,
-                   c.confidence AS confidence, c.status AS status
-            ORDER BY length(path)
+                   c.confidence AS confidence, c.status AS status, depth
+            ORDER BY depth
             """,
             params={"uuid": seed_uuid},
         )
         chain = store._parse_results(result)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Chain traversal failed: {e}")
         chain = [claims[0]]
 
     return {"seed": seed_uuid, "chain": chain}
