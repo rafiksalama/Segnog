@@ -509,33 +509,6 @@ async def get_config():
     }
 
 
-@router.get("/ui/ontology/{uuid}")
-async def get_ontology_node(uuid: str, request: Request):
-    """Get a single OntologyNode with full summary (for popup on click)."""
-    onto_store = get_ontology_store(request)
-    try:
-        result = await onto_store._graph.ro_query(
-            """
-            MATCH (n:OntologyNode {uuid: $uuid})
-            RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
-                   n.display_name AS display_name, n.summary AS summary,
-                   n.source_count AS source_count, n.updated_at AS updated_at
-            LIMIT 1
-            """,
-            params={"uuid": uuid},
-        )
-        if result.result_set:
-            row = result.result_set[0]
-            return {
-                "uuid": row[0], "name": row[1], "schema_type": row[2],
-                "display_name": row[3], "summary": row[4] or "",
-                "source_count": row[5] or 0, "updated_at": row[6],
-            }
-        return {"error": "Not found"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
 @router.get("/ui/ontology/edges")
 async def list_ontology_edges(request: Request, limit: int = 300):
     """Return RELATES edges between OntologyNodes."""
@@ -589,6 +562,33 @@ async def list_ontology_cooccurrence(request: Request, limit: int = 400):
     except Exception as e:
         logger.warning(f"Co-occurrence query failed: {e}")
         return {"edges": []}
+
+
+@router.get("/ui/ontology/{uuid}")
+async def get_ontology_node(uuid: str, request: Request):
+    """Get a single OntologyNode with full summary (for popup on click)."""
+    onto_store = get_ontology_store(request)
+    try:
+        result = await onto_store._graph.ro_query(
+            """
+            MATCH (n:OntologyNode {uuid: $uuid})
+            RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
+                   n.display_name AS display_name, n.summary AS summary,
+                   n.source_count AS source_count, n.updated_at AS updated_at
+            LIMIT 1
+            """,
+            params={"uuid": uuid},
+        )
+        if result.result_set:
+            row = result.result_set[0]
+            return {
+                "uuid": row[0], "name": row[1], "schema_type": row[2],
+                "display_name": row[3], "summary": row[4] or "",
+                "source_count": row[5] or 0, "updated_at": row[6],
+            }
+        return {"error": "Not found"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.get("/ui/events")

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext, lazy, Suspense } from "react";
+const ForceGraphView = lazy(() => import("./ForceGraph.jsx"));
 
 const API = "/api/v1/memory";
 
@@ -1773,9 +1774,22 @@ const GraphPage = () => {
     // Break out of parent padding to fill the content area edge-to-edge
     <div style={{ position: "relative", margin: "-28px -36px", height: "calc(100vh - 56px)", overflow: "hidden" }}>
 
-      {/* Full-screen canvas */}
+      {/* Full-screen graph */}
       <div style={{ position: "absolute", inset: 0, background: p.bg }}>
-        <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+        {layout === "hub" ? (
+          <Suspense fallback={<div style={{color: p.textDim, padding: 40}}>Loading graph...</div>}>
+            <ForceGraphView
+              nodes={ontology}
+              edges={(ontoEdgeData && ontoEdgeData.edges) || []}
+              cooccur={(ontoCooccurData && ontoCooccurData.pairs) || []}
+              width={typeof window !== "undefined" ? window.innerWidth - 220 : 1200}
+              height={typeof window !== "undefined" ? window.innerHeight : 800}
+              theme={p === DARK ? "dark" : "light"}
+            />
+          </Suspense>
+        ) : (
+          <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+        )}
       </div>
 
       {/* Top-left title bar */}
