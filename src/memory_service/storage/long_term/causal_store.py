@@ -217,8 +217,14 @@ class CausalClaimStore(BaseStore):
             WITH c, support_total, contradict_total,
                  CASE WHEN support_total + contradict_total > 0
                       THEN support_total / (support_total + contradict_total)
-                      ELSE c.confidence
-                 END AS new_conf
+                      ELSE 0.5
+                 END AS evidence_ratio,
+                 CASE WHEN support_total + contradict_total > 0
+                      THEN toFloat(support_total + contradict_total) / (support_total + contradict_total + 3.0)
+                      ELSE 0.0
+                 END AS evidence_weight
+            WITH c,
+                 evidence_weight * evidence_ratio + (1.0 - evidence_weight) * c.confidence AS new_conf
             SET c.confidence = new_conf,
                 c.status = CASE
                     WHEN new_conf < 0.05 THEN 'refuted'

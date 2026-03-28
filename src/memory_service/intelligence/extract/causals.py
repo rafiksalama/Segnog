@@ -22,7 +22,12 @@ Rules:
 - Extract STRONGLY IMPLIED causation (clear causal sequences)
 - Do NOT extract mere correlations or temporal co-occurrences
 - cause and effect must be specific (not vague concepts)
-- Confidence: 1.0 for explicitly stated, 0.7-0.9 for strongly implied, 0.3-0.6 for speculative
+- Confidence should reflect certainty of the CAUSAL LINK, not just whether it's stated:
+  0.9-0.95: direct causation with clear mechanism ("X caused Y because Z")
+  0.7-0.85: strong causal link but mechanism unclear or indirect
+  0.5-0.65: plausible causation, could be correlation
+  0.3-0.45: speculative, weak evidence of causation
+  Never use 1.0 — no causal claim is absolutely certain
 
 Return a JSON array of objects with these fields:
   cause, effect, mechanism (optional), confidence (0-1)
