@@ -30,8 +30,18 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
   const [search, setSearch] = useState("");
   const [highlightNode, setHighlightNode] = useState(null);
 
+  // Stabilize inputs: only recompute when counts actually change
+  const stableKey = `${nodes?.length || 0}-${edges?.length || 0}-${cooccur?.length || 0}`;
+  const prevKeyRef = useRef("");
+  const prevDataRef = useRef({ nodes: [], links: [] });
+
   // Build graph data: nodes + links
   const graphData = useMemo(() => {
+    // Skip recompute if data hasn't changed
+    if (stableKey === prevKeyRef.current && prevDataRef.current.nodes.length > 0) {
+      return prevDataRef.current;
+    }
+    prevKeyRef.current = stableKey;
     if (!nodes || nodes.length === 0) return { nodes: [], links: [] };
 
     // Build index and degree
@@ -98,8 +108,10 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
         };
       });
 
-    return { nodes: graphNodes, links };
-  }, [nodes, edges, cooccur]);
+    const result = { nodes: graphNodes, links };
+    prevDataRef.current = result;
+    return result;
+  }, [stableKey]);
 
   // Search: find node by name and zoom to it
   const handleSearch = useCallback((query) => {
@@ -121,15 +133,16 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     }
   }, [graphData]);
 
-  // Configure forces and fit after data loads
+  // Configure forces and fit — only once when data first loads
+  const didFit = useRef(false);
   useEffect(() => {
-    if (fgRef.current && graphData.nodes.length > 0) {
-      // Tune forces: moderate charge, short link distance
+    if (fgRef.current && graphData.nodes.length > 0 && !didFit.current) {
+      didFit.current = true;
       fgRef.current.d3Force("charge").strength(-40).distanceMax(200);
       fgRef.current.d3Force("link").distance(link => {
         const srcHub = link.source?.isHub || false;
         const tgtHub = link.target?.isHub || false;
-        return (srcHub && tgtHub) ? 120 : 50; // hubs spread, spokes close
+        return (srcHub && tgtHub) ? 120 : 50;
       });
       fgRef.current.d3ReheatSimulation();
       setTimeout(() => fgRef.current.zoomToFit(400, 60), 1000);
