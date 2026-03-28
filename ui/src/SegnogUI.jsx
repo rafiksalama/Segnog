@@ -824,6 +824,8 @@ const GraphPage = () => {
   const { data: epData }       = useFetch(`${API}/ui/episodes?limit=50`,              [], 20000);
   const { data: knData }       = useFetch(`${API}/ui/knowledge?limit=50`,              [], 20000);
   const { data: ontoData }     = useFetch(`${API}/ui/ontology`,                        [], 20000);
+  const { data: causalData }   = useFetch(`${API}/ui/causal`,                          [], 20000);
+  const { data: reflectData }  = useFetch(`${API}/ui/reflections?limit=20`,            [], 20000);
   const { data: ontoEdgeData }    = useFetch(`${API}/ui/ontology/edges?limit=2000`,        [], 20000);
   const { data: ontoCooccurData } = useFetch(`${API}/ui/ontology/cooccurrence?limit=2000`, [], 20000);
   const canvasRef        = useRef(null);
@@ -1839,7 +1841,7 @@ const GraphPage = () => {
       }}>
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${p.border}` }}>
-          {["episodes", "knowledge", "ontology"].map(t => (
+          {["episodes", "knowledge", "ontology", "causal", "reflections"].map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               flex: 1, padding: "12px 0", fontSize: 11, fontWeight: 700, fontFamily: MONO,
               textTransform: "uppercase", letterSpacing: "0.06em", border: "none", cursor: "pointer",
@@ -1891,6 +1893,45 @@ const GraphPage = () => {
               </div>
             ))
           )}
+          {tab === "causal" && (() => {
+            const claims = (causalData && causalData.claims) || [];
+            return claims.length === 0
+              ? <Empty msg="No causal beliefs yet." />
+              : claims.map((c, i) => (
+                <div key={i} style={{ background: p.surfaceAlt, border: `1px solid ${p.border}`, borderRadius: 8, padding: "10px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <Badge color={c.status === "active" ? p.green : c.status === "weakened" ? p.warm : p.coral}>{c.status}</Badge>
+                    <span style={{ fontSize: 10, fontFamily: MONO, color: p.textMuted }}>conf: {(c.confidence || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: p.text, lineHeight: 1.4, marginBottom: 4 }}>
+                    <span style={{ color: p.accent, fontWeight: 600 }}>{c.cause_summary}</span>
+                    <span style={{ color: p.textDim }}> → </span>
+                    <span style={{ color: p.coral, fontWeight: 600 }}>{c.effect_summary}</span>
+                  </div>
+                  {c.mechanism && <div style={{ fontSize: 11, color: p.textMuted, fontStyle: "italic", marginBottom: 4 }}>{c.mechanism}</div>}
+                  <div style={{ display: "flex", gap: 8, fontSize: 10, fontFamily: MONO }}>
+                    {c.support_count > 0 && <span style={{ color: p.green }}>+{c.support_count} supports</span>}
+                    {c.contradict_count > 0 && <span style={{ color: p.coral }}>-{c.contradict_count} contradicts</span>}
+                    {c.cause_display && <span style={{ color: p.textDim }}>{c.cause_display} → {c.effect_display}</span>}
+                  </div>
+                </div>
+              ));
+          })()}
+          {tab === "reflections" && (() => {
+            const refs = (reflectData && reflectData.reflections) || [];
+            const typeColors = { reflection: p.blue, metacognition: p.purple, causal_reflection: p.warm };
+            return refs.length === 0
+              ? <Empty msg="No reflections yet." />
+              : refs.map((r, i) => (
+                <div key={i} style={{ background: p.surfaceAlt, border: `1px solid ${p.border}`, borderRadius: 8, padding: "10px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <Badge color={typeColors[r.reflection_type] || p.textMuted}>{r.reflection_type}</Badge>
+                    <span style={{ fontSize: 10, fontFamily: MONO, color: p.textDim }}>{r.group_id?.slice(0, 8)}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: p.text, lineHeight: 1.5, whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{r.content}</div>
+                </div>
+              ));
+          })()}
         </div>
       </div>
 
