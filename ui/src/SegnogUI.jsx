@@ -1288,8 +1288,8 @@ const GraphPage = () => {
       const xs = ref.map(n => n.x), ys = ref.map(n => n.y);
       const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
       const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
-      // Hub: cap to cloud zoom so initial view shows category bubbles (not sub-types)
-      const maxFitZ = layout === "hub" ? 1.4 : 3.5;
+      // Hub: cap to cloud zoom so initial view shows category bubbles
+      const maxFitZ = layout === "hub" ? 1.0 : 3.5;
       const fz = Math.min(w / (maxX - minX), h / (maxY - minY), maxFitZ);
       zoom.z = fz;
       pan.x  = w / 2 - ((minX + maxX) / 2) * fz;
@@ -1329,9 +1329,11 @@ const GraphPage = () => {
           // Log-scaled visual radius for cloud view — prevents huge categories from dominating
           // Actual node extent used for detail view boundaries
           // Cloud radius: sqrt for wider range (log was too flat for 100-6000 range)
-          // Cap cloud radius so even 6000-node categories stay manageable
+          // Cloud radius stays capped through cloud + sub-type views
+          // Only expands to full node extent at detail zoom (>= 4x)
           const cloudR = Math.min(90, 18 + Math.sqrt(visNodes.length) * 0.9);
-          const bgR = zLvl < 1.6 ? cloudR : maxDist + 20;
+          const fullR = maxDist + 20;
+          const bgR = zLvl < 5 ? cloudR : fullR;
           const col = typeColor(cat);
 
           // Gather sub-type clusters with center + radius
@@ -1346,7 +1348,7 @@ const GraphPage = () => {
               return { st, sx, sy, sr: sr + 8, count: vis.length, col: typeColor(st) };
             }).filter(Boolean);
 
-          if (zLvl < 1.6) {
+          if (zLvl < 2.0) {
             // ── Level 1: Cloud — category blobs ──
             ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
             ctx.fillStyle = col + "45"; ctx.fill();
@@ -1357,7 +1359,7 @@ const GraphPage = () => {
             ctx.fillStyle = col + "bb"; ctx.font = `600 ${Math.max(9, fontSize * 0.65)}px ${MONO}`;
             ctx.fillText(`${visNodes.length}`, cx, cy + fontSize * 0.65);
 
-          } else if (zLvl < 3) {
+          } else if (zLvl < 5) {
             // ── Level 2: Sub-type circles inside category boundary ──
             // Category boundary (light)
             ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
@@ -1368,9 +1370,10 @@ const GraphPage = () => {
             // Category label above
             ctx.fillStyle = col + "bb"; ctx.font = `700 11px ${FONT}`; ctx.textAlign = "center";
             ctx.fillText(cat, cx, cy - bgR - 5);
-            // Sub-type bubbles
+            // Sub-type bubbles (capped radius for readability)
             stClusters.forEach(({ st, sx, sy, sr, count, col: stCol }) => {
-              ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+              const cappedSR = Math.min(sr, 12 + Math.sqrt(count) * 3);
+              ctx.beginPath(); ctx.arc(sx, sy, cappedSR, 0, Math.PI * 2);
               ctx.fillStyle = stCol + "20"; ctx.fill();
               ctx.strokeStyle = stCol + "55"; ctx.lineWidth = 1.2; ctx.stroke();
               const stFontSize = Math.max(7, Math.min(12, sr * 0.4));
@@ -1488,7 +1491,7 @@ const GraphPage = () => {
       }
 
       // ── Edges (hidden in hub cloud/sub-type view, visible at detail zoom) ──
-      const hubCloud = layout === "hub" && zLvl < 3;
+      const hubCloud = layout === "hub" && zLvl < 5;
       if (!hubCloud) {
         let edgeDrawn = 0;
         const MAX_EDGES = 200; // cap edges for readability at detail zoom
@@ -1517,7 +1520,7 @@ const GraphPage = () => {
           ctx.setLineDash([]);
           edgeDrawn++;
           // Show predicate label on semantic edges at high zoom
-          if (predicate && etype === 0 && zLvl >= 4) {
+          if (predicate && etype === 0 && zLvl >= 6) {
             const mx = (nodes[a].x + nodes[b].x) / 2;
             const my = (nodes[a].y + nodes[b].y) / 2;
             ctx.fillStyle = p.accent + "cc"; ctx.font = `500 7px ${MONO}`; ctx.textAlign = "center";
@@ -1554,7 +1557,7 @@ const GraphPage = () => {
           ctx.fill(); ctx.stroke();
           // Labels: only for top entities with enough screen space and separation
           const importance = n.data.source_count || 0;
-          const minImportance = zLvl > 4 ? 3 : 5; // stricter at medium zoom
+          const minImportance = zLvl > 6 ? 3 : 5; // stricter at medium zoom
           if (showLabels && !dimmed && screenR >= 25 && importance >= minImportance) {
             const fontSize = Math.min(9, Math.max(6, screenR * 0.3));
             ctx.fillStyle = p.text + "dd"; ctx.font = `600 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
