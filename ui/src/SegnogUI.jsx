@@ -1041,7 +1041,8 @@ const GraphPage = () => {
         // ── Position categories on ring ─────────────────────────────────
         // Log-scaled cluster radius — prevents large categories from dominating
         const maxCluster = Math.min(w, h) * 0.12;
-        const clusterR = ([, d]) => Math.min(maxCluster, 25 + Math.log2(1 + d.nodes.length) * 16);
+        // Sqrt scale — bigger range than log, shows size differences clearly
+        const clusterR = ([, d]) => Math.min(maxCluster, 20 + Math.sqrt(d.nodes.length) * 1.2);
         let maxPairSep = 0;
         if (nC >= 2) {
           const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
@@ -1310,7 +1311,8 @@ const GraphPage = () => {
           });
           // Log-scaled visual radius for cloud view — prevents huge categories from dominating
           // Actual node extent used for detail view boundaries
-          const cloudR = 25 + Math.log2(1 + visNodes.length) * 16;
+          // Cloud radius: sqrt for wider range (log was too flat for 100-6000 range)
+          const cloudR = 20 + Math.sqrt(visNodes.length) * 1.2;
           const bgR = zLvl < 1.6 ? cloudR : maxDist + 20;
           const col = typeColor(cat);
 
