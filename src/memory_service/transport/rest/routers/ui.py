@@ -25,7 +25,7 @@ from ....config import (
     get_nats_curation_max_wait,
     get_nats_curation_max_concurrent,
 )
-from ..dependencies import get_episode_store, get_ontology_store, get_dragonfly
+from ..dependencies import get_episode_store, get_ontology_store, get_dragonfly, get_service
 
 logger = logging.getLogger(__name__)
 
@@ -321,6 +321,90 @@ async def list_ontology(
     except Exception as e:
         logger.warning(f"Ontology list query failed: {e}")
         return {"nodes": []}
+
+
+@router.get("/ui/causal")
+async def list_causal_claims(
+    request: Request,
+    group_id: Optional[str] = None,
+    limit: int = 50,
+):
+    """List causal claims with entity links and evidence counts."""
+    svc = get_service(request)
+    if not svc._causal_store:
+        return {"claims": [], "entity_edges": []}
+
+    store = svc._causal_store
+    try:
+        conditions = []
+        params: dict = {"limit": limit}
+        if group_id:
+            conditions.append("c.group_id = $group_id")
+            params["group_id"] = group_id
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        # Claims with entity links
+        result = await store._graph.ro_query(
+            f"""
+            MATCH (c:CausalClaim)
+            {where}
+            OPTIONAL MATCH (c)-[:CAUSE_ENTITY]->(cause:OntologyNode)
+            OPTIONAL MATCH (c)-[:EFFECT_ENTITY]->(effect:OntologyNode)
+            OPTIONAL MATCH (k:Knowledge)-[s:SUPPORTS]->(c)
+            OPTIONAL MATCH (k2:Knowledge)-[d:CONTRADICTS]->(c)
+            RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
+                   c.effect_summary AS effect_summary, c.mechanism AS mechanism,
+                   c.confidence AS confidence, c.status AS status,
+                   c.evidence_count AS evidence_count, c.group_id AS group_id,
+                   c.created_at AS created_at,
+                   cause.name AS cause_entity, cause.display_name AS cause_display,
+                   effect.name AS effect_entity, effect.display_name AS effect_display,
+                   count(DISTINCT s) AS support_count, count(DISTINCT d) AS contradict_count
+            ORDER BY c.confidence DESC
+            LIMIT $limit
+            """,
+            params=params,
+        )
+        claims = [
+            {
+                "uuid": row[0],
+                "cause_summary": row[1],
+                "effect_summary": row[2],
+                "mechanism": row[3] or "",
+                "confidence": float(row[4]) if row[4] is not None else 0.0,
+                "status": row[5] or "active",
+                "evidence_count": row[6] or 0,
+                "group_id": row[7],
+                "created_at": row[8],
+                "cause_entity": row[9],
+                "cause_display": row[10],
+                "effect_entity": row[11],
+                "effect_display": row[12],
+                "support_count": row[13] or 0,
+                "contradict_count": row[14] or 0,
+            }
+            for row in result.result_set
+        ]
+
+        # CAUSES edges between claims (for chain visualization)
+        chain_result = await store._graph.ro_query(
+            f"""
+            MATCH (a:CausalClaim)-[:CAUSES]->(b:CausalClaim)
+            {("WHERE a.group_id = $group_id" if group_id else "")}
+            RETURN a.uuid AS from_uuid, b.uuid AS to_uuid
+            LIMIT 200
+            """,
+            params=params,
+        )
+        chains = [
+            {"from": row[0], "to": row[1]}
+            for row in chain_result.result_set
+        ]
+
+        return {"claims": claims, "chains": chains}
+    except Exception as e:
+        logger.warning(f"Causal claims list query failed: {e}")
+        return {"claims": [], "chains": []}
 
 
 @router.get("/ui/config")

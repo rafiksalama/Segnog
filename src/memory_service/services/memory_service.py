@@ -726,6 +726,26 @@ class MemoryService:
                     except Exception:
                         pass
                 if causal_count:
+                    # Auto-link knowledge as SUPPORTS evidence for causal claims
+                    if knowledge_entries:
+                        try:
+                            claims = await self._causal_store.list_claims(group_id=group_id, limit=50)
+                            for claim in claims:
+                                claim_text = f"{claim.get('cause_summary', '')} {claim.get('effect_summary', '')}"
+                                claim_emb = await self._causal_store._embed(claim_text)
+                                # Find knowledge that semantically matches this claim
+                                matches = await kn_store.search_hybrid(
+                                    query=claim_text, top_k=3, min_score=0.6,
+                                )
+                                for kn in matches:
+                                    kn_uuid = kn.get("uuid", "")
+                                    if kn_uuid:
+                                        await self._causal_store.add_evidence(
+                                            claim["uuid"], kn_uuid, "supports", weight=kn.get("score", 0.7),
+                                        )
+                        except Exception as e:
+                            logger.debug(f"Auto-linking knowledge to causal claims: {e}")
+
                     await self._causal_store.revise_beliefs(group_id)
                     logger.info(f"Stored {causal_count} causal claims")
 
