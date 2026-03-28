@@ -89,8 +89,8 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
           color: typeColor(n.category || n.schema_type || "Thing"),
           deg,
           isHub,
-          // Size: hubs are bigger
-          val: isHub ? 8 + deg * 2 : 2 + Math.min(deg, 5),
+          // Size: log scale so high-degree nodes don't dominate
+          val: isHub ? 6 + Math.log2(1 + deg) * 4 : 2 + Math.log2(1 + deg) * 2,
           sourceCount: sc,
         };
       });
@@ -98,43 +98,55 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
     return { nodes: graphNodes, links };
   }, [nodes, edges, cooccur]);
 
-  // Fit graph after data loads
+  // Configure forces and fit after data loads
   useEffect(() => {
     if (fgRef.current && graphData.nodes.length > 0) {
-      setTimeout(() => fgRef.current.zoomToFit(400, 60), 500);
+      // Tune forces: moderate charge, short link distance
+      fgRef.current.d3Force("charge").strength(-40).distanceMax(200);
+      fgRef.current.d3Force("link").distance(link => {
+        const srcHub = link.source?.isHub || false;
+        const tgtHub = link.target?.isHub || false;
+        return (srcHub && tgtHub) ? 120 : 50; // hubs spread, spokes close
+      });
+      fgRef.current.d3ReheatSimulation();
+      setTimeout(() => fgRef.current.zoomToFit(400, 60), 1000);
     }
   }, [graphData]);
 
   // Custom node painting
   const paintNode = useCallback((node, ctx, globalScale) => {
-    const r = Math.sqrt(node.val) * 1.8;
-    const fontSize = node.isHub ? Math.max(3, 12 / globalScale) : Math.max(2, 8 / globalScale);
+    const r = Math.sqrt(node.val) * 2;
+    const screenR = r * globalScale;
 
     // Glow for hubs
     if (node.isHub) {
       ctx.beginPath();
-      ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
-      ctx.fillStyle = node.color + "20";
+      ctx.arc(node.x, node.y, r + 5, 0, Math.PI * 2);
+      ctx.fillStyle = node.color + "15";
       ctx.fill();
     }
 
-    // Main circle
+    // Main circle — darker fill for hubs, lighter for spokes
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = node.isHub ? node.color + "cc" : node.color + "60";
+    ctx.fillStyle = node.isHub ? node.color + "bb" : node.color + "70";
     ctx.fill();
     ctx.strokeStyle = node.color;
-    ctx.lineWidth = node.isHub ? 2 / globalScale : 0.5 / globalScale;
+    ctx.lineWidth = node.isHub ? 2 / globalScale : 1 / globalScale;
     ctx.stroke();
 
-    // Label: hubs always, spokes only when zoomed
-    const showLabel = node.isHub || (globalScale > 2 && node.deg >= 2);
+    // Labels — show when node is big enough on screen
+    // Hubs: always show. Spokes: show when zoomed enough
+    const showLabel = node.isHub || screenR > 6;
     if (showLabel) {
+      const fontSize = node.isHub
+        ? Math.max(3.5, Math.min(14, 13 / globalScale))
+        : Math.max(2.5, Math.min(10, 9 / globalScale));
       ctx.fillStyle = isDark ? "#e2e4ea" : "#1c1c1a";
-      ctx.font = `${node.isHub ? "bold" : ""} ${fontSize}px Inter, sans-serif`;
+      ctx.font = `${node.isHub ? "bold " : ""}${fontSize}px Inter, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillText(node.name, node.x, node.y + r + 2);
+      ctx.fillText(node.name, node.x, node.y + r + 1.5);
     }
   }, [isDark]);
 
@@ -180,10 +192,11 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       linkColor={linkColor}
       linkDirectionalParticles={0}
       nodeRelSize={4}
-      d3VelocityDecay={0.3}
-      d3AlphaDecay={0.02}
-      warmupTicks={80}
-      cooldownTicks={200}
+      d3VelocityDecay={0.4}
+      d3AlphaDecay={0.015}
+      warmupTicks={100}
+      cooldownTicks={300}
+      d3AlphaMin={0.001}
       backgroundColor={isDark ? "#0a0b0f" : "#f4f3ef"}
       onNodeClick={(node) => {
         // Could emit event to parent for popup
