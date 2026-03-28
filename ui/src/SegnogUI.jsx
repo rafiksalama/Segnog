@@ -980,203 +980,105 @@ const GraphPage = () => {
     nodes.forEach(n => { n.vx = 0; n.vy = 0; n.fixed = false; });
 
     if (layout === "hub" && needsReposition) {
+      // ── Hub-and-spoke layout: graph-structure driven ──────────────────
+      // 1. Compute degree for each node
+      // 2. Identify hubs (top N by degree)
+      // 3. Position hubs using simple force layout
+      // 4. Position spokes around their connected hub
+      // 5. Singletons hidden by default
+
       nodes.forEach(n => { n.isHub = false; n.community = -1; n.isSingleton = false; });
 
-      // ── Group nodes by category (top-level Schema.org superclass) ──────
-      const catMap = {};  // category → { nodes: [], subTypes: { type → [nodes] } }
-      nodes.forEach(n => {
-        const cat = n.data.category || n.data.schema_type || "Thing";
-        const stype = n.data.schema_type || "Thing";
-        if (!catMap[cat]) catMap[cat] = { nodes: [], subTypes: {} };
-        catMap[cat].nodes.push(n);
-        if (!catMap[cat].subTypes[stype]) catMap[cat].subTypes[stype] = [];
-        catMap[cat].subTypes[stype].push(n);
-      });
-      // Sort categories by node count (largest first)
-      const categories = Object.entries(catMap)
-        .sort((a, b) => b[1].nodes.length - a[1].nodes.length);
-
-      // Mark singletons: categories with only 1 node and no edges
       const deg = new Array(nodes.length).fill(0);
-      edges.forEach(([a, b]) => { if (a != null && b != null && a !== b) { deg[a]++; deg[b]++; } });
+      const adj = new Array(nodes.length).fill(null).map(() => []);
+      edges.forEach(([a, b]) => {
+        if (a != null && b != null && a !== b && nodes[a] && nodes[b]) {
+          deg[a]++; deg[b]++;
+          adj[a].push(b); adj[b].push(a);
+        }
+      });
+
+      // Mark singletons (degree 0)
       const singletonNodes = [];
-      categories.forEach(([, catData]) => {
-        catData.nodes.forEach(n => {
-          const idx = nodes.indexOf(n);
-          if (catData.nodes.length === 1 && idx >= 0 && deg[idx] === 0) {
-            n.isSingleton = true;
-            singletonNodes.push(n);
-          }
-        });
+      nodes.forEach((n, i) => {
+        if (deg[i] === 0) { n.isSingleton = true; singletonNodes.push(n); }
       });
       setSingletonCount(singletonNodes.length);
 
-      // Filter to non-singleton categories, merge tiny categories into "Other"
-      const MIN_CAT_SIZE = 10;
-      let rawCats = categories.filter(([, d]) =>
-        d.nodes.some(n => !n.isSingleton)
-      ).map(([cat, d]) => [cat, { ...d, nodes: d.nodes.filter(n => !n.isSingleton) }]);
-      // Merge small categories
-      const otherNodes = [];
-      const otherSubTypes = {};
-      const realCats = [];
-      rawCats.forEach(([cat, d]) => {
-        if (d.nodes.length < MIN_CAT_SIZE || cat === "Thing") {
-          otherNodes.push(...d.nodes);
-          Object.entries(d.subTypes).forEach(([st, ns]) => {
-            if (!otherSubTypes[st]) otherSubTypes[st] = [];
-            otherSubTypes[st].push(...ns);
-          });
+      // Find hubs: top nodes by degree, min degree 2
+      const HUB_COUNT = Math.min(30, Math.max(3, Math.floor(nodes.filter(n => !n.isSingleton).length * 0.02)));
+      const indexed = nodes.map((n, i) => ({ n, i, deg: deg[i] }))
+        .filter(x => !x.n.isSingleton && x.deg >= 2)
+        .sort((a, b) => b.deg - a.deg);
+      const hubSet = new Set();
+      indexed.slice(0, HUB_COUNT).forEach(({ n, i }) => {
+        n.isHub = true;
+        hubSet.add(i);
+      });
+
+      // Assign each non-hub to its most-connected hub (community)
+      const hubList = [...hubSet];
+      nodes.forEach((n, i) => {
+        if (n.isSingleton) return;
+        if (n.isHub) { n.community = i; return; }
+        // Find the hub this node is most connected to
+        let bestHub = -1, bestConn = 0;
+        for (const hi of hubList) {
+          let conn = 0;
+          for (const nb of adj[i]) { if (nb === hi) conn++; }
+          if (conn > bestConn) { bestConn = conn; bestHub = hi; }
+        }
+        // Fallback: nearest hub by source_count similarity
+        if (bestHub < 0 && hubList.length > 0) {
+          bestHub = hubList[0]; // default to largest hub
+        }
+        n.community = bestHub;
+      });
+
+      // Size nodes by degree
+      nodes.forEach((n, i) => {
+        if (n.isSingleton) return;
+        if (n.isHub) {
+          n.r = Math.min(30, 12 + deg[i] * 1.5);
         } else {
-          realCats.push([cat, d]);
+          n.r = Math.min(16, 5 + deg[i] * 2);
         }
       });
-      if (otherNodes.length > 0) {
-        realCats.push(["Other", { nodes: otherNodes, subTypes: otherSubTypes }]);
-      }
 
-      const nC = realCats.length;
-      if (nC === 0) {
-        // All singletons — centered grid
-        const cellSize = 50;
-        const cols = Math.ceil(Math.sqrt(nodes.length * 1.5));
-        const gridW = cols * cellSize, gridH = Math.ceil(nodes.length / cols) * cellSize;
-        nodes.forEach((n, i) => {
-          const col = i % cols, row = Math.floor(i / cols);
-          n.x = w / 2 - gridW / 2 + col * cellSize + cellSize / 2;
-          n.y = h / 2 - gridH / 2 + row * cellSize + cellSize / 2;
-          n.vx = 0; n.vy = 0;
+      // Position hubs in a circle — use most of the canvas
+      const hubR = Math.min(w, h) * 0.35;
+      hubList.forEach((hi, ci) => {
+        const a = (ci / hubList.length) * Math.PI * 2 - Math.PI / 2;
+        nodes[hi].x = w / 2 + hubR * Math.cos(a);
+        nodes[hi].y = h / 2 + hubR * Math.sin(a);
+        nodes[hi].vx = 0; nodes[hi].vy = 0;
+      });
+
+      // Position spokes around their hub
+      const hubSpokes = {}; // hubIdx → [nodeIdx]
+      nodes.forEach((n, i) => {
+        if (n.isSingleton || n.isHub) return;
+        const hub = n.community;
+        if (hub < 0) return;
+        if (!hubSpokes[hub]) hubSpokes[hub] = [];
+        hubSpokes[hub].push(i);
+      });
+
+      Object.entries(hubSpokes).forEach(([hubIdx, spokeIdxs]) => {
+        const hi = parseInt(hubIdx);
+        const hx = nodes[hi].x, hy = nodes[hi].y;
+        const spokeR = 40 + Math.sqrt(spokeIdxs.length) * 18;
+        spokeIdxs.forEach((si, j) => {
+          const a = (j / spokeIdxs.length) * Math.PI * 2;
+          nodes[si].x = hx + spokeR * Math.cos(a);
+          nodes[si].y = hy + spokeR * Math.sin(a);
+          nodes[si].vx = 0; nodes[si].vy = 0;
         });
-      } else {
-        // Assign community IDs by category (for edge rendering)
-        realCats.forEach(([, catData], cid) => {
-          catData.nodes.forEach(n => { n.community = cid; });
-        });
+      });
 
-        // ── Position categories on ring ─────────────────────────────────
-        // Log-scaled cluster radius — prevents large categories from dominating
-        const maxCluster = Math.min(w, h) * 0.12;
-        // Capped sqrt scale — shows size differences without dominating the view
-        const clusterR = ([, d]) => Math.min(maxCluster, Math.min(90, 18 + Math.sqrt(d.nodes.length) * 0.9));
-        let maxPairSep = 0;
-        if (nC >= 2) {
-          const byCR = [...realCats].sort((a, b) => clusterR(b) - clusterR(a));
-          for (let i = 0; i < nC; i++)
-            maxPairSep = Math.max(maxPairSep, clusterR(byCR[i]) + clusterR(byCR[(i + 1) % nC]) + 40);
-        }
-        const minRing = nC >= 2 ? (maxPairSep / 2) / Math.sin(Math.PI / nC) : 0;
-        // Scale ring radius — use most of the canvas
-        const ringScale = nC > 12 ? 0.44 : nC > 8 ? 0.40 : 0.36;
-        const catRing = nC <= 1 ? 0 : Math.max(minRing, Math.min(w, h) * ringScale);
-
-        // Category center positions — packed layout (largest central, spiral out)
-        // Merge "Thing" into its largest sibling category (it's the root, not useful as a group)
-        const thingCat = realCats.find(([c]) => c === "Thing");
-        const nonThingCats = realCats.filter(([c]) => c !== "Thing");
-        if (thingCat && nonThingCats.length > 0) {
-          // Redistribute Thing nodes to their schema_type's nearest category
-          thingCat[1].nodes.forEach(n => {
-            n.isSingleton = true;  // hide Thing nodes in cloud view
-          });
-        }
-        const sortedCats = (nonThingCats.length > 0 ? nonThingCats : realCats)
-          .sort((a, b) => b[1].nodes.length - a[1].nodes.length);
-
-        const catCenters = [];
-        const placed = []; // {cx, cy, r} for collision avoidance
-        const GAP = 25; // minimum gap between bubble edges
-
-        sortedCats.forEach(([cat, catData], ci) => {
-          const r = clusterR([cat, catData]);
-          let cx, cy;
-          if (ci === 0) {
-            cx = w / 2; cy = h / 2;
-          } else {
-            // Spiral placement with collision avoidance
-            let bestX = w / 2, bestY = h / 2, found = false;
-            for (let dist = r + GAP; dist < Math.max(w, h) * 0.45 && !found; dist += 10) {
-              // Golden angle spiral for even distribution
-              const goldenAngle = ci * 2.399963;
-              for (let da = 0; da < Math.PI * 2; da += 0.25) {
-                const a = goldenAngle + da;
-                const tx = w / 2 + dist * Math.cos(a);
-                const ty = h / 2 + dist * Math.sin(a);
-                let overlap = false;
-                for (const p of placed) {
-                  if (Math.hypot(tx - p.cx, ty - p.cy) < r + p.r + GAP) { overlap = true; break; }
-                }
-                if (!overlap && tx > r + 5 && tx < w - r - 5 && ty > r + 5 && ty < h - r - 5) {
-                  bestX = tx; bestY = ty; found = true; break;
-                }
-              }
-            }
-            cx = bestX; cy = bestY;
-          }
-          placed.push({ cx, cy, r });
-          catCenters.push({ cat, cx, cy, data: catData });
-        });
-
-        // ── Position nodes within each category cluster ──────────────────
-        catCenters.forEach(({ cx, cy, data: catData }) => {
-          const subTypeEntries = Object.entries(catData.subTypes)
-            .map(([t, ns]) => [t, ns.filter(n => !n.isSingleton)])
-            .filter(([, ns]) => ns.length > 0)
-            .sort((a, b) => b[1].length - a[1].length);
-
-          if (subTypeEntries.length === 0) return;
-
-          if (subTypeEntries.length === 1) {
-            // Single sub-type: arrange nodes in a circle around center
-            const ns = subTypeEntries[0][1];
-            if (ns.length === 1) {
-              ns[0].x = cx; ns[0].y = cy; ns[0].vx = 0; ns[0].vy = 0;
-            } else {
-              const r = Math.min(maxCluster, 10 + ns.length * 5);
-              ns.forEach((n, i) => {
-                const a = (i / ns.length) * Math.PI * 2;
-                n.x = cx + r * Math.cos(a); n.y = cy + r * Math.sin(a);
-                n.vx = 0; n.vy = 0;
-              });
-            }
-          } else {
-            // Multiple sub-types: arrange sub-type clusters around category center
-            const stR = Math.min(maxCluster * 0.7, 12 + subTypeEntries.length * 5);
-            subTypeEntries.forEach(([, ns], si) => {
-              const sa = (si / subTypeEntries.length) * Math.PI * 2 - Math.PI / 2;
-              const stCx = cx + stR * Math.cos(sa);
-              const stCy = cy + stR * Math.sin(sa);
-              if (ns.length === 1) {
-                ns[0].x = stCx; ns[0].y = stCy; ns[0].vx = 0; ns[0].vy = 0;
-              } else {
-                const nr = Math.min(maxCluster * 0.4, 8 + ns.length * 3);
-                ns.forEach((n, i) => {
-                  const a = (i / ns.length) * Math.PI * 2;
-                  n.x = stCx + nr * Math.cos(a); n.y = stCy + nr * Math.sin(a);
-                  n.vx = 0; n.vy = 0;
-                });
-              }
-            });
-          }
-        });
-
-        // Store category centers for label rendering
-        nodesRef._catCenters = catCenters;
-
-        // Singletons: compact grid below clusters (only when shown)
-        if (showSingletons && singletonNodes.length > 0) {
-          let maxRealY = 0;
-          catCenters.forEach(({ cy }) => { maxRealY = Math.max(maxRealY, cy + maxCluster + 30); });
-          const cellSize = 50;
-          const cols = Math.ceil(Math.sqrt(singletonNodes.length * 2));
-          const gridW = cols * cellSize;
-          singletonNodes.forEach((n, si) => {
-            const col = si % cols, row = Math.floor(si / cols);
-            n.x = w / 2 - gridW / 2 + col * cellSize + cellSize / 2;
-            n.y = maxRealY + 40 + row * cellSize;
-            n.vx = 0; n.vy = 0;
-          });
-        }
-      }
+      // Store hub info for rendering
+      nodesRef._catCenters = []; // Clear old category centers
+      nodesRef._hubLayout = true;
     } else if (layout === "force") {
       // Random seed only when layout or node count changes; otherwise keep positions
       if (nodeCountChanged || layoutChanged) {
@@ -1281,16 +1183,17 @@ const GraphPage = () => {
       // In hub layout: fit only to real-community nodes so the singleton
       // grid below doesn't force the camera to zoom way out
       const fitNodes = (layout === "hub")
-        ? nodes.filter(n => !n.isSingleton)
+        ? nodes.filter(n => !n.isSingleton && (n.isHub || n.community >= 0))
         : nodes;
       const ref = fitNodes.length > 0 ? fitNodes : nodes;
       const pad = 60;
       const xs = ref.map(n => n.x), ys = ref.map(n => n.y);
       const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
       const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
-      // Hub: cap to cloud zoom so initial view shows category bubbles
-      const maxFitZ = layout === "hub" ? 1.0 : 3.5;
-      const fz = Math.min(w / (maxX - minX), h / (maxY - minY), maxFitZ);
+      const maxFitZ = layout === "hub" ? 1.5 : 3.5;
+      let fz = Math.min(w / (maxX - minX), h / (maxY - minY), maxFitZ);
+      // Hub: ensure minimum zoom so the graph is visible
+      if (layout === "hub") fz = Math.max(fz, 0.8);
       zoom.z = fz;
       pan.x  = w / 2 - ((minX + maxX) / 2) * fz;
       pan.y  = h / 2 - ((minY + maxY) / 2) * fz;
@@ -1316,7 +1219,8 @@ const GraphPage = () => {
       //   1.6–3  → sub-type circles inside category boundaries
       //   > 3    → individual nodes with labels
       const zLvl = zoom.z;
-      if (layout === "hub") {
+      if (layout === "hub" && false) {
+        // OLD CATEGORY BUBBLE CODE — DISABLED, replaced by hub-and-spoke
         const catCenters = nodesRef._catCenters || [];
         catCenters.forEach(({ cat, cx, cy, data: catData }) => {
           const visNodes = catData.nodes.filter(n => !n.isSingleton);
@@ -1360,27 +1264,31 @@ const GraphPage = () => {
             ctx.fillText(`${visNodes.length}`, cx, cy + fontSize * 0.65);
 
           } else if (zLvl < 5) {
-            // ── Level 2: Sub-type circles inside category boundary ──
-            // Category boundary (light)
+            // ── Level 2: Sub-type circles — only show top sub-types (≥5 nodes) ──
+            // Light category boundary
             ctx.beginPath(); ctx.arc(cx, cy, bgR, 0, Math.PI * 2);
-            ctx.fillStyle = col + "08"; ctx.fill();
-            ctx.setLineDash([4, 8]);
-            ctx.strokeStyle = col + "25"; ctx.lineWidth = 0.8; ctx.stroke();
-            ctx.setLineDash([]);
-            // Category label above
-            ctx.fillStyle = col + "bb"; ctx.font = `700 11px ${FONT}`; ctx.textAlign = "center";
-            ctx.fillText(cat, cx, cy - bgR - 5);
-            // Sub-type bubbles (capped radius for readability)
-            stClusters.forEach(({ st, sx, sy, sr, count, col: stCol }) => {
-              const cappedSR = Math.min(sr, 12 + Math.sqrt(count) * 3);
-              ctx.beginPath(); ctx.arc(sx, sy, cappedSR, 0, Math.PI * 2);
-              ctx.fillStyle = stCol + "20"; ctx.fill();
-              ctx.strokeStyle = stCol + "55"; ctx.lineWidth = 1.2; ctx.stroke();
-              const stFontSize = Math.max(7, Math.min(12, sr * 0.4));
-              ctx.fillStyle = stCol; ctx.font = `700 ${stFontSize}px ${FONT}`; ctx.textAlign = "center";
-              ctx.fillText(st, sx, sy - 2);
-              ctx.fillStyle = stCol + "88"; ctx.font = `600 ${Math.max(6, stFontSize * 0.7)}px ${MONO}`;
-              ctx.fillText(`${count}`, sx, sy + stFontSize * 0.65);
+            ctx.fillStyle = col + "0c"; ctx.fill();
+            ctx.strokeStyle = col + "30"; ctx.lineWidth = 1.5; ctx.stroke();
+            // Category label
+            ctx.fillStyle = col; ctx.font = `700 12px ${FONT}`; ctx.textAlign = "center";
+            ctx.fillText(cat, cx, cy - bgR - 6);
+            ctx.fillStyle = col + "99"; ctx.font = `600 9px ${MONO}`;
+            ctx.fillText(`${visNodes.length}`, cx, cy - bgR + 8);
+            // Only show sub-types with ≥5 nodes, max 8 per category
+            const topST = stClusters
+              .filter(s => s.count >= 5)
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 8);
+            topST.forEach(({ st, sx, sy, count, col: stCol }) => {
+              const r = Math.min(40, 10 + Math.sqrt(count) * 2);
+              ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+              ctx.fillStyle = stCol + "25"; ctx.fill();
+              ctx.strokeStyle = stCol + "60"; ctx.lineWidth = 1; ctx.stroke();
+              const fs = Math.max(7, Math.min(11, r * 0.35));
+              ctx.fillStyle = stCol; ctx.font = `700 ${fs}px ${FONT}`; ctx.textAlign = "center";
+              ctx.fillText(st, sx, sy - 1);
+              ctx.fillStyle = stCol + "88"; ctx.font = `600 ${Math.max(6, fs * 0.7)}px ${MONO}`;
+              ctx.fillText(`${count}`, sx, sy + fs * 0.6);
             });
 
           } else {
@@ -1491,7 +1399,7 @@ const GraphPage = () => {
       }
 
       // ── Edges (hidden in hub cloud/sub-type view, visible at detail zoom) ──
-      const hubCloud = layout === "hub" && zLvl < 5;
+      const hubCloud = false; // hub-and-spoke always shows nodes+edges
       if (!hubCloud) {
         let edgeDrawn = 0;
         const MAX_EDGES = 200; // cap edges for readability at detail zoom
@@ -1507,14 +1415,20 @@ const GraphPage = () => {
           }
           const interComm = layout === "hub" && nodes[a].community !== undefined && nodes[a].community !== nodes[b].community;
           ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y);
+          const hubEdge = layout === "hub" && nodes[a].isHub && nodes[b].isHub;
           if (etype === 1) {
             ctx.setLineDash([3, 6]);
-            ctx.strokeStyle = p.textMuted + (interComm ? "40" : "18");
-            ctx.lineWidth = interComm ? 1 : 0.5;
+            ctx.strokeStyle = p.textMuted + "20";
+            ctx.lineWidth = 0.5;
+          } else if (hubEdge) {
+            // Hub-to-hub: thick prominent edge
+            ctx.setLineDash([]);
+            ctx.strokeStyle = p.textMuted + "90";
+            ctx.lineWidth = 3;
           } else {
             ctx.setLineDash([]);
-            ctx.strokeStyle = p.accent + (interComm ? "70" : "35");
-            ctx.lineWidth = interComm ? 1.5 : 0.8;
+            ctx.strokeStyle = p.textMuted + "40";
+            ctx.lineWidth = 0.8;
           }
           ctx.stroke();
           ctx.setLineDash([]);
@@ -1529,39 +1443,52 @@ const GraphPage = () => {
         });
       }
 
-      // ── Nodes (hidden in hub cloud/sub-type view, visible at detail zoom) ──
-      // Only draw nodes visible in current viewport to avoid drawing 5000+ circles
+      // ── Nodes ──────────────────────────────────────────────────────────
       if (!hubCloud) {
         const pan = panRef.current;
-        // Viewport bounds in world coordinates
-        const vx0 = -pan.x / zLvl - 50, vy0 = -pan.y / zLvl - 50;
-        const vx1 = (w - pan.x) / zLvl + 50, vy1 = (h - pan.y) / zLvl + 50;
+        const vx0 = -pan.x / zLvl - 80, vy0 = -pan.y / zLvl - 80;
+        const vx1 = (w - pan.x) / zLvl + 80, vy1 = (h - pan.y) / zLvl + 80;
         let drawn = 0;
-        const MAX_DRAW = 300; // cap visible nodes for readability
-        // Sort by source_count desc so important nodes are drawn first
-        const sortedNodes = [...nodes].sort((a, b) => (b.data.source_count || 0) - (a.data.source_count || 0));
+        const MAX_DRAW = 400;
+        // Sort: hubs first, then by degree/source_count
+        const sortedNodes = [...nodes].sort((a, b) => {
+          if (a.isHub !== b.isHub) return a.isHub ? -1 : 1;
+          return (b.data.source_count || 0) - (a.data.source_count || 0);
+        });
         for (const n of sortedNodes) {
-          if (layout === "hub" && n.isSingleton && !showSingletons) continue;
-          // Viewport culling
+          if (n.isSingleton && !showSingletons) continue;
           if (n.x < vx0 || n.x > vx1 || n.y < vy0 || n.y > vy1) continue;
           if (drawn >= MAX_DRAW) break;
           drawn++;
           const nodeType = n.data.schema_type || "Thing";
           const dimmed = typeFilter && nodeType !== typeFilter;
-          const alpha = dimmed ? 0.15 : 1;
-          ctx.globalAlpha = alpha;
+          ctx.globalAlpha = dimmed ? 0.15 : 1;
           const screenR = n.r * zLvl;
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-          ctx.fillStyle = n.fixed ? n.color + "60" : n.color + "20";
-          ctx.strokeStyle = n.color + "90"; ctx.lineWidth = 1;
-          ctx.fill(); ctx.stroke();
-          // Labels: only for top entities with enough screen space and separation
-          const importance = n.data.source_count || 0;
-          const minImportance = zLvl > 6 ? 3 : 5; // stricter at medium zoom
-          if (showLabels && !dimmed && screenR >= 25 && importance >= minImportance) {
-            const fontSize = Math.min(9, Math.max(6, screenR * 0.3));
-            ctx.fillStyle = p.text + "dd"; ctx.font = `600 ${fontSize}px ${FONT}`; ctx.textAlign = "center";
-            ctx.fillText(n.label, n.x, n.y + n.r + 10);
+
+          if (n.isHub) {
+            // Hub: prominent filled circle with glow
+            ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 6, 0, Math.PI * 2);
+            ctx.fillStyle = n.color + "18"; ctx.fill();
+            ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+            ctx.fillStyle = n.color + "80"; ctx.fill();
+            ctx.strokeStyle = n.color; ctx.lineWidth = 2.5; ctx.stroke();
+            // Hub always shows label
+            if (showLabels && !dimmed) {
+              const fs = Math.min(11, Math.max(8, n.r * 0.7));
+              ctx.fillStyle = p.text; ctx.font = `700 ${fs}px ${FONT}`; ctx.textAlign = "center";
+              ctx.fillText(n.label, n.x, n.y + n.r + 14);
+            }
+          } else {
+            // Spoke/leaf: lighter fill
+            ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+            ctx.fillStyle = n.color + "40"; ctx.fill();
+            ctx.strokeStyle = n.color + "80"; ctx.lineWidth = 1.2; ctx.stroke();
+            // Spoke label: only at high zoom and high importance
+            if (showLabels && !dimmed && screenR >= 20 && (n.data.source_count || 0) >= 3) {
+              const fs = Math.min(9, Math.max(6, screenR * 0.35));
+              ctx.fillStyle = p.text + "cc"; ctx.font = `600 ${fs}px ${FONT}`; ctx.textAlign = "center";
+              ctx.fillText(n.label, n.x, n.y + n.r + 10);
+            }
           }
           ctx.globalAlpha = 1;
         }
@@ -1681,7 +1608,7 @@ const GraphPage = () => {
     // Skip animation restart if only theme changed (no structural change)
     let frame, settled = 0;
     const FRAMES = (nodeCountChanged || layoutChanged)
-      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 40 : 0)
+      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 60 : 0)
       : 0;
     // Hub-specific overlap resolution: grid-accelerated push of overlapping nodes
     // Only processes non-singleton visible nodes. O(n) average with spatial grid.
