@@ -111,12 +111,17 @@ def create_app() -> FastAPI:
                 "episodes": "/api/v1/memory/episodes",
                 "knowledge": "/api/v1/memory/knowledge",
                 "artifacts": "/api/v1/memory/artifacts",
+                "causal_claims": "/api/v1/memory/causal/claims",
+                "causal_chain": "/api/v1/memory/causal/chain",
+                "reflections": "GET /api/v1/memory/reflections",
                 "ontology": "/api/v1/memory/ui/ontology",
                 "smart": "/api/v1/memory/smart",
                 "pipelines": "/api/v1/memory/pipelines",
                 "health": "/health",
                 "mcp_sse": "/mcp/sse",
                 "mcp_tools": "GET /api/v1/memory/mcp/tools",
+                "ui_causal": "GET /api/v1/memory/ui/causal",
+                "ui_reflections": "GET /api/v1/memory/ui/reflections",
             },
         }
 
