@@ -1893,14 +1893,20 @@ const GraphPage = () => {
       }}>
         {/* Tabs */}
         <div style={{ display: "flex", borderBottom: `1px solid ${p.border}` }}>
-          {["episodes", "knowledge", "ontology", "causal", "reflections"].map(t => (
+          {[
+            ["episodes", "Eps"],
+            ["knowledge", "Know"],
+            ["ontology", "Entity"],
+            ["causal", "Causal"],
+            ["reflections", "Reflect"],
+          ].map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)} style={{
-              flex: 1, padding: "12px 0", fontSize: 11, fontWeight: 700, fontFamily: MONO,
-              textTransform: "uppercase", letterSpacing: "0.06em", border: "none", cursor: "pointer",
+              flex: 1, padding: "10px 0", fontSize: 10, fontWeight: 700, fontFamily: MONO,
+              textTransform: "uppercase", letterSpacing: "0.04em", border: "none", cursor: "pointer",
               background: "transparent", color: tab === t ? p.accent : p.textMuted,
               borderBottom: tab === t ? `2px solid ${p.accent}` : "2px solid transparent",
               transition: "all 0.15s",
-            }}>{t}</button>
+            }}>{label}</button>
           ))}
         </div>
 
