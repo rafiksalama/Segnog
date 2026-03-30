@@ -37,9 +37,9 @@ class REMSweepPublisher:
                         "memory.rem.sweep.trigger",
                         json.dumps(payload).encode(),
                     )
-                    logger.debug("Published REM sweep trigger")
+                    logger.info(f"Published REM sweep trigger (timer)")
                 except Exception as e:
-                    logger.warning(f"Failed to publish sweep trigger: {e}")
+                    logger.error(f"Failed to publish sweep trigger: {e}", exc_info=True)
         except asyncio.CancelledError:
             self._running = False
             logger.info("REM sweep timer stopped")
@@ -91,18 +91,26 @@ class REMSweepWorker:
             while self._running:
                 try:
                     msgs = await sub.fetch(batch=1, timeout=10)
+                    logger.debug(f"REMSweepWorker fetched {len(msgs)} message(s)")
                     for msg in msgs:
                         try:
                             await self._run_sweep()
                             await msg.ack()
+                            logger.debug("REMSweepWorker acknowledged sweep message")
                         except Exception as e:
                             logger.error(f"Sweep failed: {e}", exc_info=True)
                             try:
                                 await msg.nak()
                             except Exception:
                                 pass
-                except Exception:
-                    pass  # Timeout, loop back
+                except asyncio.TimeoutError:
+                    # Timeout is expected - no messages available, loop back
+                    pass
+                except Exception as e:
+                    # Log unexpected errors but don't crash
+                    logger.warning(f"REMSweepWorker fetch error: {e}")
+                    # Brief sleep before retrying
+                    await asyncio.sleep(5)
         except asyncio.CancelledError:
             self._running = False
             logger.info("REMSweepWorker stopped")
