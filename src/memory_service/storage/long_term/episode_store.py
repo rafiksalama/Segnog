@@ -405,6 +405,7 @@ class EpisodeStore(BaseStore):
         expansion_hops: int = 1,
         after_time: Optional[float] = None,
         before_time: Optional[float] = None,
+        global_search: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Vector similarity search on stored episodes.
@@ -418,26 +419,28 @@ class EpisodeStore(BaseStore):
             expansion_hops: Number of hops for graph expansion.
             after_time: Only include episodes after this epoch time.
             before_time: Only include episodes before this epoch time.
+            global_search: If True, search across ALL groups (not just current session).
 
         Returns:
             List of dicts with uuid, content, episode_type, metadata,
             created_at, created_at_iso, score.
         """
-        # Fast path: skip embedding if the group(s) have no episodes.
-        use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
-        if use_scope:
-            count_result = await self._graph.ro_query(
-                "MATCH (e:Episode) WHERE e.group_id IN $gids RETURN count(e) AS n",
-                params={"gids": self._scope_group_ids},
-            )
-        else:
-            count_result = await self._graph.ro_query(
-                "MATCH (e:Episode) WHERE e.group_id = $gid RETURN count(e) AS n",
-                params={"gid": self._group_id},
-            )
-        count_rows = self._parse_results(count_result)
-        if not count_rows or count_rows[0].get("n", 0) == 0:
-            return []
+        if not global_search:
+            # Fast path: skip embedding if the group(s) have no episodes.
+            use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
+            if use_scope:
+                count_result = await self._graph.ro_query(
+                    "MATCH (e:Episode) WHERE e.group_id IN $gids RETURN count(e) AS n",
+                    params={"gids": self._scope_group_ids},
+                )
+            else:
+                count_result = await self._graph.ro_query(
+                    "MATCH (e:Episode) WHERE e.group_id = $gid RETURN count(e) AS n",
+                    params={"gid": self._group_id},
+                )
+            count_rows = self._parse_results(count_result)
+            if not count_rows or count_rows[0].get("n", 0) == 0:
+                return []
 
         query_embedding = await self._embed(query)
         return await self._search_with_embedding(
@@ -449,6 +452,7 @@ class EpisodeStore(BaseStore):
             expansion_hops,
             after_time,
             before_time,
+            global_search=global_search,
         )
 
     async def _search_with_embedding(
@@ -462,6 +466,7 @@ class EpisodeStore(BaseStore):
         after_time: Optional[float] = None,
         before_time: Optional[float] = None,
         include_embedding: bool = False,
+        global_search: bool = False,
     ) -> List[Dict[str, Any]]:
         """Vector similarity search using a pre-computed embedding vector."""
         type_filter = "AND e.episode_type = $episode_type" if episode_type else ""
@@ -475,9 +480,10 @@ class EpisodeStore(BaseStore):
             ",\n                e.embedding AS embedding" if include_embedding else ""
         )
 
-        # Inherited scope: search across current session + ancestor sessions
-        use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
-        if use_scope:
+        # Group scoping: global (no filter), inherited scope, or single session
+        if global_search:
+            group_filter = "true"  # no group filter
+        elif self._scope_group_ids and len(self._scope_group_ids) > 1:
             group_filter = "e.group_id IN $group_ids"
         else:
             group_filter = "e.group_id = $group_id"
@@ -505,10 +511,12 @@ class EpisodeStore(BaseStore):
             "min_score": min_score,
             "top_k": top_k * 2,  # Over-fetch for temporal re-ranking
         }
-        if use_scope:
-            params["group_ids"] = self._scope_group_ids
-        else:
-            params["group_id"] = self._group_id
+        if not global_search:
+            use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
+            if use_scope:
+                params["group_ids"] = self._scope_group_ids
+            else:
+                params["group_id"] = self._group_id
         if episode_type:
             params["episode_type"] = episode_type
         if after_time is not None:

@@ -90,6 +90,7 @@ class MemoryService:
         expansion_hops: int = 1,
         after_time: Optional[float] = None,
         before_time: Optional[float] = None,
+        global_search: bool = False,
     ) -> List[Dict[str, Any]]:
         return await self._ep(group_id).search_episodes(
             query=query,
@@ -100,6 +101,7 @@ class MemoryService:
             expansion_hops=expansion_hops,
             after_time=after_time,
             before_time=before_time,
+            global_search=global_search,
         )
 
     async def search_episodes_by_entities(
@@ -413,13 +415,14 @@ class MemoryService:
         except Exception as e:
             logger.warning(f"Task reinterpretation failed (non-critical): {e}")
 
-        # Step 1: Episode vector search
+        # Step 1: Episode vector search — GLOBAL (cross-session)
         long_term_context = ""
         try:
             results = await ep_store.search_episodes(
                 query=search_query,
                 top_k=10,
                 min_score=0.55,
+                global_search=True,  # search across ALL sessions
             )
             if results:
                 lines = ["## Related Memory (Episode Search)"]

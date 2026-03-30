@@ -203,26 +203,27 @@ async def memory_search_knowledge(
 
 @mcp.tool()
 async def memory_search_episodes(
-    session_id: str,
-    query: str,
+    session_id: Optional[str] = None,
+    query: str = "",
     top_k: int = 10,
     min_score: float = 0.40,
 ) -> str:
     """
-    Semantic search over raw episode history for a session.
+    Semantic search over episode history.
 
-    Episodes are individual observation turns — the raw conversational
-    record.  Use `memory_search_knowledge` for distilled facts; use this
-    tool to recall specific conversation moments.
+    Omit `session_id` to search globally across ALL sessions
+    (finds metacognition reports, causal reflections, and past conversations).
+    Supply `session_id` to scope results to that session only.
 
     Returns a JSON array of episode records ordered by relevance score.
     """
     svc = await _get_service()
     results = await svc.search_episodes(
-        group_id=session_id,
+        group_id=session_id or "default",
         query=query,
         top_k=top_k,
         min_score=min_score,
+        global_search=not session_id,  # global when no session specified
     )
     return json.dumps(results, indent=2, default=str)
 
