@@ -215,16 +215,15 @@ class CausalClaimStore(BaseStore):
                  coalesce(sum(s.weight), 0) AS support_total,
                  coalesce(sum(d.weight), 0) AS contradict_total
             WITH c, support_total, contradict_total,
-                 CASE WHEN support_total + contradict_total > 0
-                      THEN support_total / (support_total + contradict_total)
-                      ELSE 0.5
-                 END AS evidence_ratio,
-                 CASE WHEN support_total + contradict_total > 0
-                      THEN toFloat(support_total + contradict_total) / (support_total + contradict_total + 3.0)
-                      ELSE 0.0
-                 END AS evidence_weight
-            WITH c,
-                 evidence_weight * evidence_ratio + (1.0 - evidence_weight) * c.confidence AS new_conf
+                 CASE
+                     WHEN support_total + contradict_total > 0 THEN
+                         // Simple evidence ratio: support / (support + contradict)
+                         // This naturally scales from 0.0 to 1.0 based on evidence balance
+                         support_total::float / (support_total + contradict_total)
+                     ELSE
+                         // No evidence: slight regression to 0.5 (uncertainty) prevents overconfidence
+                         c.confidence * 0.95 + 0.5 * 0.05
+                 END AS new_conf
             SET c.confidence = new_conf,
                 c.status = CASE
                     WHEN new_conf < 0.05 THEN 'refuted'
