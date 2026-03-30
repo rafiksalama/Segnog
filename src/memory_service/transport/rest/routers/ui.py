@@ -663,20 +663,22 @@ async def list_ontology_cooccurrence(request: Request, limit: int = 400):
         return {"edges": []}
 
 
-@router.get("/ui/ontology/{uuid}")
-async def get_ontology_node(uuid: str, request: Request):
-    """Get a single OntologyNode with full summary (for popup on click)."""
+@router.get("/ui/ontology/{identifier}")
+async def get_ontology_node(identifier: str, request: Request):
+    """Get a single OntologyNode by name or UUID."""
     onto_store = get_ontology_store(request)
     try:
+        # Try by name first (ForceGraph uses name as ID), then by UUID
         result = await onto_store._graph.ro_query(
             """
-            MATCH (n:OntologyNode {uuid: $uuid})
+            MATCH (n:OntologyNode)
+            WHERE n.name = $id OR n.uuid = $id
             RETURN n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type,
                    n.display_name AS display_name, n.summary AS summary,
                    n.source_count AS source_count, n.updated_at AS updated_at
             LIMIT 1
             """,
-            params={"uuid": uuid},
+            params={"id": identifier},
         )
         if result.result_set:
             row = result.result_set[0]
