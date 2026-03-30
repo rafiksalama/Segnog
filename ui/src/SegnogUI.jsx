@@ -1610,13 +1610,13 @@ const GraphPage = () => {
     // Skip animation restart if only theme changed (no structural change)
     let frame, settled = 0;
     const FRAMES = (nodeCountChanged || layoutChanged)
-      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 60 : 0)
+      ? (layout === "force" ? COSE_MAX : layout === "spiral" ? 80 : layout === "hub" ? 120 : 0)
       : 0;
     // Hub-specific overlap resolution: grid-accelerated push of overlapping nodes
     // Only processes non-singleton visible nodes. O(n) average with spatial grid.
     const HUB_CELL = 60;
     const stepHub = () => {
-      const PAD = 4;
+      const PAD = 8; // Increased padding to reduce overlap
       const grid = {};
       // Build spatial grid (only visible nodes)
       nodes.forEach((n, i) => {
@@ -1640,7 +1640,7 @@ const GraphPage = () => {
                 const dist = Math.sqrt(dx * dx + dy * dy) || 1;
                 const minDist = nodes[i].r + nodes[j].r + PAD;
                 if (dist < minDist) {
-                  const push = (minDist - dist) * 0.3;
+                  const push = (minDist - dist) * 0.5; // Increased push strength
                   const ux = dx / dist, uy = dy / dist;
                   nodes[i].x += ux * push; nodes[i].y += uy * push;
                   nodes[j].x -= ux * push; nodes[j].y -= uy * push;
