@@ -152,7 +152,8 @@ class MemoryService:
         end_date: Optional[str] = None,
         include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
-        return await self._kn(group_id).search_hybrid(
+        # Search knowledge store
+        knowledge = await self._kn(group_id).search_hybrid(
             query=query,
             labels=labels,
             top_k=top_k,
@@ -161,6 +162,41 @@ class MemoryService:
             end_date=end_date,
             include_embedding=include_embedding,
         )
+
+        # Also search reflection-type episodes globally (metacognition, causal_reflection)
+        try:
+            ep_store = self._ep(group_id or "default")
+            embedding = await ep_store._embed(query)
+            refl_result = await ep_store._graph.ro_query(
+                """
+                MATCH (e:Episode)
+                WHERE e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']
+                WITH e,
+                     (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
+                WHERE score >= $min_score
+                RETURN e.uuid AS uuid, e.content AS content, e.episode_type AS knowledge_type,
+                       e.group_id AS group_id, score
+                ORDER BY score DESC
+                LIMIT $top_k
+                """,
+                params={"query_vec": embedding, "min_score": min_score or 0.4, "top_k": max(3, top_k // 3)},
+            )
+            for row in refl_result.result_set:
+                knowledge.append({
+                    "uuid": row[0],
+                    "content": row[1] or "",
+                    "knowledge_type": row[2] or "reflection",
+                    "labels": [],
+                    "confidence": 0.9,
+                    "score": row[4],
+                    "source": "reflection_episode",
+                })
+        except Exception as e:
+            logger.debug(f"Reflection episode search failed: {e}")
+
+        # Sort merged results by score descending, cap to top_k
+        knowledge.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return knowledge[:top_k]
 
     async def search_knowledge_by_labels(
         self, group_id: str, labels: List[str], top_k: int = 10
@@ -465,9 +501,41 @@ class MemoryService:
                 logger.warning(f"Artifact search failed (non-critical): {e}")
                 return ""
 
-        knowledge_context, artifacts_context = await asyncio.gather(
+        async def _search_reflections():
+            """Search metacognition, causal_reflection, and reflection episodes globally."""
+            try:
+                embedding = await ep_store._embed(search_query)
+                result = await ep_store._graph.ro_query(
+                    """
+                    MATCH (e:Episode)
+                    WHERE e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']
+                    WITH e,
+                         (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
+                    WHERE score >= 0.45
+                    RETURN e.uuid AS uuid, e.content AS content, e.episode_type AS episode_type,
+                           e.group_id AS group_id, score
+                    ORDER BY score DESC
+                    LIMIT 5
+                    """,
+                    params={"query_vec": embedding},
+                )
+                if not result.result_set:
+                    return ""
+                lines = ["## Prior Reflections & Metacognition"]
+                for i, r in enumerate(result.result_set, 1):
+                    etype = r[2] or "reflection"
+                    content = (r[1] or "")[:300]
+                    score = r[4]
+                    lines.append(f"{i}. [{etype}] {content}... (score={score:.2f})")
+                return "\n".join(lines)
+            except Exception as e:
+                logger.warning(f"Reflections search failed (non-critical): {e}")
+                return ""
+
+        knowledge_context, artifacts_context, reflections_context = await asyncio.gather(
             _search_knowledge(),
             _search_artifacts(),
+            _search_reflections(),
         )
 
         # Step 3: LLM filter on episode results
@@ -511,13 +579,18 @@ class MemoryService:
         try:
             from ..intelligence.synthesis.synthesize import synthesize_background
 
+            # Combine knowledge + reflections into a single context block
+            combined_knowledge = knowledge_context
+            if reflections_context:
+                combined_knowledge = (combined_knowledge + "\n\n" + reflections_context) if combined_knowledge else reflections_context
+
             result = await synthesize_background(
                 task=task,
                 long_term_context=long_term_context,
                 tool_stats_context=tool_stats_context,
                 inferred_state=inferred_state,
                 model=model,
-                knowledge_context=knowledge_context,
+                knowledge_context=combined_knowledge,
                 artifacts_context=artifacts_context,
                 episode_store=ep_store,
             )
