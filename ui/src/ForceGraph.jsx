@@ -44,6 +44,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
   const [search, setSearch] = useState("");
   const [highlightNode, setHighlightNode] = useState(null);
   const [selectedSession, setSelectedSession] = useState("__all__");
+  const [nodeDetail, setNodeDetail] = useState(null); // {name, type, summary, ...}
 
   // When a session is selected, fetch session-specific data
   const sessionParam = selectedSession === "__all__" ? "" : `?group_id=${selectedSession}`;
@@ -338,10 +339,63 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
         onNodeClick={(node) => {
           setHighlightNode(node);
           setSearch(node.name);
+          // Fetch full details (summary) for popup
+          setNodeDetail({ name: node.name, type: node.type, category: node.category, deg: node.deg, loading: true });
+          fetch(`${API}/ui/ontology/${node.id}`)
+            .then(r => r.json())
+            .then(data => {
+              if (data.summary) setNodeDetail(prev => prev ? { ...prev, summary: data.summary, loading: false } : null);
+              else setNodeDetail(prev => prev ? { ...prev, loading: false } : null);
+            })
+            .catch(() => setNodeDetail(prev => prev ? { ...prev, loading: false } : null));
         }}
+        onBackgroundClick={() => setNodeDetail(null)}
         enableNodeDrag={true}
         enableZoomPanInteraction={true}
       />
+
+      {/* Node detail popup */}
+      {nodeDetail && (
+        <div style={{
+          position: "absolute", bottom: 16, left: 16, right: 16, maxHeight: 220,
+          background: isDark ? "#12141af0" : "#ffffffee",
+          border: `1px solid ${isDark ? "#282d3e" : "#dddbd5"}`,
+          borderRadius: 12, padding: "14px 18px", zIndex: 20,
+          boxShadow: "0 -4px 20px rgba(0,0,0,0.2)", overflowY: "auto",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <div>
+              <span style={{ fontSize: 16, fontWeight: 700, color: isDark ? "#e2e4ea" : "#1c1c1a" }}>
+                {nodeDetail.name}
+              </span>
+              <span style={{
+                marginLeft: 10, fontSize: 11, padding: "2px 8px", borderRadius: 4,
+                background: typeColor(nodeDetail.category) + "30",
+                color: typeColor(nodeDetail.category),
+                fontWeight: 600,
+              }}>
+                {nodeDetail.type}
+              </span>
+              <span style={{ marginLeft: 8, fontSize: 11, color: isDark ? "#7a7f94" : "#5a5a52" }}>
+                {nodeDetail.deg} connections
+              </span>
+            </div>
+            <button onClick={() => setNodeDetail(null)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: isDark ? "#7a7f94" : "#9a9a90", fontSize: 18, lineHeight: 1,
+            }}>×</button>
+          </div>
+          {nodeDetail.loading && <div style={{ color: isDark ? "#4a4f62" : "#9a9a90", fontSize: 12 }}>Loading summary...</div>}
+          {nodeDetail.summary && (
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: isDark ? "#b0b3c0" : "#3a3a38" }}>
+              {nodeDetail.summary}
+            </div>
+          )}
+          {!nodeDetail.loading && !nodeDetail.summary && (
+            <div style={{ color: isDark ? "#4a4f62" : "#9a9a90", fontSize: 12, fontStyle: "italic" }}>No summary available</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -72,7 +72,7 @@ class CausalClaimStore(BaseStore):
         effect_entity: Optional[str] = None,
         group_id: Optional[str] = None,
     ) -> str:
-        """MERGE a CausalClaim by normalized (cause+effect, group_id).
+        """MERGE a CausalClaim by normalized (cause+effect) — global KG.
 
         Returns the claim's uuid.
         """
@@ -91,7 +91,7 @@ class CausalClaimStore(BaseStore):
 
         result = await self._graph.query(
             """
-            MERGE (c:CausalClaim {merge_key: $merge_key, group_id: $group_id})
+            MERGE (c:CausalClaim {merge_key: $merge_key})
             ON CREATE SET
                 c.uuid           = $uuid,
                 c.cause_summary  = $cause_summary,
@@ -143,7 +143,7 @@ class CausalClaimStore(BaseStore):
             await self._graph.query(
                 f"""
                 MATCH (c:CausalClaim {{uuid: $claim_uuid}})
-                MATCH (n:OntologyNode {{name: $entity_name, group_id: $group_id}})
+                MATCH (n:OntologyNode {{name: $entity_name}})
                 MERGE (c)-[:{edge_type}]->(n)
                 """,
                 params={
@@ -207,7 +207,7 @@ class CausalClaimStore(BaseStore):
         gid = group_id or self._group_id
         result = await self._graph.query(
             """
-            MATCH (c:CausalClaim {group_id: $group_id})
+            MATCH (c:CausalClaim)
             WHERE c.status <> 'refuted'
             OPTIONAL MATCH (k1:Knowledge)-[s:SUPPORTS]->(c)
             OPTIONAL MATCH (k2:Knowledge)-[d:CONTRADICTS]->(c)
@@ -335,7 +335,7 @@ class CausalClaimStore(BaseStore):
         result = await self._graph.ro_query(
             """
             MATCH (c:CausalClaim)
-            WHERE c.group_id = $group_id AND c.status <> 'refuted'
+            WHERE c.status <> 'refuted'
             WITH c,
                  (2 - vec.cosineDistance(c.embedding, vecf32($query_vec))) / 2 AS score
             WHERE score >= $min_score

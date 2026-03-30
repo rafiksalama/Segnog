@@ -1016,9 +1016,8 @@ async def _observe_core_inner(
                 causal_results = await causal_store.search_claims(
                     embedding=embedding,
                     top_k=3,
-                    group_id=session_id,
                     min_score=0.4,
-                )
+                )  # Global search — causal KG spans all sessions
                 for claim in causal_results:
                     claim_uuid = claim.get("uuid", "")
                     if claim_uuid:
