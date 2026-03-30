@@ -832,7 +832,8 @@ async def _observe_core_inner(
             entries[f"kn_{kn_uuid}"] = {
                 "content": kn.get("content", ""),
                 "source_type": "hydrated_knowledge",
-                "created_at": 0,
+                "created_at": kn.get("created_at", 0),
+                "event_date": kn.get("event_date", ""),
                 "rank": kn.get("score", 0.75),
             }
         for node in ontology_results or []:
@@ -1108,7 +1109,8 @@ async def _observe_core_inner(
                     entries[key] = {
                         "content": kn.get("content", ""),
                         "source_type": "hydrated_knowledge",
-                        "created_at": 0,
+                        "created_at": kn.get("created_at", 0),
+                        "event_date": kn.get("event_date", ""),
                         "rank": kn.get("score", 0.75),
                     }
             for node in onto_results:

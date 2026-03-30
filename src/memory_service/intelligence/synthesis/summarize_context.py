@@ -2,7 +2,8 @@
 relevant to the current observation."""
 
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import dspy
@@ -47,6 +48,7 @@ def _format_entries(entries: Dict[str, Any]) -> str:
     Output is ordered highest-rank first, grouped by source type within
     equal-rank tiers.
     """
+    now = time.time()
     items = []
     for uuid, entry in entries.items():
         source_type = entry.get("source_type", "local")
@@ -57,6 +59,7 @@ def _format_entries(entries: Dict[str, Any]) -> str:
                 "content": entry.get("content", "")[:800],  # Truncate long entries for context
                 "source_type": source_type,
                 "created_at": entry.get("created_at", 0),
+                "event_date": entry.get("event_date", ""),
                 "rank": rank,
             }
         )
@@ -68,11 +71,21 @@ def _format_entries(entries: Dict[str, Any]) -> str:
     for i, item in enumerate(items, 1):
         label = _SOURCE_LABELS.get(item["source_type"], item["source_type"])
         ts = ""
+        age = ""
         if item["created_at"] > 0:
-            ts = datetime.fromtimestamp(item["created_at"]).strftime("%H:%M:%S")
-            ts = f" [{ts}]"
+            dt = datetime.fromtimestamp(item["created_at"])
+            ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+            elapsed = int(now - item["created_at"])
+            if elapsed < 0:
+                elapsed = 0
+            h, remainder = divmod(elapsed, 3600)
+            m, s = divmod(remainder, 60)
+            age = f"{h}:{m:02d}:{s:02d} ago"
+        elif item.get("event_date"):
+            ts = item["event_date"]
+        content_prefix = f"[{ts} | {age}] " if ts and age else f"[{ts}] " if ts else ""
         rank_str = f" (rank:{item['rank']:.2f})" if item["rank"] > 0 else ""
-        lines.append(f"{i}. [{label}]{ts}{rank_str} {item['content']}")
+        lines.append(f"{i}. [{label}]{rank_str} {content_prefix}{item['content']}")
 
     return "\n".join(lines)
 
