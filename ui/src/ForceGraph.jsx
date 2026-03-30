@@ -282,12 +282,17 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
             fontFamily: "Inter, sans-serif", maxWidth: 200,
           }}
         >
-          <option value="__all__">All sessions</option>
-          {(sessions || []).map(s => (
-            <option key={s.group_id} value={s.group_id}>
-              {s.group_id.slice(0, 8)}… ({s.episode_count} eps)
-            </option>
-          ))}
+          <option value="__all__">All sessions ({(sessions || []).length})</option>
+          {(sessions || [])
+            .sort((a, b) => (b.latest_at || 0) - (a.latest_at || 0))
+            .map(s => {
+              const date = s.latest_at ? new Date(s.latest_at * 1000).toLocaleDateString() : "";
+              return (
+                <option key={s.group_id} value={s.group_id}>
+                  {s.group_id.slice(0, 8)}… · {s.episode_count} eps · {date}
+                </option>
+              );
+            })}
         </select>
         <input
           type="text"
@@ -341,7 +346,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
           setSearch(node.name);
           // Fetch full details (summary) for popup
           setNodeDetail({ name: node.name, type: node.type, category: node.category, deg: node.deg, loading: true });
-          fetch(`${API}/ui/ontology/${node.id}`)
+          fetch(`${API}/ui/ontology/${encodeURIComponent(node.id)}`)
             .then(r => r.json())
             .then(data => {
               if (data.summary) setNodeDetail(prev => prev ? { ...prev, summary: data.summary, loading: false } : null);
