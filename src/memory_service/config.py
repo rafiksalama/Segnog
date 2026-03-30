@@ -112,7 +112,7 @@ def get_background_enabled() -> bool:
 
 def get_background_interval() -> int:
     s = get_settings()
-    return int(s.get("background.interval_seconds", 60))
+    return int(s.get("background.interval_seconds", 10))
 
 
 def get_background_batch_size() -> int:
