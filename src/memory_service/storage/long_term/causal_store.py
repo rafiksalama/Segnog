@@ -365,10 +365,12 @@ class CausalClaimStore(BaseStore):
         status: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        gid = group_id or self._group_id
-        where = "c.group_id = $group_id"
+        conditions = []
+        if group_id:
+            conditions.append("c.group_id = $group_id")
         if status:
-            where += " AND c.status = $status"
+            conditions.append("c.status = $status")
+        where = " AND ".join(conditions) if conditions else "true"
         result = await self._graph.ro_query(
             f"""
             MATCH (c:CausalClaim)
@@ -380,7 +382,7 @@ class CausalClaimStore(BaseStore):
             ORDER BY c.confidence DESC
             LIMIT $limit
             """,
-            params={"group_id": gid, "status": status, "limit": limit},
+            params={"group_id": group_id or "", "status": status or "", "limit": limit},
         )
         return self._parse_results(result)
 
