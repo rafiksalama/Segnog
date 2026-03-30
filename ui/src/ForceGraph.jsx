@@ -166,14 +166,21 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
 
   // Configure forces and fit — once per session change
   const didFit = useRef(false);
+  const prevNodeCount = useRef(0);
   const prevSession = useRef(selectedSession);
   if (prevSession.current !== selectedSession) {
     didFit.current = false;
     prevSession.current = selectedSession;
   }
   useEffect(() => {
-    if (fgRef.current && graphData.nodes.length > 0 && !didFit.current) {
+    const nodeCount = graphData.nodes.length;
+    const sessionChanged = prevSession.current !== selectedSession;
+    const countChanged = prevNodeCount.current !== nodeCount;
+
+    // Only refit if session changed or node count changed
+    if (fgRef.current && nodeCount > 0 && !didFit.current && (sessionChanged || countChanged)) {
       didFit.current = true;
+      prevNodeCount.current = nodeCount;
       fgRef.current.d3Force("charge").strength(-40).distanceMax(200);
       fgRef.current.d3Force("link").distance(link => {
         const srcHub = link.source?.isHub || false;
@@ -183,7 +190,7 @@ export default function ForceGraphView({ nodes, edges, cooccur, width, height, t
       fgRef.current.d3ReheatSimulation();
       setTimeout(() => fgRef.current.zoomToFit(400, 60), 1000);
     }
-  }, [graphData]);
+  }, [selectedSession, graphData.nodes.length]);
 
   // Custom node painting
   const paintNode = useCallback((node, ctx, globalScale) => {
