@@ -289,9 +289,11 @@ class CausalClaimStore(BaseStore):
                 WHERE a.uuid <> b.uuid
                   AND a.status <> 'refuted'
                   AND b.status <> 'refuted'
-                MERGE (a)-[:CAUSES]->(b)
+                MERGE (a)-[r:CAUSES]->(b)
+                ON CREATE SET r.provenance = 'transitive', r.created_at = $now
                 RETURN count(*) AS created
                 """,
+                params={"now": time.time()},
             )
             created = result.result_set[0][0] if result.result_set else 0
             if created:
@@ -475,9 +477,10 @@ class CausalClaimStore(BaseStore):
                 """
                 MATCH (a:CausalClaim {uuid: $a_uuid})
                 MATCH (b:CausalClaim {uuid: $b_uuid})
-                MERGE (a)-[:CAUSES]->(b)
+                MERGE (a)-[r:CAUSES]->(b)
+                ON CREATE SET r.provenance = 'direct', r.created_at = $now
                 """,
-                params={"a_uuid": claim_uuids[i], "b_uuid": claim_uuids[i + 1]},
+                params={"a_uuid": claim_uuids[i], "b_uuid": claim_uuids[i + 1], "now": time.time()},
             )
 
         return chain_uuid
