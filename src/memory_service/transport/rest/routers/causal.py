@@ -1,8 +1,6 @@
 """Causal belief network REST endpoints."""
 
-import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
@@ -18,6 +16,7 @@ def _get_causal_store(request: Request):
     store = svc._causal_store
     if store is None:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=503, detail="Causal store not available")
     return store
 
@@ -34,7 +33,10 @@ async def search_claims(
     if query:
         embedding = await store._embed(query)
         claims = await store.search_claims(
-            embedding=embedding, top_k=top_k, group_id=group_id, min_score=0.3,
+            embedding=embedding,
+            top_k=top_k,
+            group_id=group_id,
+            min_score=0.3,
         )
     else:
         claims = await store.list_claims(group_id=group_id, limit=top_k)
@@ -48,6 +50,7 @@ async def get_claim(uuid: str, request: Request):
     claim = await store.get_claim(uuid)
     if not claim:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Claim not found")
     return claim
 
@@ -59,6 +62,7 @@ async def explain_claim(uuid: str, request: Request):
     result = await store.explain_claim(uuid)
     if not result:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Claim not found")
     return result
 
@@ -76,6 +80,7 @@ async def add_evidence(uuid: str, request: Request):
     weight = float(body.get("weight", 1.0))
     if not knowledge_uuid:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=400, detail="knowledge_uuid required")
     await store.add_evidence(uuid, knowledge_uuid, direction, weight)
     # Revise beliefs after new evidence
@@ -96,7 +101,10 @@ async def search_chain(
     store = _get_causal_store(request)
     embedding = await store._embed(query)
     claims = await store.search_claims(
-        embedding=embedding, top_k=1, group_id=group_id, min_score=0.3,
+        embedding=embedding,
+        top_k=1,
+        group_id=group_id,
+        min_score=0.3,
     )
     if not claims:
         return {"chain": []}

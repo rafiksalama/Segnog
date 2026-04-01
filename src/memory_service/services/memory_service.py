@@ -181,18 +181,24 @@ class MemoryService:
                 ORDER BY score DESC
                 LIMIT $top_k
                 """,
-                params={"query_vec": embedding, "min_score": min_score or 0.4, "top_k": max(3, top_k // 3)},
+                params={
+                    "query_vec": embedding,
+                    "min_score": min_score or 0.4,
+                    "top_k": max(3, top_k // 3),
+                },
             )
             for row in refl_result.result_set:
-                knowledge.append({
-                    "uuid": row[0],
-                    "content": row[1] or "",
-                    "knowledge_type": row[2] or "reflection",
-                    "labels": [],
-                    "confidence": 0.9,
-                    "score": row[4],
-                    "source": "reflection_episode",
-                })
+                knowledge.append(
+                    {
+                        "uuid": row[0],
+                        "content": row[1] or "",
+                        "knowledge_type": row[2] or "reflection",
+                        "labels": [],
+                        "confidence": 0.9,
+                        "score": row[4],
+                        "source": "reflection_episode",
+                    }
+                )
         except Exception as e:
             logger.debug(f"Reflection episode search failed: {e}")
 
@@ -585,7 +591,11 @@ class MemoryService:
             # Combine knowledge + reflections into a single context block
             combined_knowledge = knowledge_context
             if reflections_context:
-                combined_knowledge = (combined_knowledge + "\n\n" + reflections_context) if combined_knowledge else reflections_context
+                combined_knowledge = (
+                    (combined_knowledge + "\n\n" + reflections_context)
+                    if combined_knowledge
+                    else reflections_context
+                )
 
             result = await synthesize_background(
                 task=task,
@@ -649,7 +659,9 @@ class MemoryService:
         try:
             from ..intelligence.synthesis.reflect import generate_reflection
 
-            reflection_sections = await generate_reflection(mission_data, model=model, group_id=group_id)
+            reflection_sections = await generate_reflection(
+                mission_data, model=model, group_id=group_id
+            )
             logger.info(
                 "Generated reflection sections: %s",
                 {k: len(v) for k, v in reflection_sections.items() if v},
@@ -805,19 +817,26 @@ class MemoryService:
                     # Auto-link knowledge as SUPPORTS evidence for causal claims
                     if knowledge_entries:
                         try:
-                            claims = await self._causal_store.list_claims(group_id=group_id, limit=50)
+                            claims = await self._causal_store.list_claims(
+                                group_id=group_id, limit=50
+                            )
                             for claim in claims:
                                 claim_text = f"{claim.get('cause_summary', '')} {claim.get('effect_summary', '')}"
-                                claim_emb = await self._causal_store._embed(claim_text)
+                                await self._causal_store._embed(claim_text)
                                 # Find knowledge that semantically matches this claim
                                 matches = await kn_store.search_hybrid(
-                                    query=claim_text, top_k=3, min_score=0.6,
+                                    query=claim_text,
+                                    top_k=3,
+                                    min_score=0.6,
                                 )
                                 for kn in matches:
                                     kn_uuid = kn.get("uuid", "")
                                     if kn_uuid:
                                         await self._causal_store.add_evidence(
-                                            claim["uuid"], kn_uuid, "supports", weight=kn.get("score", 0.7),
+                                            claim["uuid"],
+                                            kn_uuid,
+                                            "supports",
+                                            weight=kn.get("score", 0.7),
                                         )
                         except Exception as e:
                             logger.debug(f"Auto-linking knowledge to causal claims: {e}")
@@ -834,7 +853,10 @@ class MemoryService:
                             line += f" ({claim['mechanism'][:100]})"
                         line += f" [confidence={claim.get('confidence', 0.8):.2f}]"
                         causal_lines.append(line)
-                    causal_summary = f"Causal beliefs extracted ({causal_count} claims):\n" + "\n".join(causal_lines)
+                    causal_summary = (
+                        f"Causal beliefs extracted ({causal_count} claims):\n"
+                        + "\n".join(causal_lines)
+                    )
                     try:
                         await ep_store.store_episode(
                             content=f"Causal Reflection for: {task[:200]}\n\n{causal_summary}",

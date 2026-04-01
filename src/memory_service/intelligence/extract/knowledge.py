@@ -122,6 +122,7 @@ async def extract_knowledge(
                 except (ValueError, TypeError):
                     # Accept year-only (e.g. "2024") or year-month (e.g. "2024-03")
                     import re
+
                     if re.match(r"^\d{4}$", ev_str):
                         validated_date = f"{ev_str}-01-01"
                     elif re.match(r"^\d{4}-\d{2}$", ev_str):

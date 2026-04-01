@@ -40,11 +40,13 @@ def capture_reasoning(group_id: str, caller: str, prompt_snippet: str, raw_text:
         if reasoning:
             buf = _reasoning_buffer[group_id]
             if len(buf) < _MAX_TRACES_PER_GROUP:
-                buf.append({
-                    "caller": caller,
-                    "prompt_snippet": prompt_snippet[:200],
-                    "reasoning": reasoning,
-                })
+                buf.append(
+                    {
+                        "caller": caller,
+                        "prompt_snippet": prompt_snippet[:200],
+                        "reasoning": reasoning,
+                    }
+                )
     return _THINK_RE.sub("", raw_text).strip()
 
 
@@ -122,6 +124,7 @@ async def llm_call(
         }
 
     import asyncio as _asyncio
+
     # Timeout: 120s for high-reasoning calls, 60s for normal
     _timeout = 120.0 if reasoning_effort else 60.0
     response = await _asyncio.wait_for(
@@ -136,11 +139,13 @@ async def llm_call(
     if group_id and reasoning_content:
         buf = _reasoning_buffer[group_id]
         if len(buf) < _MAX_TRACES_PER_GROUP:
-            buf.append({
-                "caller": caller or "llm_call",
-                "prompt_snippet": prompt[:200],
-                "reasoning": reasoning_content,
-            })
+            buf.append(
+                {
+                    "caller": caller or "llm_call",
+                    "prompt_snippet": prompt[:200],
+                    "reasoning": reasoning_content,
+                }
+            )
 
     if group_id:
         return capture_reasoning(group_id, caller or "llm_call", prompt[:200], raw)

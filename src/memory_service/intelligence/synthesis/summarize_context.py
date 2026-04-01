@@ -3,7 +3,7 @@ relevant to the current observation."""
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import dspy
@@ -35,7 +35,7 @@ _DEFAULT_RANK = {
     "causal_claim": 0.80,
     "reflection": 0.70,
     "local": 0.50,
-    "hydrated": 0.0,        # should have a real rank from 3D scoring
+    "hydrated": 0.0,  # should have a real rank from 3D scoring
     "relevant_episode": 0.0,
 }
 

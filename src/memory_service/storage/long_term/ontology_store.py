@@ -402,7 +402,7 @@ class OntologyStore(BaseStore):
                 ORDER BY n.updated_at DESC
                 LIMIT $limit
                 """,
-                params={"group_id": gid, "limit": limit},
+                params={"group_id": group_id or self._group_id, "limit": limit},
             )
 
         return self._parse_results(result)

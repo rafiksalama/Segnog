@@ -37,7 +37,7 @@ class REMSweepPublisher:
                         "memory.rem.sweep.trigger",
                         json.dumps(payload).encode(),
                     )
-                    logger.info(f"Published REM sweep trigger (timer)")
+                    logger.info("Published REM sweep trigger (timer)")
                 except Exception as e:
                     logger.error(f"Failed to publish sweep trigger: {e}", exc_info=True)
         except asyncio.CancelledError:

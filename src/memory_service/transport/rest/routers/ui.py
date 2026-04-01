@@ -328,12 +328,16 @@ async def list_ontology(
             # Merge seed + neighbors, deduplicate by name
             onto = onto_store._ontology
             _cat_cache = {}
+
             def _category(st):
-                if st in _cat_cache: return _cat_cache[st]
+                if st in _cat_cache:
+                    return _cat_cache[st]
                 chain = onto.ancestors(st) if onto else [st]
                 cat = st
                 for i, a in enumerate(chain):
-                    if a == "Thing" and i > 0: cat = chain[i-1]; break
+                    if a == "Thing" and i > 0:
+                        cat = chain[i - 1]
+                        break
                 _cat_cache[st] = cat
                 return cat
 
@@ -344,12 +348,17 @@ async def list_ontology(
                 if not name or name in seen_names:
                     continue
                 seen_names.add(name)
-                nodes.append({
-                    "uuid": r[0], "name": name, "schema_type": r[2],
-                    "category": _category(r[2] or "Thing"),
-                    "display_name": r[3] or name, "source_count": r[4] or 0,
-                    "updated_at": r[5],
-                })
+                nodes.append(
+                    {
+                        "uuid": r[0],
+                        "name": name,
+                        "schema_type": r[2],
+                        "category": _category(r[2] or "Thing"),
+                        "display_name": r[3] or name,
+                        "source_count": r[4] or 0,
+                        "updated_at": r[5],
+                    }
+                )
             return {"nodes": nodes}
 
         conditions = []
@@ -443,14 +452,16 @@ async def list_ui_reflections(
                 params=params,
             )
             for row in result.result_set:
-                all_reflections.append({
-                    "uuid": row[0],
-                    "content": row[1][:500] if row[1] else "",
-                    "reflection_type": row[2],
-                    "group_id": row[3],
-                    "created_at": row[4],
-                    "created_at_iso": row[5],
-                })
+                all_reflections.append(
+                    {
+                        "uuid": row[0],
+                        "content": row[1][:500] if row[1] else "",
+                        "reflection_type": row[2],
+                        "group_id": row[3],
+                        "created_at": row[4],
+                        "created_at_iso": row[5],
+                    }
+                )
         except Exception as e:
             logger.warning(f"UI reflections query failed for {rtype}: {e}")
 
@@ -531,10 +542,7 @@ async def list_causal_claims(
             """,
             params=params,
         )
-        chains = [
-            {"from": row[0], "to": row[1]}
-            for row in chain_result.result_set
-        ]
+        chains = [{"from": row[0], "to": row[1]} for row in chain_result.result_set]
 
         return {"claims": claims, "chains": chains}
     except Exception as e:
@@ -683,9 +691,13 @@ async def get_ontology_node(identifier: str, request: Request):
         if result.result_set:
             row = result.result_set[0]
             return {
-                "uuid": row[0], "name": row[1], "schema_type": row[2],
-                "display_name": row[3], "summary": row[4] or "",
-                "source_count": row[5] or 0, "updated_at": row[6],
+                "uuid": row[0],
+                "name": row[1],
+                "schema_type": row[2],
+                "display_name": row[3],
+                "summary": row[4] or "",
+                "source_count": row[5] or 0,
+                "updated_at": row[6],
             }
         return {"error": "Not found"}
     except Exception as e:

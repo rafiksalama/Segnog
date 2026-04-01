@@ -93,12 +93,8 @@ class KnowledgeEntryInput(BaseModel):
         "fact",
         description="Type of knowledge: fact, pattern, insight, preference, procedure",
     )
-    labels: List[str] = Field(
-        default_factory=list, description="Semantic labels / tags"
-    )
-    confidence: float = Field(
-        0.8, ge=0.0, le=1.0, description="Confidence score (0–1)"
-    )
+    labels: List[str] = Field(default_factory=list, description="Semantic labels / tags")
+    confidence: float = Field(0.8, ge=0.0, le=1.0, description="Confidence score (0–1)")
     event_date: Optional[str] = Field(
         None, description="Optional ISO 8601 date the event occurred (YYYY-MM-DD)"
     )
@@ -303,7 +299,10 @@ async def memory_search_causal(
         return json.dumps({"claims": [], "note": "Causal store not available"})
     embedding = await svc._causal_store._embed(query)
     claims = await svc._causal_store.search_claims(
-        embedding=embedding, top_k=top_k, group_id=session_id, min_score=0.3,
+        embedding=embedding,
+        top_k=top_k,
+        group_id=session_id,
+        min_score=0.3,
     )
     return json.dumps({"claims": claims}, indent=2, default=str)
 

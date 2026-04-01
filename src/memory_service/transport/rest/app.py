@@ -11,7 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .routers import events, episodes, knowledge, artifacts, state, smart, pipelines, observe, ui, causal
+from .routers import (
+    events,
+    episodes,
+    knowledge,
+    artifacts,
+    state,
+    smart,
+    pipelines,
+    observe,
+    ui,
+    causal,
+)
 from .dependencies import setup_backends, teardown_backends
 from ...workers.span_aggregator import run_span_aggregator
 from ..mcp.server import mcp as mcp_server, set_service as mcp_set_service
@@ -167,7 +178,9 @@ def create_app() -> FastAPI:
     # we check a list of candidate paths rather than walking up from __file__.
     for _candidate in [
         Path("/app/ui/dist"),  # Docker
-        Path(__file__).resolve().parent.parent.parent.parent.parent / "ui" / "dist",  # editable install
+        Path(__file__).resolve().parent.parent.parent.parent.parent
+        / "ui"
+        / "dist",  # editable install
     ]:
         if _candidate.exists():
             app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="ui")

@@ -18,7 +18,10 @@ _EMBED_MAX_RETRIES = 3
 def normalize_name(name: str) -> str:
     """Normalize a label/name to lowercase, hyphenated form for consistent graph storage."""
     from ...ontology.names import normalize_name as _canonical
+
     return _canonical(name)
+
+
 _EMBED_RETRY_BASE_DELAY = 1.0  # seconds, doubled on each retry
 
 

@@ -76,8 +76,11 @@ Be concise but specific. Reference actual content from the reflection and traces
 
     try:
         metacognition = await llm_call(
-            prompt, model=model, temperature=0.3,
-            max_tokens=16000, reasoning_effort="high",
+            prompt,
+            model=model,
+            temperature=0.3,
+            max_tokens=16000,
+            reasoning_effort="high",
         )
         logger.info(
             "Generated metacognition: %d chars (traces: %d)",
@@ -163,9 +166,13 @@ Produce a concise reflection covering:
     reflection = ""
     try:
         reflection = await llm_call(
-            prompt, model=model, temperature=0.3,
-            max_tokens=16000, reasoning_effort="high",
-            group_id=group_id, caller="generate_reflection",
+            prompt,
+            model=model,
+            temperature=0.3,
+            max_tokens=16000,
+            reasoning_effort="high",
+            group_id=group_id,
+            caller="generate_reflection",
         )
         logger.info("Generated reflection: %d chars", len(reflection))
     except Exception as e:

@@ -99,17 +99,19 @@ async def extract_causal_claims(
             confidence = float(item.get("confidence", 0.8))
             confidence = max(0.0, min(1.0, confidence))
 
-            claims.append({
-                "cause": cause,
-                "cause_norm": cause_norm,
-                "cause_type": "Thing",
-                "effect": effect,
-                "effect_norm": effect_norm,
-                "effect_type": "Thing",
-                "mechanism": str(item.get("mechanism", "")).strip(),
-                "confidence": confidence,
-                "temporal_marker": "",
-            })
+            claims.append(
+                {
+                    "cause": cause,
+                    "cause_norm": cause_norm,
+                    "cause_type": "Thing",
+                    "effect": effect,
+                    "effect_norm": effect_norm,
+                    "effect_type": "Thing",
+                    "mechanism": str(item.get("mechanism", "")).strip(),
+                    "confidence": confidence,
+                    "temporal_marker": "",
+                }
+            )
 
         logger.info("Extracted %d causal claims", len(claims))
         return claims

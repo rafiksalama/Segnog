@@ -69,10 +69,19 @@ Write the updated prose summary for {entity_name}:"""
 
         # Reject responses with LLM meta-commentary or tool calls
         _REJECT_PATTERNS = [
-            "I cannot", "I don't see", "I'm checking", "I should",
-            "Let me", "I need to", "Action:", "web_search", "```",
-            "I'll run", "Based on the context provided, I don't",
-            "I cannot complete", "two required inputs",
+            "I cannot",
+            "I don't see",
+            "I'm checking",
+            "I should",
+            "Let me",
+            "I need to",
+            "Action:",
+            "web_search",
+            "```",
+            "I'll run",
+            "Based on the context provided, I don't",
+            "I cannot complete",
+            "two required inputs",
         ]
         if any(p in updated for p in _REJECT_PATTERNS):
             logger.warning(

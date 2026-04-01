@@ -92,7 +92,9 @@ _REFLECTION_TYPES = {"reflection", "metacognition", "causal_reflection"}
 async def list_reflections(
     request: Request,
     group_id: str = Query(...),
-    reflection_type: str = Query(None, description="Filter by type: reflection, metacognition, causal_reflection"),
+    reflection_type: str = Query(
+        None, description="Filter by type: reflection, metacognition, causal_reflection"
+    ),
     query: str = Query(None, description="Semantic search within reflections"),
     top_k: int = Query(10, ge=1, le=50),
 ):
@@ -130,15 +132,17 @@ async def list_reflections(
                 min_score=0.0,
             )
         for r in raw:
-            all_results.append({
-                "uuid": r.get("uuid", ""),
-                "reflection_type": rtype,
-                "content": r.get("content", ""),
-                "metadata": r.get("metadata"),
-                "created_at": r.get("created_at", 0.0),
-                "created_at_iso": r.get("created_at_iso"),
-                "score": r.get("score", 0.0),
-            })
+            all_results.append(
+                {
+                    "uuid": r.get("uuid", ""),
+                    "reflection_type": rtype,
+                    "content": r.get("content", ""),
+                    "metadata": r.get("metadata"),
+                    "created_at": r.get("created_at", 0.0),
+                    "created_at_iso": r.get("created_at_iso"),
+                    "score": r.get("score", 0.0),
+                }
+            )
 
     # Sort by score descending, then by created_at descending
     all_results.sort(key=lambda x: (-x.get("score", 0), -x.get("created_at", 0)))
