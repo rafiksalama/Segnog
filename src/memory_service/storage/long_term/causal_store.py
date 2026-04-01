@@ -341,7 +341,7 @@ class CausalClaimStore(BaseStore):
             RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
                    c.effect_summary AS effect_summary, c.mechanism AS mechanism,
                    c.confidence AS confidence, c.evidence_count AS evidence_count,
-                   c.status AS status, score
+                   c.status AS status, c.created_at AS created_at, score
             ORDER BY score DESC
             LIMIT $top_k
             """,

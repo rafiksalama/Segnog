@@ -213,6 +213,7 @@ class OntologyStore(BaseStore):
                 n.display_name AS display_name,
                 n.summary      AS summary,
                 n.source_count AS source_count,
+                n.created_at   AS created_at,
                 n.updated_at   AS updated_at,
                 score{embedding_return}
             ORDER BY score DESC

@@ -844,7 +844,7 @@ async def _observe_core_inner(
                 entries[f"onto_{node_uuid}"] = {
                     "content": f"{display}: {summary}" if display else summary,
                     "source_type": "ontology_node",
-                    "created_at": 0,
+                    "created_at": node.get("created_at", 0),
                     "rank": node.get("score", 0.85),
                 }
         for ep in relevant_episodes:
@@ -1005,7 +1005,7 @@ async def _observe_core_inner(
                             entries[key] = {
                                 "content": f"{display}: {summary}" if display else summary,
                                 "source_type": "ontology_node",
-                                "created_at": 0,
+                                "created_at": node.get("created_at", 0),
                                 "rank": node.get("score", 0.85),
                             }
             except Exception as e:
@@ -1035,7 +1035,7 @@ async def _observe_core_inner(
                             entries[key] = {
                                 "content": content_str,
                                 "source_type": "causal_claim",
-                                "created_at": 0,
+                                "created_at": claim.get("created_at", 0),
                                 "rank": claim.get("score", 0.80),
                             }
             except Exception as e:
