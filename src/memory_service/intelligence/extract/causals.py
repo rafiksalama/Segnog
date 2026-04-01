@@ -23,13 +23,14 @@ Causal types:
 - "prevents": X stops Y from happening ("X prevented Y", "X blocked Y")
 - "inhibits": X reduces the likelihood of Y ("X discouraged Y", "X made Y less likely")
 
-Rules:
-- Extract EXPLICIT causation ("X caused Y", "because of X, Y happened")
-- Extract STRONGLY IMPLIED causation (clear causal sequences)
-- Do NOT extract mere correlations or temporal co-occurrences
-- cause and effect must be specific (not vague concepts)
-- Confidence should reflect certainty of the CAUSAL LINK, not just whether it's stated:
-  0.9-0.95: direct causation with clear mechanism ("X caused Y because Z")
+For each candidate relationship, follow these steps:
+1. Identify whether it is true causation or mere correlation/temporal co-occurrence
+2. Classify the causal type: causes, enables, prevents, or inhibits
+3. Determine if the mechanism is stated, implied, or speculative
+4. Assign confidence accordingly — discard pure correlations
+
+Confidence guidelines:
+  0.9-0.95: direct causation with clear mechanism
   0.7-0.85: strong causal link but mechanism unclear or indirect
   0.5-0.65: plausible causation, could be correlation
   0.3-0.45: speculative, weak evidence of causation
@@ -37,13 +38,6 @@ Rules:
 
 Return a JSON array of objects with these fields:
   cause, effect, causal_type ("causes"|"enables"|"prevents"|"inhibits"), mechanism (optional), confidence (0-1)
-
-Example output:
-[
-  {"cause": "merger between Acme and Beta", "effect": "200 layoffs in engineering", "causal_type": "causes", "mechanism": "post-merger restructuring", "confidence": 0.95},
-  {"cause": "new firewall rules", "effect": "unauthorized access", "causal_type": "prevents", "mechanism": "blocked external IPs", "confidence": 0.85},
-  {"cause": "layoffs", "effect": "John relocated to NYC", "causal_type": "enables", "mechanism": "needed new employment", "confidence": 0.7}
-]
 
 Return ONLY the JSON array. No explanation, no markdown."""
 
