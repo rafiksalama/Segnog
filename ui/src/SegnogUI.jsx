@@ -1777,108 +1777,19 @@ const GraphPage = () => {
 
       {/* Full-screen graph */}
       <div style={{ position: "absolute", inset: 0, background: p.bg }}>
-        {layout === "hub" ? (
-          <Suspense fallback={<div style={{color: p.textDim, padding: 40}}>Loading graph...</div>}>
-            <ForceGraphView
-              nodes={ontology}
-              edges={(ontoEdgeData && ontoEdgeData.edges) || []}
-              cooccur={(ontoCooccurData && ontoCooccurData.pairs) || []}
-              sessions={(sessionsData && sessionsData.sessions) || []}
-              width={typeof window !== "undefined" ? window.innerWidth - 220 : 1200}
-              height={typeof window !== "undefined" ? window.innerHeight : 800}
-              theme={p === DARK ? "dark" : "light"}
-            />
-          </Suspense>
-        ) : (
-          <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
-        )}
+        <Suspense fallback={<div style={{color: p.textDim, padding: 40}}>Loading graph...</div>}>
+          <ForceGraphView
+            nodes={ontology}
+            edges={(ontoEdgeData && ontoEdgeData.edges) || []}
+            cooccur={(ontoCooccurData && ontoCooccurData.pairs) || []}
+            sessions={(sessionsData && sessionsData.sessions) || []}
+            width={typeof window !== "undefined" ? window.innerWidth - 220 : 1200}
+            height={typeof window !== "undefined" ? window.innerHeight : 800}
+            theme={p === DARK ? "dark" : "light"}
+          />
+        </Suspense>
       </div>
 
-      {/* Top-left title bar */}
-      <div style={{ position: "absolute", top: 20, left: 24, zIndex: 10, pointerEvents: "none" }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: p.text }}>Memory Graph</h2>
-        <div style={{ fontSize: 11, color: p.textMuted, fontFamily: MONO, marginTop: 3 }}>
-          {ontology.length} ontology · {knowledge.length} knowledge · {episodes.length} episodes
-        </div>
-      </div>
-
-      {/* Top toolbar — layout buttons + filter controls */}
-      <div style={{ position: "absolute", top: 12, left: 0, right: sidebarOpen ? 340 : 0, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "0 120px 0 10px" }}>
-        {/* Row 1: Layout buttons */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
-          {LAYOUT_OPTS.map(l => (
-            <button key={l.id} onClick={() => setLayout(l.id)} style={{
-              padding: "4px 10px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
-              border: `1px solid ${layout === l.id ? p.accent : p.border}`,
-              background: layout === l.id ? p.accent + "22" : p.surface + "dd",
-              color: layout === l.id ? p.accent : p.textMuted,
-              fontSize: 10, fontWeight: 600, fontFamily: MONO,
-              backdropFilter: "blur(8px)",
-            }}>{l.label}</button>
-          ))}
-        </div>
-        {/* Row 2: Filters */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
-          {/* Type filter dropdown */}
-          <select
-            value={typeFilter || ""}
-            onChange={e => setTypeFilter(e.target.value || null)}
-            style={{
-              padding: "3px 8px", borderRadius: 12, cursor: "pointer",
-              border: `1px solid ${typeFilter ? p.accent : p.border}`,
-              background: typeFilter ? p.accent + "22" : p.surface + "dd",
-              color: typeFilter ? p.accent : p.textMuted,
-              fontSize: 10, fontWeight: 600, fontFamily: MONO,
-              backdropFilter: "blur(8px)", outline: "none",
-            }}
-          >
-            <option value="">All types</option>
-            {[...new Set(ontology.map(o => o.schema_type || "Thing"))].sort().map(t => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          {/* Separator */}
-          <span style={{ color: p.textDim, fontSize: 10 }}>|</span>
-          {/* Edge toggles */}
-          <button onClick={() => setShowRelates(v => !v)} style={{
-            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
-            border: `1px solid ${showRelates ? p.accent : p.border}`,
-            background: showRelates ? p.accent + "22" : p.surface + "dd",
-            color: showRelates ? p.accent : p.textMuted,
-            fontSize: 10, fontWeight: 600, fontFamily: MONO,
-            backdropFilter: "blur(8px)",
-          }}>Semantic</button>
-          <button onClick={() => setShowCooccur(v => !v)} style={{
-            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
-            border: `1px solid ${showCooccur ? p.blue : p.border}`,
-            background: showCooccur ? p.blue + "22" : p.surface + "dd",
-            color: showCooccur ? p.blue : p.textMuted,
-            fontSize: 10, fontWeight: 600, fontFamily: MONO,
-            backdropFilter: "blur(8px)",
-          }}>Co-occur</button>
-          <span style={{ color: p.textDim, fontSize: 10 }}>|</span>
-          {/* Label toggle */}
-          <button onClick={() => setShowLabels(v => !v)} style={{
-            padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
-            border: `1px solid ${showLabels ? p.warm : p.border}`,
-            background: showLabels ? p.warm + "22" : p.surface + "dd",
-            color: showLabels ? p.warm : p.textMuted,
-            fontSize: 10, fontWeight: 600, fontFamily: MONO,
-            backdropFilter: "blur(8px)",
-          }}>Labels</button>
-          {/* Singleton toggle */}
-          {layout === "hub" && singletonCount > 0 && (
-            <button onClick={() => { setShowSingletons(v => !v); setLayoutKey(k => k + 1); }} style={{
-              padding: "3px 10px", borderRadius: 12, cursor: "pointer", transition: "all 0.15s",
-              border: `1px solid ${showSingletons ? p.warm : p.border}`,
-              background: showSingletons ? p.warm + "22" : p.surface + "dd",
-              color: showSingletons ? p.warm : p.textMuted,
-              fontSize: 10, fontWeight: 600, fontFamily: MONO,
-              backdropFilter: "blur(8px)",
-            }}>{singletonCount} isolated</button>
-          )}
-        </div>
-      </div>
 
       {/* Bottom-left legend — collapsible, click type to filter */}
       {ontology.length > 0 && (() => {

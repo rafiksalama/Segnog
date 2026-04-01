@@ -202,6 +202,10 @@ class CausalClaimStore(BaseStore):
     async def revise_beliefs(self, group_id: Optional[str] = None) -> int:
         """Recompute confidence for all active claims from evidence edges.
 
+        Uses Laplace-smoothed evidence ratio: (support + 1) / (support + contradict + 2).
+        This prevents a single SUPPORTS edge from producing confidence=1.0 — a claim
+        with 1 support and 0 contradicts gets 0.67 instead of 1.0.
+
         Returns number of claims revised.
         """
         gid = group_id or self._group_id
@@ -217,12 +221,13 @@ class CausalClaimStore(BaseStore):
             WITH c, support_total, contradict_total,
                  CASE
                      WHEN support_total + contradict_total > 0 THEN
-                         // Simple evidence ratio: support / (support + contradict)
-                         // This naturally scales from 0.0 to 1.0 based on evidence balance
-                         support_total::float / (support_total + contradict_total)
+                         // Laplace-smoothed evidence ratio with a uniform prior (alpha=1).
+                         // 1 support, 0 contradicts → 2/3 ≈ 0.67 (not 1.0).
+                         // Converges to the raw ratio as evidence accumulates.
+                         (support_total + 1.0) / (support_total + contradict_total + 2.0)
                      ELSE
-                         // No evidence: slight regression to 0.5 (uncertainty) prevents overconfidence
-                         c.confidence * 0.95 + 0.5 * 0.05
+                         // No evidence: exponential decay toward 0.5 (uncertainty)
+                         0.5 + (c.confidence - 0.5) * 0.95
                  END AS new_conf
             SET c.confidence = new_conf,
                 c.status = CASE
@@ -241,57 +246,30 @@ class CausalClaimStore(BaseStore):
         return revised
 
     async def auto_chain(self, group_id: Optional[str] = None) -> int:
-        """Auto-link causal claims where A's effect matches B's cause.
+        """Auto-link causal claims via shared entities (graph-path discovery).
 
-        Embeds each effect_summary and cause_summary separately, then links
-        A→B when cosine(A.effect_embedding, B.cause_embedding) > 0.80.
+        Creates A-[:CAUSES]->B when A's effect entity is the same OntologyNode
+        as B's cause entity — i.e. the two claims share a real-world entity
+        that is the effect of one and the cause of the other.
+
+        This replaces the previous embedding-similarity approach which confused
+        semantic relatedness with actual causal linkage.
+
         Returns number of CAUSES edges created.
         """
         gid = group_id or self._group_id
         try:
-            claims = await self.list_claims(group_id=gid, limit=100)
-            if len(claims) < 2:
-                return 0
-
-            # Embed all effect and cause summaries
-            effects = [c.get("effect_summary", "") for c in claims]
-            causes = [c.get("cause_summary", "") for c in claims]
-            all_texts = effects + causes
-            all_embs = await self._embed_batch(all_texts)
-            effect_embs = all_embs[: len(claims)]
-            cause_embs = all_embs[len(claims) :]
-
-            # Compare each effect to each cause
-            import numpy as np
-
-            created = 0
-            for i, claim_a in enumerate(claims):
-                for j, claim_b in enumerate(claims):
-                    if i == j:
-                        continue
-                    # Cosine similarity between A's effect and B's cause
-                    a_vec = np.array(effect_embs[i])
-                    b_vec = np.array(cause_embs[j])
-                    norm = np.linalg.norm(a_vec) * np.linalg.norm(b_vec)
-                    if norm == 0:
-                        continue
-                    sim = float(np.dot(a_vec, b_vec) / norm)
-                    if sim > 0.80:
-                        try:
-                            await self._graph.query(
-                                """
-                                MATCH (a:CausalClaim {uuid: $a_uuid})
-                                MATCH (b:CausalClaim {uuid: $b_uuid})
-                                MERGE (a)-[:CAUSES]->(b)
-                                """,
-                                params={
-                                    "a_uuid": claim_a["uuid"],
-                                    "b_uuid": claim_b["uuid"],
-                                },
-                            )
-                            created += 1
-                        except Exception:
-                            pass
+            result = await self._graph.query(
+                """
+                MATCH (a:CausalClaim)-[:EFFECT_ENTITY]->(n:OntologyNode)<-[:CAUSE_ENTITY]-(b:CausalClaim)
+                WHERE a.uuid <> b.uuid
+                  AND a.status <> 'refuted'
+                  AND b.status <> 'refuted'
+                MERGE (a)-[:CAUSES]->(b)
+                RETURN count(*) AS created
+                """,
+            )
+            created = result.result_set[0][0] if result.result_set else 0
             if created:
                 logger.info("Auto-chained %d CAUSES edges for group %s", created, gid)
             return created
