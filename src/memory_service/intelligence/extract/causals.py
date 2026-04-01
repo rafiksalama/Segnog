@@ -15,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """You are a causal reasoning analyst. Extract all causal relationships from text.
 
-A causal claim asserts that one event/action/state CAUSES, LEADS TO, or RESULTS IN another.
+A causal claim asserts that one event/action/state CAUSES, ENABLES, PREVENTS, or INHIBITS another.
+
+Causal types:
+- "causes": X directly produces Y ("X caused Y", "because of X, Y happened")
+- "enables": X makes Y possible but doesn't guarantee it ("X allowed Y", "X enabled Y")
+- "prevents": X stops Y from happening ("X prevented Y", "X blocked Y")
+- "inhibits": X reduces the likelihood of Y ("X discouraged Y", "X made Y less likely")
 
 Rules:
 - Extract EXPLICIT causation ("X caused Y", "because of X, Y happened")
@@ -30,12 +36,13 @@ Rules:
   Never use 1.0 — no causal claim is absolutely certain
 
 Return a JSON array of objects with these fields:
-  cause, effect, mechanism (optional), confidence (0-1)
+  cause, effect, causal_type ("causes"|"enables"|"prevents"|"inhibits"), mechanism (optional), confidence (0-1)
 
 Example output:
 [
-  {"cause": "merger between Acme and Beta", "effect": "200 layoffs in engineering", "mechanism": "post-merger restructuring", "confidence": 0.95},
-  {"cause": "layoffs", "effect": "John relocated to NYC", "mechanism": "needed new employment", "confidence": 0.7}
+  {"cause": "merger between Acme and Beta", "effect": "200 layoffs in engineering", "causal_type": "causes", "mechanism": "post-merger restructuring", "confidence": 0.95},
+  {"cause": "new firewall rules", "effect": "unauthorized access", "causal_type": "prevents", "mechanism": "blocked external IPs", "confidence": 0.85},
+  {"cause": "layoffs", "effect": "John relocated to NYC", "causal_type": "enables", "mechanism": "needed new employment", "confidence": 0.7}
 ]
 
 Return ONLY the JSON array. No explanation, no markdown."""
@@ -99,6 +106,10 @@ async def extract_causal_claims(
             confidence = float(item.get("confidence", 0.8))
             confidence = max(0.0, min(1.0, confidence))
 
+            causal_type = str(item.get("causal_type", "causes")).strip().lower()
+            if causal_type not in {"causes", "enables", "prevents", "inhibits"}:
+                causal_type = "causes"
+
             claims.append(
                 {
                     "cause": cause,
@@ -108,6 +119,7 @@ async def extract_causal_claims(
                     "effect_norm": effect_norm,
                     "effect_type": "Thing",
                     "mechanism": str(item.get("mechanism", "")).strip(),
+                    "causal_type": causal_type,
                     "confidence": confidence,
                     "temporal_marker": "",
                 }

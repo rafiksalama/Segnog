@@ -214,6 +214,7 @@ async def update_group_ontology(
                         effect_summary=claim["effect"],
                         mechanism=claim.get("mechanism", ""),
                         confidence=claim.get("confidence", 0.8),
+                        causal_type=claim.get("causal_type", "causes"),
                         cause_entity=claim.get("cause_norm"),
                         effect_entity=claim.get("effect_norm"),
                         group_id=group_id,

@@ -62,12 +62,15 @@ class CausalClaimStore(BaseStore):
     # Write: upsert claim
     # ------------------------------------------------------------------
 
+    CAUSAL_TYPES = {"causes", "enables", "prevents", "inhibits"}
+
     async def upsert_claim(
         self,
         cause_summary: str,
         effect_summary: str,
         mechanism: str = "",
         confidence: float = 0.8,
+        causal_type: str = "causes",
         cause_entity: Optional[str] = None,
         effect_entity: Optional[str] = None,
         group_id: Optional[str] = None,
@@ -82,7 +85,8 @@ class CausalClaimStore(BaseStore):
         effect_norm = normalize_name(effect_summary)
         merge_key = f"{cause_norm}--{effect_norm}"
 
-        embed_text = f"{cause_summary} causes {effect_summary}"
+        ctype = causal_type if causal_type in self.CAUSAL_TYPES else "causes"
+        embed_text = f"{cause_summary} {ctype} {effect_summary}"
         if mechanism:
             embed_text += f" because {mechanism}"
         embedding = await self._embed(embed_text)
@@ -98,6 +102,8 @@ class CausalClaimStore(BaseStore):
                 c.effect_summary = $effect_summary,
                 c.mechanism      = $mechanism,
                 c.confidence     = $confidence,
+                c.certainty      = 0.0,
+                c.causal_type    = $causal_type,
                 c.evidence_count = 0,
                 c.status         = 'active',
                 c.embedding      = vecf32($embedding),
@@ -118,6 +124,7 @@ class CausalClaimStore(BaseStore):
                 "cause_summary": cause_summary,
                 "effect_summary": effect_summary,
                 "mechanism": mechanism,
+                "causal_type": ctype,
                 "confidence": max(0.0, min(1.0, confidence)),
                 "embedding": embedding,
                 "now": now,
@@ -164,23 +171,28 @@ class CausalClaimStore(BaseStore):
         claim_uuid: str,
         knowledge_uuid: str,
         direction: str = "supports",
-        weight: float = 1.0,
+        weight: Optional[float] = None,
     ) -> None:
-        """Add a SUPPORTS or CONTRADICTS edge from Knowledge to CausalClaim."""
+        """Add a SUPPORTS or CONTRADICTS edge from Knowledge to CausalClaim.
+
+        If weight is None, uses the Knowledge node's own confidence as the
+        edge weight — stronger sources produce stronger evidence.
+        """
         edge_type = "SUPPORTS" if direction == "supports" else "CONTRADICTS"
         try:
             await self._graph.query(
                 f"""
                 MATCH (k:Knowledge {{uuid: $kn_uuid}})
                 MATCH (c:CausalClaim {{uuid: $claim_uuid}})
+                WITH k, c, CASE WHEN $weight < 0 THEN coalesce(k.confidence, 0.5) ELSE $weight END AS w
                 MERGE (k)-[r:{edge_type}]->(c)
-                ON CREATE SET r.weight = $weight, r.created_at = $now
-                ON MATCH SET r.weight = $weight
+                ON CREATE SET r.weight = w, r.created_at = $now
+                ON MATCH SET r.weight = w
                 """,
                 params={
                     "kn_uuid": knowledge_uuid,
                     "claim_uuid": claim_uuid,
-                    "weight": weight,
+                    "weight": weight if weight is not None else -1.0,
                     "now": time.time(),
                 },
             )
@@ -200,15 +212,23 @@ class CausalClaimStore(BaseStore):
     # ------------------------------------------------------------------
 
     async def revise_beliefs(self, group_id: Optional[str] = None) -> int:
-        """Recompute confidence for all active claims from evidence edges.
+        """Recompute confidence and certainty for all active claims.
 
-        Uses Laplace-smoothed evidence ratio: (support + 1) / (support + contradict + 2).
-        This prevents a single SUPPORTS edge from producing confidence=1.0 — a claim
-        with 1 support and 0 contradicts gets 0.67 instead of 1.0.
+        Confidence uses Laplace-smoothed evidence ratio:
+            (support + 1) / (support + contradict + 2)
+
+        Certainty tracks how much evidence backs the claim:
+            1 - 1 / (1 + evidence_count)
+        0 evidence → 0.0 certainty, 1 → 0.5, 4 → 0.8, 9 → 0.9.
+
+        No-evidence claims decay toward 0.5 via time-based exponential decay:
+            0.5 + (conf - 0.5) * exp(-λ * hours_since_update)
+        with λ = 0.01 (half-life ≈ 69 hours ≈ 3 days).
 
         Returns number of claims revised.
         """
         gid = group_id or self._group_id
+        now = time.time()
         result = await self._graph.query(
             """
             MATCH (c:CausalClaim)
@@ -217,19 +237,23 @@ class CausalClaimStore(BaseStore):
             OPTIONAL MATCH (k2:Knowledge)-[d:CONTRADICTS]->(c)
             WITH c,
                  coalesce(sum(s.weight), 0) AS support_total,
-                 coalesce(sum(d.weight), 0) AS contradict_total
-            WITH c, support_total, contradict_total,
+                 coalesce(sum(d.weight), 0) AS contradict_total,
+                 count(DISTINCT s) + count(DISTINCT d) AS obs_count
+            WITH c, support_total, contradict_total, obs_count,
                  CASE
                      WHEN support_total + contradict_total > 0 THEN
-                         // Laplace-smoothed evidence ratio with a uniform prior (alpha=1).
-                         // 1 support, 0 contradicts → 2/3 ≈ 0.67 (not 1.0).
-                         // Converges to the raw ratio as evidence accumulates.
+                         // Laplace-smoothed evidence ratio (alpha=1 prior).
                          (support_total + 1.0) / (support_total + contradict_total + 2.0)
                      ELSE
-                         // No evidence: exponential decay toward 0.5 (uncertainty)
-                         0.5 + (c.confidence - 0.5) * 0.95
-                 END AS new_conf
+                         // Time-based exponential decay toward 0.5.
+                         // hours_elapsed = (now - updated_at) / 3600, λ = 0.01
+                         0.5 + (c.confidence - 0.5) * exp(-0.01 * ($now - coalesce(c.updated_at, $now)) / 3600.0)
+                 END AS new_conf,
+                 // Certainty: 0 when no evidence, approaches 1 as evidence grows
+                 1.0 - 1.0 / (1.0 + obs_count) AS new_certainty
             SET c.confidence = new_conf,
+                c.certainty = new_certainty,
+                c.evidence_count = obs_count,
                 c.status = CASE
                     WHEN new_conf < 0.05 THEN 'refuted'
                     WHEN new_conf < 0.2  THEN 'weakened'
@@ -238,7 +262,7 @@ class CausalClaimStore(BaseStore):
                 c.updated_at = $now
             RETURN count(c) AS revised
             """,
-            params={"group_id": gid, "now": time.time()},
+            params={"group_id": gid, "now": now},
         )
         revised = result.result_set[0][0] if result.result_set else 0
         if revised:
@@ -287,8 +311,10 @@ class CausalClaimStore(BaseStore):
             MATCH (c:CausalClaim {uuid: $uuid})
             RETURN c.uuid AS uuid, c.group_id AS group_id,
                    c.cause_summary AS cause_summary, c.effect_summary AS effect_summary,
-                   c.mechanism AS mechanism, c.confidence AS confidence,
-                   c.evidence_count AS evidence_count, c.status AS status,
+                   c.mechanism AS mechanism, c.causal_type AS causal_type,
+                   c.confidence AS confidence,
+                   c.certainty AS certainty, c.evidence_count AS evidence_count,
+                   c.status AS status,
                    c.created_at AS created_at, c.updated_at AS updated_at
             LIMIT 1
             """,
@@ -318,7 +344,8 @@ class CausalClaimStore(BaseStore):
             WHERE score >= $min_score
             RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
                    c.effect_summary AS effect_summary, c.mechanism AS mechanism,
-                   c.confidence AS confidence, c.evidence_count AS evidence_count,
+                   c.confidence AS confidence, c.certainty AS certainty,
+                   c.evidence_count AS evidence_count,
                    c.status AS status, c.created_at AS created_at, score
             ORDER BY score DESC
             LIMIT $top_k
@@ -354,7 +381,8 @@ class CausalClaimStore(BaseStore):
             WHERE {where}
             RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
                    c.effect_summary AS effect_summary, c.mechanism AS mechanism,
-                   c.confidence AS confidence, c.evidence_count AS evidence_count,
+                   c.confidence AS confidence, c.certainty AS certainty,
+                   c.evidence_count AS evidence_count,
                    c.status AS status, c.updated_at AS updated_at
             ORDER BY c.confidence DESC
             LIMIT $limit
