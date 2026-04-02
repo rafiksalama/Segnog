@@ -489,9 +489,17 @@ class EpisodeStore(BaseStore):
         else:
             group_filter = "e.group_id = $group_id"
 
+        # Exclude known garbage content patterns (reflections, metacognition, failed LLM outputs)
+        garbage_filter = """
+            AND NOT e.content STARTS WITH 'Reflection for:'
+            AND NOT e.content STARTS WITH 'Causal Reflection for:'
+            AND NOT e.content STARTS WITH 'Metacognition for:'
+            AND NOT e.content STARTS WITH 'Mission completed with status='
+        """
+
         cypher = f"""
             MATCH (e:Episode)
-            WHERE {group_filter} {type_filter} {time_filter}
+            WHERE {group_filter} {type_filter} {time_filter} {garbage_filter}
             WITH e, (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
             WHERE score > $min_score
             RETURN

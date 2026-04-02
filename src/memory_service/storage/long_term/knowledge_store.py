@@ -266,9 +266,16 @@ class KnowledgeStore(BaseStore):
         else:
             group_filter = "k.group_id = $group_id"
 
+        # Exclude garbage knowledge types (reflections, metacognition)
+        garbage_filter = """
+            AND NOT k.knowledge_type IN ['reflection', 'causal_reflection', 'metacognition']
+            AND NOT k.content STARTS WITH 'Reflection for:'
+            AND NOT k.content STARTS WITH 'Metacognition for:'
+        """
+
         cypher = f"""
             MATCH (k:Knowledge)
-            WHERE {group_filter} {type_filter}
+            WHERE {group_filter} {type_filter} {garbage_filter}
             WITH k, (2 - vec.cosineDistance(k.embedding, vecf32($query_vec))) / 2 AS score
             WHERE score > $min_score
             RETURN
