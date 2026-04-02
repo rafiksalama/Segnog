@@ -200,9 +200,18 @@ class OntologyStore(BaseStore):
             ",\n                n.embedding AS embedding" if include_embedding else ""
         )
 
+        # Scope to entities linked to episodes in this group via ABOUT edges,
+        # or search globally if no group_id.
+        if gid:
+            match_clause = """
+            MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(n:OntologyNode)
+            WITH DISTINCT n"""
+        else:
+            match_clause = "MATCH (n:OntologyNode)"
+
         result = await self._graph.ro_query(
             f"""
-            MATCH (n:OntologyNode)
+            {match_clause}
             WITH n,
                  (2 - vec.cosineDistance(n.embedding, vecf32($query_vec))) / 2 AS score
             WHERE score >= $min_score
