@@ -13,6 +13,7 @@ services:
       - dragonfly_data:/data/dragonfly
       - falkordb_data:/data/falkordb
       - nats_data:/data/nats
+      - ./settings.toml:/app/settings.toml:ro
     restart: unless-stopped
 
 volumes:

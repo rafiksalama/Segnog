@@ -51,7 +51,7 @@ activation_cap = 1000
 # Background worker (REM sleep cycles)
 [default.background]
 enabled = true
-interval_seconds = 10
+interval_seconds = 120
 batch_size = 5
 min_episodes_for_processing = 3
 # Cosine-similarity threshold above which a pending episode is treated as a duplicate
