@@ -4,7 +4,7 @@
 ## ---------------------------------------------------------------------------
 
 # ── Build Python deps ──────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ COPY ui/ .
 RUN npm run build
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
