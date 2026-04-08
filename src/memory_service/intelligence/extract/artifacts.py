@@ -113,11 +113,11 @@ async def extract_artifacts(
         for entry in extraction.entries:
             valid.append(
                 {
-                    "name": str(entry.name)[:200],
+                    "name": str(entry.name),
                     "artifact_type": entry.artifact_type,
-                    "path": str(entry.path)[:500],
-                    "description": str(entry.description)[:500],
-                    "labels": list(entry.labels)[:7],
+                    "path": str(entry.path),
+                    "description": str(entry.description),
+                    "labels": list(entry.labels),
                 }
             )
 

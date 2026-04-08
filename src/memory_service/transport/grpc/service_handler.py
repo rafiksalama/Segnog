@@ -248,7 +248,7 @@ class MemoryServiceHandler:
             etype = e.get("type", "")
             data = e.get("data", {})
             content = (
-                data.get("content", str(data)[:200]) if isinstance(data, dict) else str(data)[:200]
+                data.get("content", str(data)) if isinstance(data, dict) else str(data)
             )
             lines.append(f"[{etype}] {content}")
         return {"formatted_context": "\n".join(lines) if lines else "No recent events."}

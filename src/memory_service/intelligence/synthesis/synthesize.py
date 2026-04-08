@@ -101,11 +101,11 @@ Rules:
     if narrative and episode_store:
         try:
             episode_uuid = await episode_store.store_episode(
-                content=f"Background briefing for task: {task[:200]}\n\n{narrative}",
+                content=f"Background briefing for task: {task}\n\n{narrative}",
                 metadata={
                     "source": "synthesizer",
-                    "task": task[:200],
-                    "inferred_state": inferred_state[:200] if inferred_state else "",
+                    "task": task,
+                    "inferred_state": inferred_state or "",
                 },
                 episode_type="narrative",
             )

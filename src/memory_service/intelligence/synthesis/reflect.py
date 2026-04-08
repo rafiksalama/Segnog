@@ -52,10 +52,10 @@ async def generate_metacognition(
 about this task — not what it produced, but the quality and patterns of its thinking.
 
 ## Task
-{task[:500]}
+{task}
 
 ## Reflection (system's self-assessment)
-{reflection[:5000]}
+{reflection}
 {traces_section}
 
 ## Instructions
@@ -110,9 +110,9 @@ async def generate_reflection(
     """
     model = model or get_flash_model()
 
-    task = mission_data.get("task", "")[:500]
+    task = mission_data.get("task", "")
     status = mission_data.get("status", "")
-    output = mission_data.get("output", "")[:2000]
+    output = mission_data.get("output", "")
     state = mission_data.get("state", {})
     state_desc = state.get("state_description", "") if isinstance(state, dict) else ""
     iterations = mission_data.get("iterations", 0)
@@ -121,12 +121,12 @@ async def generate_reflection(
     # Format plan progression
     plan_section = ""
     if plan_data and isinstance(plan_data, dict):
-        plan_lines = [f"Plan goal: {plan_data.get('goal', 'N/A')[:100]}"]
+        plan_lines = [f"Plan goal: {plan_data.get('goal', 'N/A')}"]
         for item in plan_data.get("items", []):
             s = item.get("status", "pending")
-            desc = item.get("description", "")[:80]
+            desc = item.get("description", "")
             result = item.get("result", "")
-            result_str = f" → {result[:60]}" if result else ""
+            result_str = f" → {result}" if result else ""
             plan_lines.append(f"  [{s}] {desc}{result_str}")
         plan_section = "\n## Plan Execution\n" + "\n".join(plan_lines)
 
@@ -136,7 +136,7 @@ async def generate_reflection(
     judge_feedback = state.get("judge_previous_feedback", "") if isinstance(state, dict) else ""
     if judge_round > 0:
         judge_section = (
-            f"\n## Judge Evaluation\nRounds: {judge_round}\nLast feedback: {judge_feedback[:300]}"
+            f"\n## Judge Evaluation\nRounds: {judge_round}\nLast feedback: {judge_feedback}"
         )
 
     prompt = f"""Review this completed mission and produce a structured reflection.

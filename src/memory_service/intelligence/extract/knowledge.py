@@ -143,7 +143,7 @@ async def extract_knowledge(
 
             valid.append(
                 {
-                    "content": str(content)[:500],
+                    "content": str(content),
                     "knowledge_type": ktype,
                     "labels": list(labels)[:15],
                     "confidence": min(1.0, max(0.0, float(confidence))),

@@ -53,12 +53,12 @@ async def compress_events(
             etype = e.get("type", "unknown")
             content = e.get("content", "")
             if isinstance(content, dict):
-                content = json.dumps(content)[:200]
+                content = json.dumps(content)
             else:
-                content = str(content)[:200]
+                content = str(content)
             event_lines.append(f"[{etype}] {content}")
 
-        events_text = "\n".join(event_lines[:30])
+        events_text = "\n".join(event_lines)
 
         context_hint = f"\nAgent's final state: {state_description}\n" if state_description else ""
         summary = await llm_call(

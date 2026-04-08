@@ -215,15 +215,15 @@ class CurationWorker:
                                 data = e.get("data", {})
                                 if etype == "tool_call":
                                     tool = data.get("tool", data.get("tool_name", "unknown"))
-                                    inp = str(data.get("input", data.get("args", "")))[:300]
+                                    inp = str(data.get("input", data.get("args", "")))
                                     lines.append(f"[tool_call] {tool}: {inp}")
                                 elif etype == "tool_result":
                                     tool = data.get("tool", data.get("tool_name", "unknown"))
-                                    out = str(data.get("output", data.get("result", "")))[:500]
+                                    out = str(data.get("output", data.get("result", "")))
                                     ok = "ok" if data.get("success", True) else "FAILED"
                                     lines.append(f"[tool_result:{ok}] {tool}: {out}")
                                 else:
-                                    content = str(data.get("content", str(data)))[:300]
+                                    content = str(data.get("content", str(data)))
                                     lines.append(f"[{etype}] {content}")
                             tool_context = "\n".join(lines)
                     except Exception as exc:
@@ -238,8 +238,8 @@ class CurationWorker:
                     "data_source_type": "conversation",
                     "iterations": 1,
                     "state": {
-                        "state_description": combined[:2000],
-                        "outputs": [{"iteration": 1, "output": combined[:4000]}],
+                        "state_description": combined,
+                        "outputs": [{"iteration": 1, "output": combined}],
                     },
                 }
 
@@ -292,7 +292,7 @@ class CurationWorker:
                     compressed_uuid = await self._episode_store.compress_raw_episodes(
                         group_id=group_id,
                         source_uuids=source_uuids,
-                        summary_content=combined[:3000],
+                        summary_content=combined,
                     )
 
                 duration_ms = (time.time() - start_time) * 1000

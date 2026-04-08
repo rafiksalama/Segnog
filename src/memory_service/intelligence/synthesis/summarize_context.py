@@ -56,7 +56,7 @@ def _format_entries(entries: Dict[str, Any]) -> str:
         rank = entry.get("rank", entry.get("score", _DEFAULT_RANK.get(source_type, 0.0)))
         items.append(
             {
-                "content": entry.get("content", "")[:800],  # Truncate long entries for context
+                "content": entry.get("content", ""),
                 "source_type": source_type,
                 "created_at": entry.get("created_at", 0),
                 "event_date": entry.get("event_date", ""),

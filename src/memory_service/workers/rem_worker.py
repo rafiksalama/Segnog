@@ -226,7 +226,7 @@ class REMWorker:
             "task": f"Background consolidation for group '{group_id}'",
             "status": "completed",
             "run_id": f"rem_{group_id}_{int(time.time())}",
-            "state": {"state_description": combined_content[:2000]},
+            "state": {"state_description": combined_content},
         }
 
         curation_result = await self._handler.run_curation(
@@ -253,7 +253,7 @@ class REMWorker:
             compressed_uuid = await self._episode_store.compress_raw_episodes(
                 group_id=group_id,
                 source_uuids=source_uuids,
-                summary_content=combined_content[:3000],
+                summary_content=combined_content,
             )
 
         return {

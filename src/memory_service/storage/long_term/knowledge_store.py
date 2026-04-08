@@ -183,7 +183,7 @@ class KnowledgeStore(BaseStore):
                     "knowledge_type": entry.get("knowledge_type", "fact"),
                     "labels": json.dumps(labels_normalized),
                     "confidence": float(entry.get("confidence", 0.8)),
-                    "source_mission": source_mission[:200],
+                    "source_mission": source_mission,
                     "mission_status": mission_status,
                     "source_episode_uuid": source_episode_uuid,
                     "created_at": now,

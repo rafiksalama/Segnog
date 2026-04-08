@@ -588,8 +588,8 @@ async def background_hydrate(
                         "data_source_type": "conversation",
                         "iterations": 1,
                         "state": {
-                            "state_description": content[:2000],
-                            "outputs": [{"iteration": 1, "output": content[:4000]}],
+                            "state_description": content,
+                            "outputs": [{"iteration": 1, "output": content}],
                         },
                     }
                     knowledge_entries = await _extract_knowledge(

@@ -433,10 +433,10 @@ class MemoryService:
             if results:
                 lines = ["## Related Memory (Episode Search)"]
                 for i, r in enumerate(results[:10], 1):
-                    content = str(r.get("content", ""))[:200]
+                    content = str(r.get("content", ""))
                     score = r.get("score", 0)
                     etype = r.get("episode_type", "raw")
-                    lines.append(f"{i}. [{etype}] {content}... (score={score:.2f})")
+                    lines.append(f"{i}. [{etype}] {content} (score={score:.2f})")
                 long_term_context = "\n".join(lines)
         except Exception as e:
             logger.warning(f"Episode search failed (non-critical): {e}")
@@ -455,7 +455,7 @@ class MemoryService:
                 lines = ["## Accumulated Knowledge"]
                 for i, r in enumerate(results, 1):
                     ktype = r.get("knowledge_type", "fact")
-                    content = r.get("content", "")[:200]
+                    content = r.get("content", "")
                     labels_val = r.get("labels", [])
                     if isinstance(labels_val, str):
                         try:
@@ -489,7 +489,7 @@ class MemoryService:
                     name = r.get("name", "unknown")
                     atype = r.get("artifact_type", "file")
                     path = r.get("path", "")
-                    desc = r.get("description", "")[:150]
+                    desc = r.get("description", "")
                     labels_val = r.get("labels", [])
                     if isinstance(labels_val, str):
                         try:
@@ -498,7 +498,7 @@ class MemoryService:
                             labels_val = []
                     label_str = ", ".join(labels_val[:3]) if labels_val else ""
                     score = r.get("score", 0)
-                    source = r.get("source_mission", "")[:60]
+                    source = r.get("source_mission", "")
                     lines.append(
                         f"{i}. **{name}** [{atype}] — {desc}"
                         + (f"\n   Path: {path}" if path else "")
@@ -533,9 +533,9 @@ class MemoryService:
                 lines = ["## Prior Reflections & Metacognition"]
                 for i, r in enumerate(result.result_set, 1):
                     etype = r[2] or "reflection"
-                    content = (r[1] or "")[:300]
+                    content = (r[1] or "")
                     score = r[4]
-                    lines.append(f"{i}. [{etype}] {content}... (score={score:.2f})")
+                    lines.append(f"{i}. [{etype}] {content} (score={score:.2f})")
                 return "\n".join(lines)
             except Exception as e:
                 logger.warning(f"Reflections search failed (non-critical): {e}")
@@ -681,10 +681,10 @@ class MemoryService:
                 continue
             try:
                 ep_uuid = await ep_store.store_episode(
-                    content=f"{section_type.replace('_', ' ').title()} for: {task[:200]}\n\n{content_text}",
+                    content=f"{section_type.replace('_', ' ').title()} for: {task}\n\n{content_text}",
                     metadata={
                         "source": "curator",
-                        "task": task[:200],
+                        "task": task,
                         "status": status,
                         "reflection_type": section_type,
                     },
@@ -736,7 +736,7 @@ class MemoryService:
             try:
                 uuids = await kn_store.store_knowledge(
                     entries=knowledge_entries,
-                    source_mission=task[:200],
+                    source_mission=task,
                     mission_status=status,
                     source_episode_uuid=reflection_uuid,
                 )
@@ -764,7 +764,7 @@ class MemoryService:
             try:
                 uuids = await art_store.store_artifacts(
                     entries=artifact_entries,
-                    source_mission=task[:200],
+                    source_mission=task,
                     mission_status=status,
                     source_episode_uuid=reflection_uuid,
                 )
@@ -851,7 +851,7 @@ class MemoryService:
                     for claim in causal_claims:
                         line = f"- {claim['cause']} → {claim['effect']}"
                         if claim.get("mechanism"):
-                            line += f" ({claim['mechanism'][:100]})"
+                            line += f" ({claim['mechanism']})"
                         line += f" [confidence={claim.get('confidence', 0.8):.2f}]"
                         causal_lines.append(line)
                     causal_summary = (
@@ -860,10 +860,10 @@ class MemoryService:
                     )
                     try:
                         await ep_store.store_episode(
-                            content=f"Causal Reflection for: {task[:200]}\n\n{causal_summary}",
+                            content=f"Causal Reflection for: {task}\n\n{causal_summary}",
                             metadata={
                                 "source": "curator",
-                                "task": task[:200],
+                                "task": task,
                                 "reflection_type": "causal_reflection",
                                 "causal_count": causal_count,
                             },
