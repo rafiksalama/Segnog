@@ -23,7 +23,7 @@ base_url = "https://openrouter.ai/api/v1"
 
 # LLM (for smart operations)
 [default.llm]
-flash_model = "MiniMax-M2.7"
+flash_model = "MiniMax-M2.7-highspeed"
 base_url = "https://api.minimax.io/v1"
 
 # Session (short-term memory in DragonflyDB)
