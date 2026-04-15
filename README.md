@@ -55,59 +55,46 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
-- An [OpenRouter](https://openrouter.ai) API key (used for embeddings and LLM extraction)
+- An LLM API key (OpenAI, MiniMax, Anthropic, or any OpenAI-compatible provider)
+- An embedding API key (OpenRouter, OpenAI, or any OpenAI-compatible provider)
 
 ---
 
-### Step 1 — Clone the repo
+### Step 1 — Clone and run setup
 
 ```bash
 git clone https://github.com/rafiksalama/Segnog.git
 cd Segnog
+python setup.py
+```
+
+The setup wizard will ask for:
+
+| Prompt | What it configures | Default |
+|---|---|---|
+| LLM base URL | Provider endpoint (OpenAI, MiniMax, etc.) | `https://api.minimax.io/v1` |
+| LLM API key | Secret key for the LLM provider | — |
+| LLM model name | Model used for extraction & reasoning | `MiniMax-M2.7-highspeed` |
+| Embedding base URL | Provider endpoint for embeddings | `https://openrouter.ai/api/v1` |
+| Embedding API key | Secret key (press Enter to reuse LLM key) | Same as LLM key |
+| Embedding model | Model for semantic search | `qwen/qwen3-embedding-8b:nitro` |
+| REST port | Host port for REST API + UI | `9000` |
+| gRPC port | Host port for gRPC | `50051` |
+
+The wizard automatically detects port conflicts, writes all config files, pulls the Docker image, starts the container, and runs a health check.
+
+**Other modes:**
+
+```bash
+python setup.py --quick      # Use existing config, no prompts
+python setup.py --skip-pull  # Don't re-pull the image
+python setup.py --stop       # Stop the container
+python setup.py --status     # Show container health
 ```
 
 ---
 
-### Step 2 — Set your API key
-
-Create `.secrets.toml` in the project root (it is gitignored):
-
-```toml
-# .secrets.toml
-[default.embeddings]
-api_key = "sk-or-v1-..."
-
-[default.llm]
-api_key = "sk-or-v1-..."
-```
-
-Both fields accept the same OpenRouter key. Alternatively, export environment variables:
-
-```bash
-export MEMORY_SERVICE_EMBEDDINGS__API_KEY=sk-or-v1-...
-export MEMORY_SERVICE_LLM__API_KEY=sk-or-v1-...
-```
-
----
-
-### Step 3 — Build and start
-
-```bash
-docker-compose build
-docker-compose up -d
-```
-
-The build step compiles the Python package and the React dashboard inside Docker. It takes a few minutes on first run.
-
-To use a different host port:
-
-```bash
-PORT=8080 docker-compose up -d
-```
-
----
-
-### Step 4 — Verify
+### Step 2 — Verify
 
 ```bash
 curl http://localhost:9000/health
@@ -116,7 +103,7 @@ curl http://localhost:9000/health
 
 ---
 
-### Step 5 — Open the dashboard
+### Step 3 — Open the dashboard
 
 Visit **[http://localhost:9000](http://localhost:9000)** in a browser.
 

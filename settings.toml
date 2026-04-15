@@ -1,43 +1,37 @@
-# gRPC server
+
+[default]
+
 [default.grpc]
 port = 50051
 
-# REST server (FastAPI)
 [default.rest]
 host = "0.0.0.0"
 port = 9000
 
-# DragonflyDB (short-term memory)
 [default.dragonfly]
 url = "redis://localhost:6381"
 
-# FalkorDB (long-term memory: episodes, knowledge, artifacts)
 [default.falkordb]
 url = "redis://localhost:6380"
 graph_name = "episode_store"
 
-# Embeddings
 [default.embeddings]
 model = "qwen/qwen3-embedding-8b:nitro"
 base_url = "https://openrouter.ai/api/v1"
 
-# LLM (for smart operations)
 [default.llm]
 flash_model = "MiniMax-M2.7-highspeed"
 base_url = "https://api.minimax.io/v1"
 
-# Session (short-term memory in DragonflyDB)
 [default.session]
 ttl_seconds = 86400
 
-# Temporal scoring (dual-dimension: semantic + temporal)
 [default.scoring]
 episode_half_life_hours = 168.0
 episode_alpha = 0.3
 knowledge_half_life_hours = 720.0
 knowledge_alpha = 0.2
 
-# Hebbian learning (co-activation reinforcement)
 [default.hebbian]
 enabled = true
 learning_rate = 0.1
@@ -48,51 +42,30 @@ decay_rate = 0.01
 decay_interval_hours = 168
 activation_cap = 1000
 
-# Background worker (REM sleep cycles)
 [default.background]
 enabled = true
 interval_seconds = 120
 batch_size = 5
 min_episodes_for_processing = 3
-# Cosine-similarity threshold above which a pending episode is treated as a duplicate
-# of an already-consolidated episode (0.90 = very high similarity required)
-dedup_threshold = 0.90
+dedup_threshold = 0.9
 
-# Retrieval parameters (observe pipeline)
 [default.retrieval]
-# How many episode candidates to fetch from FalkorDB per observe call
 episode_top_k = 25
-# How many knowledge-node candidates to fetch per observe call
 knowledge_top_k = 10
-# Minimum semantic similarity score for episode/knowledge results (0–1)
-min_score = 0.40
-# How many ontology nodes to include in context
+min_score = 0.4
 ontology_top_k = 5
-# Minimum score for ontology node inclusion
-ontology_min_score = 0.30
-# Number of prior session entries below which a cold-start FalkorDB pre-fill is run
+ontology_min_score = 0.3
 cold_start_threshold = 2
 
-# Ontology extraction
 [default.ontology]
-# Entities with more than this many words in their display name are skipped
-# (long names are almost always image captions, not real-world entities)
 entity_max_name_words = 4
 
-# Observe pipeline feature flags
-# Set any flag to false to disable that step for all observe calls.
-# Useful for debugging, cost reduction, or A/B testing pipeline variants.
 [default.pipeline]
-# Run per-episode LLM knowledge extraction in the background (step 1b)
 extract_knowledge = true
-# Run LLM observation judge in the background (step 4) — classifies type + importance
 judge_observation = true
-# Run LLM reinterpret_task() on cold-start sessions before FalkorDB pre-fill
 reinterpret_on_cold_start = true
-# Hydrate DragonflyDB session with OntologyNode summaries during warm/cold hydration
 hydrate_ontology = true
 
-# NATS event bus (event-driven curation)
 [default.nats]
 enabled = true
 url = "nats://localhost:4222"

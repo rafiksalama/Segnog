@@ -12,6 +12,7 @@ build/
 /data/
 !/data/schemaorg-current-https.jsonld
 src/memory_service/data/class_embeddings_*.json
+*.bak
 benchmarks/
 scripts/
 tests/
