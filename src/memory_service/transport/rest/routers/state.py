@@ -156,9 +156,7 @@ async def get_memory_context(
     for e in reversed(events):  # Oldest first for context
         etype = e.get("type", "")
         data = e.get("data", {})
-        content = (
-            data.get("content", str(data)) if isinstance(data, dict) else str(data)
-        )
+        content = data.get("content", str(data)) if isinstance(data, dict) else str(data)
         lines.append(f"[{etype}] {content}")
 
     formatted = "\n".join(lines) if lines else "No recent events."

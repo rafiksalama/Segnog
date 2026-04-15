@@ -533,7 +533,7 @@ class MemoryService:
                 lines = ["## Prior Reflections & Metacognition"]
                 for i, r in enumerate(result.result_set, 1):
                     etype = r[2] or "reflection"
-                    content = (r[1] or "")
+                    content = r[1] or ""
                     score = r[4]
                     lines.append(f"{i}. [{etype}] {content} (score={score:.2f})")
                 return "\n".join(lines)
