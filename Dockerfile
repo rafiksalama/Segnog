@@ -30,7 +30,7 @@ COPY ui/ .
 RUN npm run build
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim
 
 WORKDIR /app
 
