@@ -19,6 +19,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "agent-memory-service",
+    host="0.0.0.0",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    ),
     instructions=(
         "Agent memory service. Use memory_startup to begin a session and get "
         "background context, memory_observe to store/retrieve per-turn, and "
