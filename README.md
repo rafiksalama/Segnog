@@ -55,8 +55,10 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
-- An LLM API key (OpenAI, MiniMax, Anthropic, or any OpenAI-compatible provider)
-- An embedding API key (OpenRouter, OpenAI, or any OpenAI-compatible provider)
+- An API key for an OpenAI-compatible LLM provider (OpenAI, Anthropic, MiniMax, Together, etc.)
+- An API key for an OpenAI-compatible embedding provider (can be the same provider)
+
+Segnog is provider-agnostic. It works with any LLM or embedding service that exposes an OpenAI-compatible `/chat/completions` and `/embeddings` endpoint. You pick your provider and model during setup.
 
 ---
 
@@ -72,14 +74,24 @@ The setup wizard will ask for:
 
 | Prompt | What it configures | Default |
 |---|---|---|
-| LLM base URL | Provider endpoint (OpenAI, MiniMax, etc.) | `https://api.minimax.io/v1` |
-| LLM API key | Secret key for the LLM provider | — |
-| LLM model name | Model used for extraction & reasoning | `MiniMax-M2.7-highspeed` |
-| Embedding base URL | Provider endpoint for embeddings | `https://openrouter.ai/api/v1` |
+| LLM base URL | Provider endpoint (must be OpenAI-compatible) | `https://api.openai.com/v1` |
+| LLM API key | Secret key for the LLM provider | *(required)* |
+| LLM model name | Model used for extraction & reasoning | *(required, e.g. `gpt-4o`, `claude-sonnet-4-20250514`)* |
+| Embedding base URL | Provider endpoint for embeddings | `https://api.openai.com/v1` |
 | Embedding API key | Secret key (press Enter to reuse LLM key) | Same as LLM key |
-| Embedding model | Model for semantic search | `qwen/qwen3-embedding-8b:nitro` |
+| Embedding model | Model for semantic search | *(required, e.g. `text-embedding-3-small`)* |
 | REST port | Host port for REST API + UI | `9000` |
 | gRPC port | Host port for gRPC | `50051` |
+
+**Example provider setups:**
+
+| Provider | LLM base URL | LLM model | Embedding model |
+|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` | `text-embedding-3-small` |
+| Anthropic | `https://api.anthropic.com/v1` | `claude-sonnet-4-20250514` | *(use OpenAI or OpenRouter)* |
+| MiniMax | `https://api.minimax.io/v1` | `MiniMax-M2.7-highspeed` | *(use OpenRouter)* |
+| Together | `https://api.together.xyz/v1` | `meta-llama/Llama-3-70b-chat-hf` | `togethercomputer/m2-bert-80M-8k-retrieval` |
+| OpenRouter | `https://openrouter.ai/api/v1` | *(any model)* | `qwen/qwen3-embedding-8b:nitro` |
 
 The wizard automatically detects port conflicts, writes all config files, pulls the Docker image, starts the container, and runs a health check.
 

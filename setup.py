@@ -32,10 +32,10 @@ SECRETS_FILE = PROJECT_ROOT / ".secrets.toml"
 ENV_FILE = PROJECT_ROOT / ".env"
 COMPOSE_FILE = PROJECT_ROOT / "docker-compose.yml"
 
-DEFAULT_LLM_URL = "https://api.minimax.io/v1"
-DEFAULT_LLM_MODEL = "MiniMax-M2.7-highspeed"
-DEFAULT_EMBED_URL = "https://openrouter.ai/api/v1"
-DEFAULT_EMBED_MODEL = "qwen/qwen3-embedding-8b:nitro"
+DEFAULT_LLM_URL = "https://api.openai.com/v1"
+DEFAULT_LLM_MODEL = ""
+DEFAULT_EMBED_URL = "https://api.openai.com/v1"
+DEFAULT_EMBED_MODEL = ""
 DEFAULT_REST_PORT = 9000
 DEFAULT_GRPC_PORT = 50051
 
