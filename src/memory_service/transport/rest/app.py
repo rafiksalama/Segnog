@@ -148,6 +148,7 @@ def create_app() -> FastAPI:
                 "pipelines": "/api/v1/memory/pipelines",
                 "health": "/health",
                 "mcp_sse": "/mcp/sse",
+                "mcp_streamable_http": "/mcp/v1",
                 "mcp_tools": "GET /api/v1/memory/mcp/tools",
                 "ui_causal": "GET /api/v1/memory/ui/causal",
                 "ui_reflections": "GET /api/v1/memory/ui/reflections",
@@ -173,6 +174,9 @@ def create_app() -> FastAPI:
 
     # MCP SSE transport — mounted at /mcp (SSE stream at /mcp/sse).
     app.mount("/mcp", mcp_server.sse_app())
+
+    # MCP Streamable HTTP transport — POST-based, proxy-friendly (Azure, NGINX, etc.)
+    app.mount("/mcp/v1", mcp_server.streamable_http_app())
 
     # Serve the built UI. In Docker the package is installed to site-packages so
     # we check a list of candidate paths rather than walking up from __file__.

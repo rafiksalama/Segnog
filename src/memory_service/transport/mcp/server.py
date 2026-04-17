@@ -3,10 +3,15 @@ MCP (Model Context Protocol) server for Agent Memory Service.
 
 Exposes memory operations as MCP tools.  Two modes:
 
-  Integrated (default) — MCP SSE transport mounted on the existing FastAPI app
-  at /mcp/sse.  No separate process; shares the same MemoryService instance.
-  Claude Desktop / Claude Code SSE config:
+  Integrated (default) — MCP transports mounted on the existing FastAPI app.
+  No separate process; shares the same MemoryService instance.
+
+  SSE transport at /mcp/sse (for local Claude Desktop / Claude Code):
       { "url": "http://localhost:9000/mcp/sse", "type": "sse" }
+
+  Streamable HTTP transport at /mcp/v1 (proxy-friendly, works through
+  Azure, NGINX, and other reverse proxies that break SSE):
+      { "url": "http://localhost:9000/mcp/v1", "type": "streamable-http" }
 
   Standalone stdio — separate process, useful for local Claude Desktop use.
   Claude Desktop stdio config:
