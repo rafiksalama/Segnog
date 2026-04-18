@@ -50,6 +50,61 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 
 ---
 
+## Features
+
+### Memory Architecture
+
+**Two-layer storage.** DragonflyDB holds hot session data (fast, in-memory, TTL-scoped). FalkorDB holds the persistent long-term graph (episodes, knowledge, ontology, causal claims, artifacts). The hot path never touches the graph — reads are always against the cache, writes propagate to the graph in the background.
+
+**Hierarchical sessions.** Sessions nest via `parent_session_id`. A child session automatically inherits context from all ancestors at query time — `subtask-1a` sees everything from `task-1` and `project-x` without extra logic. Links are created lazily on first write.
+
+**3D ranked retrieval.** Observe returns entries ranked by a composite score of semantic similarity (embedding cosine distance), temporal recency (exponential decay with configurable half-life), and Hebbian co-activation strength (entities frequently retrieved together get boosted). Not chronological — most relevant first.
+
+### Automatic Knowledge Extraction
+
+**Per-episode extraction.** Every observation triggers background LLM extraction of structured knowledge facts. No prompting required — the agent just sends content, Segnog extracts `who/what/where/when/why` tuples with typed categories (`[fact]`, `[identity]`, `[event]`, `[conclusion]`, `[experience]`, `[tool_insight]`).
+
+**Schema.org ontology.** Entity extraction uses the full Schema.org vocabulary (930 classes, 1520 properties). Embedding-based class retrieval selects the top-60 most relevant Schema.org types for each observation, so extraction is context-aware without sending the entire taxonomy. Entities are normalized to canonical names and linked via typed relationships (e.g. `Person → worksFor → Organization`).
+
+**Inverse and symmetric inference.** At write time, Segnog auto-stores reverse edges for inverse pairs (`memberOf ↔ member`, `parent ↔ children`) and symmetric predicates (`knows`, `spouse`, `sibling`, `colleague`). A `Person → memberOf → Team` edge automatically creates `Team → member → Person`.
+
+### Causal Reasoning
+
+**Causal belief network.** Segnog extracts causal claims from observations (`X causes Y`), stores them as a directed graph with `CAUSES` edges, and attaches evidence links from knowledge nodes (`SUPPORTS` or `CONTRADICTS`). Each claim has a confidence score computed from the evidence ratio.
+
+**Auto-chaining.** Related causal claims are automatically linked — if one claim's effect matches another's cause, they're chained into a reasoning path. The agent can ask "why does X happen?" and get a multi-hop causal explanation.
+
+**Belief revision.** After each curation cycle, Segnog revises causal claim confidence based on new evidence. Contradicting evidence reduces confidence, supporting evidence increases it — Bayesian update without manual tuning.
+
+### Background Consolidation (REM Sleep)
+
+**REM worker.** A background sweep process runs every 2 minutes (configurable), selecting batches of un-consolidated episodes for processing. This is the "sleep cycle" — while the agent is idle, Segnog organizes what happened.
+
+**Curation pipeline.** For each batch: extract knowledge → consolidate episodes (merge duplicates above 0.90 cosine similarity) → update ontology nodes (re-summarize entity profiles) → run reflection and metacognition → store compressed episode summaries.
+
+**Metacognition.** After each curation, Segnog runs a two-part reflection: (1) a structured summary of what was learned, and (2) a metacognitive analysis of the agent's reasoning quality — identifying patterns, gaps, and biases in the session's decision-making.
+
+**Hebbian learning.** Entities that are frequently co-retrieved develop stronger associative edges over time. This means the more two concepts appear together in relevant context, the more likely they are to surface together in future queries — mimicking biological associative memory.
+
+### Protocols
+
+| Protocol | Endpoint | Transport | Use case |
+|---|---|---|---|
+| **REST** | `:9000/api/v1/memory` | HTTP JSON | curl, HTTP clients, frameworks |
+| **gRPC** | `:50051` | HTTP/2 | high-throughput, low-latency agents |
+| **MCP (SSE)** | `:9000/mcp/sse` | Server-Sent Events | Claude Desktop, Claude Code (local) |
+| **MCP (Streamable HTTP)** | `:9000/mcp/v1` | HTTP POST/Response | Azure, NGINX, reverse proxies |
+
+### Observability
+
+**Built-in dashboard.** A React UI at `:9000` with seven pages: health grid, reporting with latency percentiles, session tree, interactive ontology graph (hub/force/radial/hierarchical layouts), observe playground, REM monitor, and configuration viewer.
+
+**Deep health checks.** The `/health` endpoint reports individual backend status (DragonflyDB, FalkorDB, NATS) — returns `degraded` if any backend is down instead of silently failing.
+
+**Memory logging.** Every observe exchange is logged with timestamps, stored content, and retrieved context for debugging and audit trails.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -158,9 +213,9 @@ The response `context` field is a ready-to-use passage — inject it directly in
 
 ### From Claude / any MCP client
 
-Segnog exposes all its tools over the [Model Context Protocol](https://modelcontextprotocol.io) via SSE. The MCP endpoint runs on the same port as the REST API — no extra process, no extra port.
+Segnog exposes all its tools over the [Model Context Protocol](https://modelcontextprotocol.io). Two transports are available — no extra process, no extra port.
 
-Add it to your Claude Desktop config (`~/.claude/claude_desktop_config.json`):
+**SSE** (local use, Claude Desktop / Claude Code):
 
 ```json
 {
@@ -173,14 +228,14 @@ Add it to your Claude Desktop config (`~/.claude/claude_desktop_config.json`):
 }
 ```
 
-Or in Claude Code (`settings.json`):
+**Streamable HTTP** (proxy-friendly, works through Azure / NGINX / reverse proxies):
 
 ```json
 {
   "mcpServers": {
     "memory": {
-      "url": "http://localhost:9000/mcp/sse",
-      "type": "sse"
+      "url": "https://your-domain.com/mcp/v1",
+      "type": "streamable-http"
     }
   }
 }
@@ -324,7 +379,8 @@ Segnog exposes three protocols — all on the same port, all sharing the same se
 |---|---|---|
 | **REST** | `http://localhost:9000/api/v1/memory` | curl, HTTP clients, agent frameworks |
 | **gRPC** | `localhost:50051` | high-throughput agents, Python/Go/Rust gRPC clients |
-| **MCP** | `http://localhost:9000/mcp/sse` | Claude Desktop, Claude Code, any MCP-compatible LLM client |
+| **MCP (SSE)** | `http://localhost:9000/mcp/sse` | Claude Desktop, Claude Code (local) |
+| **MCP (Streamable HTTP)** | `http://localhost:9000/mcp/v1` | Azure, NGINX, reverse proxies |
 
 REST discovery and docs:
 
