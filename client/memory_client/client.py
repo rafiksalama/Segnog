@@ -618,8 +618,87 @@ class MemoryClient:
             }
             if self._parent_session_id:
                 payload["parent_session_id"] = self._parent_session_id
-            resp = await self._transport.post("/api/v1/memory/observe", payload)
+            resp = await self._transport.post("/observe", payload)
         return resp or {}
+
+    # =========================================================================
+    # Events (extended)
+    # =========================================================================
+
+    async def search_events(
+        self,
+        event_types: Optional[List[str]] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Search events filtered by type."""
+        resp = await self._transport.post(
+            "/events/search",
+            {
+                "group_id": self._group_id,
+                "workflow_id": self._workflow_id,
+                "event_types": event_types or [],
+                "limit": limit,
+            },
+        )
+        return resp.get("events", [])
+
+    # =========================================================================
+    # Episodes (extended)
+    # =========================================================================
+
+    async def search_episodes_by_entities(
+        self,
+        entity_names: List[str],
+        top_k: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Search episodes by entity names."""
+        resp = await self._transport.post(
+            "/episodes/search/entities",
+            {
+                "group_id": self._group_id,
+                "entity_names": entity_names,
+                "top_k": top_k,
+            },
+        )
+        return resp.get("episodes", [])
+
+    async def list_reflections(
+        self,
+        reflection_type: Optional[str] = None,
+        query: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """List or search reflection episodes."""
+        params = {
+            "group_id": self._group_id,
+            "top_k": top_k,
+        }
+        if reflection_type:
+            params["reflection_type"] = reflection_type
+        if query:
+            params["query"] = query
+        resp = await self._transport.get("/reflections", params=params)
+        return resp.get("reflections", [])
+
+    async def link_episodes(
+        self,
+        from_uuid: str,
+        to_uuid: str,
+        edge_type: str = "RELATED",
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Link two episodes with an edge."""
+        resp = await self._transport.post(
+            "/episodes/link",
+            {
+                "group_id": self._group_id,
+                "from_uuid": from_uuid,
+                "to_uuid": to_uuid,
+                "edge_type": edge_type,
+                "properties": properties or {},
+            },
+        )
+        return resp.get("linked", False)
 
     # =========================================================================
     # Smart Operations (Phase 2)
@@ -848,6 +927,293 @@ class MemoryClient:
                 },
             )
             return resp.get("compressed", False)
+
+    async def extract_relationships(
+        self,
+        text: str,
+        model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract Schema.org-typed relationships from text."""
+        if self._is_grpc:
+            resp = await self._transport.call(
+                "ExtractRelationships",
+                {
+                    "text": text,
+                    "model": model or "",
+                },
+            )
+        else:
+            resp = await self._transport.post(
+                "/smart/extract-relationships",
+                {
+                    "text": text,
+                    "model": model,
+                },
+            )
+        return resp.get("relationships", [])
+
+    async def update_ontology_node(
+        self,
+        entity_name: str,
+        schema_type: str,
+        new_episode_text: str,
+        existing_summary: str = "",
+        group_id: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update an OntologyNode's summary and optionally upsert."""
+        if self._is_grpc:
+            resp = await self._transport.call(
+                "UpdateOntologyNode",
+                {
+                    "entity_name": entity_name,
+                    "schema_type": schema_type,
+                    "existing_summary": existing_summary,
+                    "new_episode_text": new_episode_text,
+                    "group_id": group_id or "",
+                    "model": model or "",
+                },
+            )
+        else:
+            resp = await self._transport.post(
+                "/smart/update-ontology-node",
+                {
+                    "entity_name": entity_name,
+                    "schema_type": schema_type,
+                    "existing_summary": existing_summary,
+                    "new_episode_text": new_episode_text,
+                    "group_id": group_id,
+                    "model": model,
+                },
+            )
+        return resp
+
+    async def search_ontology_nodes(
+        self,
+        query: str,
+        group_id: Optional[str] = None,
+        top_k: int = 10,
+        min_score: float = 0.3,
+    ) -> List[Dict[str, Any]]:
+        """Vector search over OntologyNode summaries."""
+        if self._is_grpc:
+            resp = await self._transport.call(
+                "SearchOntologyNodes",
+                {
+                    "query": query,
+                    "group_id": group_id or "",
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
+        else:
+            resp = await self._transport.post(
+                "/smart/search-ontology-nodes",
+                {
+                    "query": query,
+                    "group_id": group_id,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                },
+            )
+        return resp.get("nodes", [])
+
+    # =========================================================================
+    # Causal Belief Network
+    # =========================================================================
+
+    async def search_causal_claims(
+        self,
+        query: str = "",
+        top_k: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Search causal claims by semantic similarity."""
+        resp = await self._transport.get(
+            "/causal/claims",
+            params={
+                "group_id": self._group_id,
+                "query": query,
+                "top_k": top_k,
+            },
+        )
+        return resp.get("claims", [])
+
+    async def list_causal_claims(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """List causal claims without semantic search."""
+        resp = await self._transport.get(
+            "/causal/claims",
+            params={
+                "group_id": self._group_id,
+                "top_k": limit,
+            },
+        )
+        return resp.get("claims", [])
+
+    async def get_causal_claim(self, uuid: str) -> Optional[Dict[str, Any]]:
+        """Get a single causal claim by UUID."""
+        try:
+            resp = await self._transport.get(f"/causal/claims/{uuid}")
+            return resp
+        except Exception:
+            return None
+
+    async def explain_causal_claim(self, uuid: str) -> Optional[Dict[str, Any]]:
+        """Get a causal claim with its full evidence trail."""
+        try:
+            resp = await self._transport.get(f"/causal/claims/{uuid}/explain")
+            return resp
+        except Exception:
+            return None
+
+    async def add_causal_evidence(
+        self,
+        uuid: str,
+        knowledge_uuid: str,
+        direction: str = "supports",
+        weight: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Add evidence for or against a causal claim."""
+        resp = await self._transport.post(
+            f"/causal/claims/{uuid}/evidence",
+            {
+                "knowledge_uuid": knowledge_uuid,
+                "direction": direction,
+                "weight": weight,
+            },
+        )
+        return resp
+
+    async def search_causal_chain(self, query: str) -> Dict[str, Any]:
+        """Find the most relevant causal claim and traverse its chain."""
+        resp = await self._transport.get(
+            "/causal/chain",
+            params={
+                "group_id": self._group_id,
+                "query": query,
+            },
+        )
+        return resp
+
+    # =========================================================================
+    # UI Endpoints
+    # =========================================================================
+
+    async def get_stats(self, group_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get aggregate counts: episodes, knowledge, ontology, REM stats."""
+        params = {}
+        if group_id:
+            params["group_id"] = group_id
+        return await self._transport.get("/ui/stats", params=params)
+
+    async def list_sessions(self, limit: int = 5000) -> List[Dict[str, Any]]:
+        """List sessions with episode counts and parent links."""
+        resp = await self._transport.get("/ui/sessions", params={"limit": limit})
+        return resp.get("sessions", [])
+
+    async def list_session_children(self, session_id: str) -> List[Dict[str, Any]]:
+        """List direct child sessions of a given session."""
+        resp = await self._transport.get(f"/ui/sessions/{session_id}/children")
+        return resp.get("children", [])
+
+    async def list_ui_episodes(
+        self,
+        group_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """List recent episodes without requiring a search query."""
+        params: Dict[str, Any] = {"limit": limit}
+        if group_id:
+            params["group_id"] = group_id
+        resp = await self._transport.get("/ui/episodes", params=params)
+        return resp.get("episodes", [])
+
+    async def list_ui_knowledge(
+        self,
+        group_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """List recent knowledge nodes with labels."""
+        params: Dict[str, Any] = {"limit": limit}
+        if group_id:
+            params["group_id"] = group_id
+        resp = await self._transport.get("/ui/knowledge", params=params)
+        return resp.get("knowledge", [])
+
+    async def list_ui_ontology(
+        self,
+        group_id: Optional[str] = None,
+        schema_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List ontology nodes."""
+        params: Dict[str, Any] = {}
+        if group_id:
+            params["group_id"] = group_id
+        if schema_type:
+            params["schema_type"] = schema_type
+        resp = await self._transport.get("/ui/ontology", params=params)
+        return resp.get("nodes", [])
+
+    async def list_ui_reflections(
+        self,
+        group_id: Optional[str] = None,
+        reflection_type: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """List reflection episodes for the UI."""
+        params: Dict[str, Any] = {"limit": limit}
+        if group_id:
+            params["group_id"] = group_id
+        if reflection_type:
+            params["reflection_type"] = reflection_type
+        resp = await self._transport.get("/ui/reflections", params=params)
+        return resp.get("reflections", [])
+
+    async def list_ui_causal_claims(
+        self,
+        group_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """List causal claims with entity links and evidence counts."""
+        params: Dict[str, Any] = {"limit": limit}
+        if group_id:
+            params["group_id"] = group_id
+        return await self._transport.get("/ui/causal", params=params)
+
+    async def get_ui_config(self) -> Dict[str, Any]:
+        """Get all configuration values."""
+        return await self._transport.get("/ui/config")
+
+    async def list_ontology_edges(
+        self,
+        group_id: Optional[str] = None,
+        limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        """Return RELATES edges between ontology nodes."""
+        params: Dict[str, Any] = {"limit": limit}
+        if group_id:
+            params["group_id"] = group_id
+        resp = await self._transport.get("/ui/ontology/edges", params=params)
+        return resp.get("edges", [])
+
+    async def list_ontology_cooccurrence(self, limit: int = 400) -> List[Dict[str, Any]]:
+        """Return co-occurring ontology node pairs."""
+        resp = await self._transport.get(
+            "/ui/ontology/cooccurrence", params={"limit": limit}
+        )
+        return resp.get("edges", [])
+
+    async def get_ontology_node(self, identifier: str) -> Dict[str, Any]:
+        """Get a single ontology node by name or UUID."""
+        return await self._transport.get(f"/ui/ontology/{identifier}")
+
+    async def list_ui_events(self, count: int = 20) -> List[Dict[str, Any]]:
+        """Return recent DragonflyDB stream events."""
+        resp = await self._transport.get("/ui/events", params={"count": count})
+        return resp.get("events", [])
+
+    async def get_latency_stats(self) -> Any:
+        """Per-endpoint latency stats with samples."""
+        return await self._transport.get("/ui/latency")
 
     # =========================================================================
     # Pipelines (Phase 3)

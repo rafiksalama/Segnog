@@ -16,12 +16,12 @@ url = "redis://localhost:6380"
 graph_name = "episode_store"
 
 [default.embeddings]
-model = ""
-base_url = "https://api.openai.com/v1"
+model = "qwen/qwen3-embedding-8b:nitro"
+base_url = "https://openrouter.ai/api/v1"
 
 [default.llm]
-flash_model = ""
-base_url = "https://api.openai.com/v1"
+flash_model = "google/gemini-3-flash-preview"
+base_url = "https://openrouter.ai/api/v1"
 
 [default.session]
 ttl_seconds = 86400

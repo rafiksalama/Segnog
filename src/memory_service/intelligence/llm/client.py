@@ -55,10 +55,6 @@ def get_reasoning_traces(group_id: str) -> List[Dict[str, str]]:
     return list(_reasoning_buffer.pop(group_id, []))
 
 
-def clear_reasoning_traces(group_id: str) -> None:
-    """Discard buffered reasoning traces for a group."""
-    _reasoning_buffer.pop(group_id, None)
-
 
 def get_llm_client() -> AsyncOpenAI:
     """Get or create the shared AsyncOpenAI client."""
