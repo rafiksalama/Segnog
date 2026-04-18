@@ -1197,9 +1197,7 @@ class MemoryClient:
 
     async def list_ontology_cooccurrence(self, limit: int = 400) -> List[Dict[str, Any]]:
         """Return co-occurring ontology node pairs."""
-        resp = await self._transport.get(
-            "/ui/ontology/cooccurrence", params={"limit": limit}
-        )
+        resp = await self._transport.get("/ui/ontology/cooccurrence", params={"limit": limit})
         return resp.get("edges", [])
 
     async def get_ontology_node(self, identifier: str) -> Dict[str, Any]:

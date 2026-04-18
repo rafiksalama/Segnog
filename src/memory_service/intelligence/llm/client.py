@@ -55,7 +55,6 @@ def get_reasoning_traces(group_id: str) -> List[Dict[str, str]]:
     return list(_reasoning_buffer.pop(group_id, []))
 
 
-
 def get_llm_client() -> AsyncOpenAI:
     """Get or create the shared AsyncOpenAI client."""
     global _client
