@@ -2,10 +2,6 @@
   <img src="assets/segnog-logo.png" width="600" alt="Segnog" />
 </p>
 
-Agentic memory, we are all getting obsessed with them, for the right reasons. LLMs cannot remember a thing, you need to constantly tell them every time what we were doing, and what we want to do, and here is everything else you need to know. A common problem for everything I try to build is a good memory,  and I wanted a very simple one API call memory, and it handles everything internally, one docker container, so a weekend project Segnog, that I kept iterating on it in the evenings, suspiciously good, for now. 
-
-The trick it uses, is very simple, short memory fast, using Redis cache and embeddings for indexing. Long memory using Knowledge Graph and embeddings on the content and the Ontology terms. Internally it has a NATS event bus to sort out all artifacts internally. Like a good boy I used Schema.org for the Ontology, and dspy for optimizing prompts based on the context. Thanks Claude for all the help 🙃 
-
 ## Name
 
 > **Dal Segno** — *from the sign*. In music notation, *Dal Segno* instructs the performer to return to the segno mark (𝄋) and replay the passage — but with everything they have learned since the first time. The second pass through is never the same as the first.
