@@ -70,7 +70,10 @@ async def _extract_from_batch(
     except Exception as e:
         logger.error(
             "Ontology 8a [%s]: entity extraction failed for '%s': %s",
-            batch_label, group_id, e, exc_info=True,
+            batch_label,
+            group_id,
+            e,
+            exc_info=True,
         )
         raise
 
@@ -79,6 +82,7 @@ async def _extract_from_batch(
         if not name_norm:
             continue
         from ...ontology.names import normalize_name
+
         norm = normalize_name(name_norm)
         if not norm:
             continue
@@ -99,6 +103,7 @@ async def _extract_from_batch(
     if causal_store is not None:
         try:
             from ..extract.causals import extract_causal_claims
+
             claims = await extract_causal_claims(content)
             all_causal_claims.extend(claims)
         except Exception as e:
@@ -106,7 +111,10 @@ async def _extract_from_batch(
 
     logger.debug(
         "Ontology 8 [%s]: %d entities, %d rels, %d causals",
-        batch_label, len(entities), len(rels) if 'rels' in dir() else 0, len(all_causal_claims),
+        batch_label,
+        len(entities),
+        len(rels) if "rels" in dir() else 0,
+        len(all_causal_claims),
     )
 
 
@@ -131,7 +139,6 @@ async def update_group_ontology(
         combined_text:  Pre-joined episode text (kept for node summary updates).
     """
     from .update_ontology import update_ontology_summary
-    from ...ontology.names import normalize_name
     from ...config import get_ontology_extraction_window_size
 
     window_size = get_ontology_extraction_window_size()
@@ -176,7 +183,7 @@ async def update_group_ontology(
                 continue
             content = _batch_content(batch)
             batch_ids = "-".join(ep.get("uuid", "?")[:8] for ep in batch)
-            label = f"pass2/win{batch_start//window_size}/{batch_ids}"
+            label = f"pass2/win{batch_start // window_size}/{batch_ids}"
             await _extract_from_batch(
                 content=content,
                 group_id=group_id,
@@ -189,12 +196,18 @@ async def update_group_ontology(
             )
 
     if not all_entities:
-        logger.debug("Ontology 8: no entities found across %d episodes for '%s'", len(episodes), group_id)
+        logger.debug(
+            "Ontology 8: no entities found across %d episodes for '%s'", len(episodes), group_id
+        )
         return
 
     logger.info(
         "Ontology 8: extracted %d entities, %d relationships, %d causals from %d episodes for group '%s'",
-        len(all_entities), len(all_relationships), len(all_causal_claims), len(episodes), group_id,
+        len(all_entities),
+        len(all_relationships),
+        len(all_causal_claims),
+        len(episodes),
+        group_id,
     )
 
     # ----------------------------------------------------------------
@@ -254,8 +267,7 @@ async def update_group_ontology(
             logger.warning("Ontology 8b: upsert failed for entity '%s': %s", display_name, e)
             return None
 
-    results = await asyncio.gather(*[_process_entity(e) for e in all_entities])
-    entity_norms: List[str] = [r for r in results if r is not None]
+    await asyncio.gather(*[_process_entity(e) for e in all_entities])
 
     # ----------------------------------------------------------------
     # 8c. Store RELATES edges

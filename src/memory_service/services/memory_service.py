@@ -891,7 +891,9 @@ class MemoryService:
                         )
                         for row in results.result_set:
                             if row[0]:
-                                episodes_with_content.append({"uuid": row[0], "content": row[1] or ""})
+                                episodes_with_content.append(
+                                    {"uuid": row[0], "content": row[1] or ""}
+                                )
                     except Exception as e:
                         logger.warning(f"Failed to fetch episode content for ontology: {e}")
 

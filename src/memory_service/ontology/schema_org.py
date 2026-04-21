@@ -625,11 +625,14 @@ class SchemaOrgOntology:
                 vectors = await asyncio.gather(*[embed_fn(text) for _, text in batch])
                 for (name, _), vec in zip(batch, vectors):
                     embeddings[name] = vec
-                logger.debug("SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items))
+                logger.debug(
+                    "SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items)
+                )
             except Exception as e:
                 logger.error(
                     "SchemaOrgOntology: embedding computation failed at batch %d/%d: %s",
-                    i // batch_size + 1, (len(items) + batch_size - 1) // batch_size,
+                    i // batch_size + 1,
+                    (len(items) + batch_size - 1) // batch_size,
                     e,
                 )
                 # Continue with what we have so far

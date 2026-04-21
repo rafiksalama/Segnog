@@ -90,7 +90,9 @@ async def retrieve_relevant_classes(
         class_embs = await onto.embed_classes(_embed)
 
     if not class_embs:
-        logger.warning("No class embeddings available — entity extraction will use no relevant classes")
+        logger.warning(
+            "No class embeddings available — entity extraction will use no relevant classes"
+        )
         return ""
 
     # Embed the source text
