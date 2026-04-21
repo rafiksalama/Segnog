@@ -16,12 +16,12 @@ url = "redis://localhost:6380"
 graph_name = "episode_store"
 
 [default.embeddings]
-model = "qwen/qwen3-embedding-8b:nitro"
+model = "qwen/qwen3-embedding-8b"
 base_url = "https://openrouter.ai/api/v1"
 
 [default.llm]
-flash_model = "google/gemini-3-flash-preview"
-base_url = "https://openrouter.ai/api/v1"
+flash_model = "MiniMax-M2.7-highspeed"
+base_url = "https://api.minimax.io/v1"
 
 [default.session]
 ttl_seconds = 86400
@@ -59,6 +59,7 @@ cold_start_threshold = 2
 
 [default.ontology]
 entity_max_name_words = 4
+extraction_window_size = 5
 
 [default.pipeline]
 extract_knowledge = true

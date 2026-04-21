@@ -621,10 +621,19 @@ class SchemaOrgOntology:
         embeddings: Dict[str, List[float]] = {}
         for i in range(0, len(items), batch_size):
             batch = items[i : i + batch_size]
-            vectors = await asyncio.gather(*[embed_fn(text) for _, text in batch])
-            for (name, _), vec in zip(batch, vectors):
-                embeddings[name] = vec
-            logger.debug("SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items))
+            try:
+                vectors = await asyncio.gather(*[embed_fn(text) for _, text in batch])
+                for (name, _), vec in zip(batch, vectors):
+                    embeddings[name] = vec
+                logger.debug("SchemaOrgOntology: embedded %d/%d classes", i + len(batch), len(items))
+            except Exception as e:
+                logger.error(
+                    "SchemaOrgOntology: embedding computation failed at batch %d/%d: %s",
+                    i // batch_size + 1, (len(items) + batch_size - 1) // batch_size,
+                    e,
+                )
+                # Continue with what we have so far
+                break
 
         # --- Save to disk cache ---
         try:
@@ -636,7 +645,13 @@ class SchemaOrgOntology:
         except Exception as e:
             logger.warning("SchemaOrgOntology: could not save disk cache: %s", e)
 
-        self._class_embeddings = embeddings
+        if not embeddings:
+            logger.error(
+                "SchemaOrgOntology: computed 0/%d class embeddings — entity extraction disabled",
+                len(indexable),
+            )
+
+        self._class_embeddings = embeddings or {}
         return self._class_embeddings
 
 

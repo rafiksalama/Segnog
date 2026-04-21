@@ -260,6 +260,12 @@ def get_ontology_entity_max_name_words() -> int:
     return int(s.get("ontology.entity_max_name_words", 4))
 
 
+def get_ontology_extraction_window_size() -> int:
+    """Number of episodes per multi-episode extraction pass in ontology pipeline (Pass 2)."""
+    s = get_settings()
+    return int(s.get("ontology.extraction_window_size", 5))
+
+
 # Pipeline feature flags (observe pipeline steps)
 def get_pipeline_extract_knowledge() -> bool:
     """Run per-episode LLM knowledge extraction in background_hydrate."""

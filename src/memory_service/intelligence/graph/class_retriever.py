@@ -89,6 +89,10 @@ async def retrieve_relevant_classes(
     async with _get_lock():
         class_embs = await onto.embed_classes(_embed)
 
+    if not class_embs:
+        logger.warning("No class embeddings available — entity extraction will use no relevant classes")
+        return ""
+
     # Embed the source text
     text_vec = np.array(await _embed(source_text), dtype=np.float32)
     norm = np.linalg.norm(text_vec)

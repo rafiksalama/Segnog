@@ -72,6 +72,7 @@ class REMWorker:
             logger.info(
                 f"REM cycle: {len(groups)} group(s) to consolidate (since_ts={self._last_sweep_ts:.0f})"
             )
+            had_failure = False
             for group_info in groups:
                 gid = group_info["group_id"]
                 try:
@@ -83,11 +84,16 @@ class REMWorker:
                         f"compressed={result.get('compressed_uuid', '')[:8] or 'none'}"
                     )
                 except Exception as e:
+                    had_failure = True
                     logger.error(f"REM failed for '{gid}': {e}", exc_info=True)
                 await asyncio.sleep(0.1)
 
-        # Advance last sweep timestamp so next cycle only sees newer episodes
-        self._last_sweep_ts = cycle_start
+            # Only advance sweep timestamp if all consolidations succeeded.
+            # On failure, episodes stay 'pending' and will be retried next cycle.
+            if not had_failure:
+                self._last_sweep_ts = cycle_start
+        else:
+            self._last_sweep_ts = cycle_start
 
         # Hebbian decay runs every cycle (even when no consolidation needed)
         await self._decay_hebbian_weights()
@@ -238,13 +244,9 @@ class REMWorker:
         )
 
         # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
+        # CRITICAL: failure halts consolidation — episodes stay 'pending' for retry
         if self._ontology_store is not None:
-            try:
-                await self._update_ontology(group_id, unique_episodes, combined_content)
-            except Exception as e:
-                logger.error(
-                    "REM Step 8 (ontology update) failed for '%s': %s", group_id, e, exc_info=True
-                )
+            await self._update_ontology(group_id, unique_episodes, combined_content)
 
         consolidated_count = await self._episode_store.mark_episodes_consolidated(source_uuids)
 

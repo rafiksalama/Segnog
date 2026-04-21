@@ -1,0 +1,22 @@
+services:
+  segnog:
+    image: segnog:local
+    ports:
+      - "${GRPC_PORT:-50051}:50051"
+      - "${PORT:-9000}:9000"
+    environment:
+      - MEMORY_SERVICE_REST__HOST=0.0.0.0
+      - MEMORY_SERVICE_REST__PORT=9000
+      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${EMBEDDINGS_API_KEY}
+      - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}
+    volumes:
+      - dragonfly_data:/data/dragonfly
+      - falkordb_data:/data/falkordb
+      - nats_data:/data/nats
+      - ./settings.toml:/app/settings.toml:ro
+    restart: unless-stopped
+
+volumes:
+  dragonfly_data:
+  falkordb_data:
+  nats_data:

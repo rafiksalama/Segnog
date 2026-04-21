@@ -64,6 +64,10 @@ async def extract_entities(
             )
 
         extraction = result.extraction
+        if extraction is None:
+            logger.warning("Entity extraction: LLM returned None for extraction field")
+            return []
+
         entities = []
         seen_names = set()
         for entry in extraction.entities:
@@ -101,5 +105,5 @@ async def extract_entities(
         return entities
 
     except Exception as e:
-        logger.error("Entity extraction failed: %s", e)
+        logger.error("Entity extraction failed: %s", e, exc_info=True)
         return []
