@@ -16,7 +16,8 @@ url = "redis://localhost:6380"
 graph_name = "episode_store"
 
 [default.embeddings]
-model = "qwen/qwen3-embedding-8b"
+backend = "local"
+model = "google/embeddinggemma-300m"
 base_url = "https://openrouter.ai/api/v1"
 
 [default.llm]

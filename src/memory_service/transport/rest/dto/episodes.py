@@ -27,7 +27,7 @@ class EpisodeRecord(BaseModel):
 
 
 class SearchEpisodesRequest(BaseModel):
-    group_id: str = "default"
+    group_id: Optional[str] = None
     query: str = Field(..., min_length=1)
     top_k: int = Field(25, ge=1, le=1000)
     min_score: float = Field(0.55, ge=0.0, le=1.0)
@@ -36,6 +36,7 @@ class SearchEpisodesRequest(BaseModel):
     expansion_hops: int = Field(1, ge=1, le=5)
     after_time: Optional[float] = None
     before_time: Optional[float] = None
+    global_search: bool = False
 
 
 class SearchEpisodesResponse(BaseModel):

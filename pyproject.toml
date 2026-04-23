@@ -24,6 +24,7 @@ dependencies = [
     # Embeddings + LLM
     "openai>=1.50.0",
     "dspy>=2.5.0",
+    "sentence-transformers>=3.0.0",
     # Config
     "dynaconf>=3.2.0",
     # Utilities

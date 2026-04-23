@@ -60,6 +60,7 @@ async def init_backends(session_ttl: int = 3600) -> dict:
         get_embedding_model,
         get_embedding_base_url,
         get_embedding_api_key,
+        get_embedding_backend,
     )
 
     # DragonflyDB
@@ -81,18 +82,29 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     )
     graph = db.select_graph(get_falkordb_graph_name())
 
-    # OpenAI embeddings client
-    embedding_api_key = get_embedding_api_key()
-    if not embedding_api_key:
-        raise RuntimeError("Embedding API key not configured")
-
-    openai_client = AsyncOpenAI(
-        api_key=embedding_api_key,
-        base_url=get_embedding_base_url(),
-        max_retries=0,  # Our _embed/_embed_batch retry loop handles retries
-    )
-
+    # Embedding backend selection
+    embedding_backend = get_embedding_backend()
     embedding_model = get_embedding_model()
+    local_embed = embedding_backend == "local"
+
+    if local_embed:
+        logger.info("Using local embedding backend: %s", embedding_model)
+        # Pre-load the model at startup so first request isn't slow
+        from .long_term.embed import get_local_embedder
+
+        get_local_embedder(embedding_model)
+        openai_client = None  # Not needed for local backend
+    else:
+        embedding_api_key = get_embedding_api_key()
+        if not embedding_api_key:
+            raise RuntimeError("Embedding API key not configured")
+
+        openai_client = AsyncOpenAI(
+            api_key=embedding_api_key,
+            base_url=get_embedding_base_url(),
+            max_retries=0,  # Our _embed/_embed_batch retry loop handles retries
+        )
+        logger.info("Using remote embedding backend: %s", embedding_model)
 
     # Schema.org Ontology (loaded once, shared singleton)
     from ..ontology.schema_org import get_shared_ontology
@@ -100,19 +112,19 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     schema_ontology = get_shared_ontology()
 
     # Initialize stores
-    episode_store = EpisodeStore(graph, openai_client, embedding_model)
+    episode_store = EpisodeStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await episode_store.ensure_indexes()
 
-    knowledge_store = KnowledgeStore(graph, openai_client, embedding_model)
+    knowledge_store = KnowledgeStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await knowledge_store.ensure_indexes()
 
-    artifact_store = ArtifactStore(graph, openai_client, embedding_model)
+    artifact_store = ArtifactStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await artifact_store.ensure_indexes()
 
-    ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology)
+    ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology, local_embed=local_embed)
     await ontology_store.ensure_indexes()
 
-    causal_store = CausalClaimStore(graph, openai_client, embedding_model)
+    causal_store = CausalClaimStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await causal_store.ensure_indexes()
 
     logger.info("All storage backends initialized")

@@ -66,7 +66,7 @@ class UpdateOntologyNodeRequest(BaseModel):
 
 class SearchOntologyNodesRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    group_id: str = "default"
+    group_id: Optional[str] = None
     top_k: int = Field(5, ge=1, le=100)
     min_score: float = Field(0.3, ge=0.0, le=1.0)
 

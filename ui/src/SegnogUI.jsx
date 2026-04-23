@@ -2119,6 +2119,246 @@ const ObservePage = () => {
   );
 };
 
+// ─── Page: Memory Search ───────────────────────────────────────────────
+const MemorySearchPage = () => {
+  const p = useP();
+  const [query, setQuery]           = useState("");
+  const [groupId, setGroupId]       = useState("");
+  const [topK, setTopK]             = useState(10);
+  const [sources, setSources]       = useState({ episodes: true, knowledge: true, ontology: true, causal: false, reflections: false });
+  const [results, setResults]       = useState({});
+  const [errors, setErrors]         = useState({});
+  const [searching, setSearching]   = useState(false);
+  const [activeTab, setActiveTab]   = useState("");
+
+  const toggleSource = (key) => setSources((s) => ({ ...s, [key]: !s[key] }));
+
+  const handleSearch = async () => {
+    if (!query.trim()) return;
+    const checked = Object.entries(sources).filter(([, v]) => v).map(([k]) => k);
+    if (checked.length === 0) return;
+    setSearching(true);
+    setResults({});
+    setErrors({});
+
+    const fetches = checked.map(async (src) => {
+      try {
+        let data;
+        const gid = groupId || undefined;
+        if (src === "episodes") {
+          const body = { query, top_k: topK };
+          if (gid) body.group_id = gid;
+          const res = await fetch(`${API}/episodes/search`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(`${res.status}`);
+          data = (await res.json()).episodes || [];
+        } else if (src === "knowledge") {
+          const body = { query, top_k: topK };
+          if (gid) body.group_id = gid;
+          const res = await fetch(`${API}/knowledge/search`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(`${res.status}`);
+          data = (await res.json()).entries || [];
+        } else if (src === "ontology") {
+          const body = { query, top_k: topK };
+          if (gid) body.group_id = gid;
+          const res = await fetch(`${API}/smart/search-ontology-nodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(`${res.status}`);
+          data = (await res.json()).nodes || [];
+        } else if (src === "causal") {
+          const params = new URLSearchParams({ query, top_k: String(topK) });
+          if (gid) params.set("group_id", gid);
+          const res = await fetch(`${API}/causal/claims?${params}`);
+          if (!res.ok) throw new Error(`${res.status}`);
+          data = (await res.json()).claims || [];
+        } else if (src === "reflections") {
+          const params = new URLSearchParams({ query, top_k: String(topK) });
+          if (gid) params.set("group_id", gid);
+          const res = await fetch(`${API}/reflections?${params}`);
+          if (!res.ok) throw new Error(`${res.status}`);
+          data = (await res.json()).reflections || [];
+        }
+        return { src, data: data || [] };
+      } catch (e) {
+        return { src, data: [], error: e.message };
+      }
+    });
+
+    const settled = await Promise.all(fetches);
+    const newResults = {};
+    const newErrors = {};
+    for (const r of settled) {
+      newResults[r.src] = r.data;
+      if (r.error) newErrors[r.src] = r.error;
+    }
+    setResults(newResults);
+    setErrors(newErrors);
+    setActiveTab(checked[0]);
+    setSearching(false);
+  };
+
+  const srcMeta = {
+    episodes:    { label: "Episodes",    color: p.blue,   endpoint: "POST /episodes/search" },
+    knowledge:   { label: "Knowledge",   color: p.warm,   endpoint: "POST /knowledge/search" },
+    ontology:    { label: "Ontology",    color: p.purple, endpoint: "POST /smart/search-ontology-nodes" },
+    causal:      { label: "Causal",      color: p.coral,  endpoint: "GET  /causal/claims" },
+    reflections: { label: "Reflections", color: p.green,  endpoint: "GET  /reflections" },
+  };
+
+  const renderResultCard = (src, item, idx) => {
+    const meta = srcMeta[src];
+    const score = item.score ?? item.confidence ?? 0;
+    return (
+      <div key={idx} style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <Badge color={meta.color}>{score.toFixed(2)}</Badge>
+          {item.knowledge_type && <Badge color={p.textMuted}>{item.knowledge_type}</Badge>}
+          {item.schema_type && <Badge color={p.textMuted}>{item.schema_type}</Badge>}
+          {item.reflection_type && <Badge color={p.textMuted}>{item.reflection_type}</Badge>}
+          {item.episode_type && item.episode_type !== "raw" && <Badge color={p.textMuted}>{item.episode_type}</Badge>}
+        </div>
+        <div style={{ fontSize: 13, color: p.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+          {src === "ontology" && item.display_name && (
+            <div style={{ fontWeight: 600, marginBottom: 4, color: meta.color }}>{item.display_name}</div>
+          )}
+          {src === "causal" ? (
+            <div>
+              <div><strong>Cause:</strong> {item.cause_summary}</div>
+              <div><strong>Effect:</strong> {item.effect_summary}</div>
+              {item.mechanism && <div><strong>Mechanism:</strong> {item.mechanism}</div>}
+            </div>
+          ) : (
+            <div>{item.content || item.summary || ""}</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const checkedSources = Object.entries(sources).filter(([, v]) => v);
+  const hasResults = Object.keys(results).length > 0;
+  const totalResults = Object.values(results).reduce((s, r) => s + r.length, 0);
+
+  const inp = { width: "100%", boxSizing: "border-box", padding: "10px 14px", borderRadius: 8, border: `1px solid ${p.borderLight}`, background: p.inputBg, color: p.text, fontFamily: MONO, fontSize: 13, outline: "none" };
+
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: p.text }}>Search Memory</h2>
+      <p style={{ color: p.textMuted, fontSize: 14, marginTop: 4, marginBottom: 24 }}>
+        Query episodes, knowledge, ontology, causal claims, and reflections
+      </p>
+
+      {/* Search bar + controls */}
+      <div style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              placeholder="Search for memories..."
+              style={inp}
+            />
+          </div>
+          <div style={{ width: 140 }}>
+            <input value={groupId} onChange={(e) => setGroupId(e.target.value)} placeholder="group_id (optional)" style={inp} />
+          </div>
+          <div style={{ width: 70 }}>
+            <input type="number" value={topK} onChange={(e) => setTopK(Math.max(1, parseInt(e.target.value) || 1))} min={1} max={100} style={inp} />
+          </div>
+          <button
+            onClick={handleSearch}
+            disabled={searching || !query.trim() || checkedSources.length === 0}
+            style={{
+              padding: "10px 24px", borderRadius: 8, border: "none",
+              background: searching ? p.surfaceAlt : `linear-gradient(135deg, ${p.accent}, ${p.accent}cc)`,
+              color: searching ? p.textMuted : p.bg, fontWeight: 700, fontSize: 13, fontFamily: FONT,
+              cursor: searching ? "wait" : "pointer", transition: "all 0.2s", whiteSpace: "nowrap",
+              display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            {searching ? "Searching…" : <><Icon d={icons.observe} size={14} /> Search</>}
+          </button>
+        </div>
+
+        {/* Source checkboxes */}
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          {Object.entries(srcMeta).map(([key, meta]) => (
+            <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <div
+                onClick={() => toggleSource(key)}
+                style={{
+                  width: 18, height: 18, borderRadius: 4,
+                  border: `1.5px solid ${sources[key] ? meta.color : p.borderLight}`,
+                  background: sources[key] ? meta.color + "30" : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}
+              >
+                {sources[key] && <Icon d={icons.check} size={12} />}
+              </div>
+              <span style={{ fontSize: 12, fontFamily: MONO, color: sources[key] ? meta.color : p.textMuted }}>{meta.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Results */}
+      {hasResults && (
+        <div>
+          {/* Summary bar */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: p.textMuted }}>
+              {totalResults} result{totalResults !== 1 ? "s" : ""} across {checkedSources.length} source{checkedSources.length !== 1 ? "s" : ""}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {checkedSources.map(([key]) => {
+                const meta = srcMeta[key];
+                const count = (results[key] || []).length;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setActiveTab(key)}
+                    style={{
+                      padding: "4px 12px", borderRadius: 6, border: `1px solid ${activeTab === key ? meta.color : p.border}`,
+                      background: activeTab === key ? meta.color + "20" : "transparent",
+                      color: activeTab === key ? meta.color : p.textMuted,
+                      fontSize: 11, fontFamily: MONO, fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 6,
+                    }}
+                  >
+                    {meta.label} ({count})
+                    {errors[key] && <span style={{ color: p.coral }} title={errors[key]}>!</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Result list */}
+          {activeTab && (results[activeTab] || []).length > 0 && (
+            <div style={{ maxHeight: "calc(100vh - 380px)", overflowY: "auto", paddingRight: 4 }}>
+              {results[activeTab].map((item, idx) => renderResultCard(activeTab, item, idx))}
+            </div>
+          )}
+          {activeTab && (results[activeTab] || []).length === 0 && !errors[activeTab] && (
+            <div style={{ textAlign: "center", color: p.textDim, padding: "40px 0", fontSize: 13 }}>No {srcMeta[activeTab].label.toLowerCase()} found</div>
+          )}
+          {activeTab && errors[activeTab] && (
+            <div style={{ color: p.coral, fontFamily: MONO, fontSize: 12, padding: "20px 0" }}>Error: {errors[activeTab]}</div>
+          )}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!hasResults && !searching && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 300, color: p.textDim }}>
+          <Icon d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" size={48} opacity={0.2} />
+          <div style={{ fontSize: 13, marginTop: 12 }}>Enter a query and select sources to search</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Page: Configuration ───────────────────────────────────────────────
 const ConfigPage = () => {
   const p = useP();
@@ -2244,6 +2484,7 @@ const NAV_ITEMS = [
   { id: "sessions",   label: "Sessions",     icon: icons.sessions   },
   { id: "graph",      label: "Memory Graph", icon: icons.graph      },
   { id: "observe",    label: "Observe",      icon: icons.observe    },
+  { id: "search",     label: "Search",       icon: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" },
   { id: "rem",        label: "REM Monitor",  icon: icons.rem        },
   { id: "config",     label: "Configuration",icon: icons.config     },
 ];
@@ -2318,6 +2559,7 @@ export default function SegnogUI() {
           {page === "sessions"   && <SessionsPage />}
           {page === "graph"      && <GraphPage />}
           {page === "observe"    && <ObservePage />}
+          {page === "search"     && <MemorySearchPage />}
           {page === "rem"        && <REMPage />}
           {page === "config"     && <ConfigPage />}
         </div>

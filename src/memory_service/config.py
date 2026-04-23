@@ -47,6 +47,15 @@ def get_falkordb_graph_name() -> str:
     return s.get("falkordb.graph_name", "episode_store")
 
 
+def get_embedding_backend() -> str:
+    """Embedding backend: 'remote' (OpenAI-compatible API) or 'local' (sentence-transformers)."""
+    s = get_settings()
+    return os.environ.get(
+        "MEMORY_SERVICE_EMBEDDINGS__BACKEND",
+        s.get("embeddings.backend", "remote"),
+    )
+
+
 def get_embedding_model() -> str:
     s = get_settings()
     return s.get("embeddings.model", "qwen/qwen3-embedding-8b:nitro")

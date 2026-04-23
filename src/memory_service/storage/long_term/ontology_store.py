@@ -44,8 +44,10 @@ class OntologyStore(BaseStore):
         embedding_model: str,
         ontology: SchemaOrgOntology,
         group_id: str = "default",
+        *,
+        local_embed: bool = False,
     ):
-        super().__init__(graph, openai_client, embedding_model, group_id)
+        super().__init__(graph, openai_client, embedding_model, group_id, local_embed=local_embed)
         self._ontology = ontology
 
     # ------------------------------------------------------------------
@@ -195,19 +197,30 @@ class OntologyStore(BaseStore):
 
         Returns list of dicts sorted by score descending. Never traverses graph edges.
         """
-        gid = group_id or self._group_id
+        gid = group_id if group_id is not None else self._group_id
         embedding_return = (
             ",\n                n.embedding AS embedding" if include_embedding else ""
         )
 
         # Scope to entities linked to episodes in this group via ABOUT edges,
-        # or search globally if no group_id.
-        if gid:
+        # or search globally if group_id was explicitly None.
+        if group_id is not None:
             match_clause = """
             MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(n:OntologyNode)
             WITH DISTINCT n"""
+            params = {
+                "group_id": gid,
+                "query_vec": embedding,
+                "min_score": min_score,
+                "top_k": top_k,
+            }
         else:
             match_clause = "MATCH (n:OntologyNode)"
+            params = {
+                "query_vec": embedding,
+                "min_score": min_score,
+                "top_k": top_k,
+            }
 
         result = await self._graph.ro_query(
             f"""
@@ -228,12 +241,7 @@ class OntologyStore(BaseStore):
             ORDER BY score DESC
             LIMIT $top_k
             """,
-            params={
-                "group_id": gid,
-                "query_vec": embedding,
-                "min_score": min_score,
-                "top_k": top_k,
-            },
+            params=params,
         )
 
         return self._parse_results(result)

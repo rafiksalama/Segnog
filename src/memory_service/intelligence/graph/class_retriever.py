@@ -5,6 +5,10 @@ Embeds the source text at inference time, computes cosine similarity
 against pre-embedded Schema.org class descriptions, and returns the
 top-K most relevant classes as a formatted string for prompt injection.
 
+Supports two embedding backends:
+  - "remote" (default): OpenAI-compatible API via AsyncOpenAI
+  - "local": sentence-transformers (CPU)
+
 Class embeddings are computed once (lazily), persisted to a JSON cache
 file alongside the schema JSON-LD, and cached in-process. An asyncio
 lock prevents duplicate work when multiple coroutines start up concurrently.
@@ -14,31 +18,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Awaitable
 
 import numpy as np
-from openai import AsyncOpenAI
-
-from ...config import get_embedding_api_key, get_embedding_base_url, get_embedding_model
 
 if TYPE_CHECKING:
     from ...ontology.schema_org import SchemaOrgOntology
 
 logger = logging.getLogger(__name__)
 
-# Limit concurrent embedding API requests to avoid rate-limiting
-_EMBED_CONCURRENCY = 5
-_embed_semaphore: asyncio.Semaphore | None = None
-
 # Global lock to prevent concurrent embed_classes() initialisation
 _embed_classes_lock: asyncio.Lock | None = None
-
-
-def _get_semaphore() -> asyncio.Semaphore:
-    global _embed_semaphore
-    if _embed_semaphore is None:
-        _embed_semaphore = asyncio.Semaphore(_EMBED_CONCURRENCY)
-    return _embed_semaphore
 
 
 def _get_lock() -> asyncio.Lock:
@@ -48,19 +38,48 @@ def _get_lock() -> asyncio.Lock:
     return _embed_classes_lock
 
 
-async def _embed(text: str) -> list[float]:
-    """Single embedding call via OpenRouter, throttled by semaphore."""
-    client = AsyncOpenAI(
-        api_key=get_embedding_api_key(),
-        base_url=get_embedding_base_url(),
-    )
-    async with _get_semaphore():
-        resp = await client.embeddings.create(
-            model=get_embedding_model(),
-            input=text,
-            encoding_format="float",
+def _get_embed_fn() -> Callable[[str], Awaitable[list[float]]]:
+    """Return the appropriate async embed function based on config."""
+    from ...config import get_embedding_backend, get_embedding_model
+
+    backend = get_embedding_backend()
+    model = get_embedding_model()
+
+    if backend == "local":
+        from ...storage.long_term.embed import aembed_single
+
+        async def _local_embed(text: str) -> list[float]:
+            return await aembed_single(text, model_name=model)
+
+        return _local_embed
+    else:
+        from openai import AsyncOpenAI
+        from ...config import get_embedding_api_key, get_embedding_base_url
+
+        _EMBED_CONCURRENCY = 5
+        _embed_semaphore: asyncio.Semaphore | None = None
+
+        def _get_semaphore() -> asyncio.Semaphore:
+            nonlocal _embed_semaphore
+            if _embed_semaphore is None:
+                _embed_semaphore = asyncio.Semaphore(_EMBED_CONCURRENCY)
+            return _embed_semaphore
+
+        client = AsyncOpenAI(
+            api_key=get_embedding_api_key(),
+            base_url=get_embedding_base_url(),
         )
-    return resp.data[0].embedding
+
+        async def _remote_embed(text: str) -> list[float]:
+            async with _get_semaphore():
+                resp = await client.embeddings.create(
+                    model=model,
+                    input=text,
+                    encoding_format="float",
+                )
+            return resp.data[0].embedding
+
+        return _remote_embed
 
 
 async def retrieve_relevant_classes(
@@ -85,9 +104,11 @@ async def retrieve_relevant_classes(
           ClassName(ParentClass) — description
           ...
     """
+    embed_fn = _get_embed_fn()
+
     # Build/fetch cached class embeddings (lock prevents duplicate concurrent build)
     async with _get_lock():
-        class_embs = await onto.embed_classes(_embed)
+        class_embs = await onto.embed_classes(embed_fn)
 
     if not class_embs:
         logger.warning(
@@ -96,7 +117,7 @@ async def retrieve_relevant_classes(
         return ""
 
     # Embed the source text
-    text_vec = np.array(await _embed(source_text), dtype=np.float32)
+    text_vec = np.array(await embed_fn(source_text), dtype=np.float32)
     norm = np.linalg.norm(text_vec)
     if norm > 0:
         text_vec /= norm

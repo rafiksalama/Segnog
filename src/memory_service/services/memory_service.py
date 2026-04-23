@@ -875,7 +875,7 @@ class MemoryService:
                 logger.warning(f"Causal extraction failed (non-critical): {e}")
 
         # Step 8: Ontology update (entity extraction + relationship + causal edges)
-        if self._ontology_store is not None and source_episode_uuids:
+        if self._ontology_store is not None:
             try:
                 from ..intelligence.graph.ontology_pipeline import update_group_ontology
 
@@ -896,6 +896,24 @@ class MemoryService:
                                 )
                     except Exception as e:
                         logger.warning(f"Failed to fetch episode content for ontology: {e}")
+                else:
+                    # No source UUIDs provided — fetch all group episodes
+                    try:
+                        results = await ep_store._graph.ro_query(
+                            """MATCH (e:Episode {group_id: $gid})
+                            WHERE coalesce(e.episode_type, 'raw') = 'raw'
+                            RETURN e.uuid AS uuid, e.content AS content
+                            ORDER BY e.created_at DESC
+                            LIMIT 20""",
+                            params={"gid": group_id},
+                        )
+                        for row in results.result_set:
+                            if row[0]:
+                                episodes_with_content.append(
+                                    {"uuid": row[0], "content": row[1] or ""}
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch group episodes for ontology: {e}")
 
                 if episodes_with_content:
                     await update_group_ontology(

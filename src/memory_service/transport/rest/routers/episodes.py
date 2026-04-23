@@ -33,8 +33,9 @@ async def store_episode(body: StoreEpisodeRequest, request: Request):
 @router.post("/episodes/search", response_model=SearchEpisodesResponse)
 async def search_episodes(body: SearchEpisodesRequest, request: Request):
     svc = get_service(request)
+    do_global = body.global_search or body.group_id is None
     raw = await svc.search_episodes(
-        group_id=body.group_id,
+        group_id=body.group_id or "default",
         query=body.query,
         top_k=body.top_k,
         episode_type=body.episode_type_filter,
@@ -43,6 +44,7 @@ async def search_episodes(body: SearchEpisodesRequest, request: Request):
         expansion_hops=body.expansion_hops,
         after_time=body.after_time,
         before_time=body.before_time,
+        global_search=do_global,
     )
     episodes = [
         EpisodeRecord(

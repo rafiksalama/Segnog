@@ -93,7 +93,9 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 
 ### Observability
 
-**Built-in dashboard.** A React UI at `:9000` with seven pages: health grid, reporting with latency percentiles, session tree, interactive ontology graph (hub/force/radial/hierarchical layouts), observe playground, REM monitor, and configuration viewer.
+**Built-in dashboard.** A React UI at `:9000` with eight pages: health grid, reporting with latency percentiles, session tree, interactive ontology graph (hub/force/radial/hierarchical layouts), observe playground, memory search, REM monitor, and configuration viewer.
+
+**Memory search.** The Search page lets you query across all memory types — episodes, knowledge, ontology entities, causal claims, and reflections — with checkboxes to select sources. Results appear with relevance scores. Supports global search (across all groups) or scoped to a specific session.
 
 **Deep health checks.** The `/health` endpoint reports individual backend status (DragonflyDB, FalkorDB, NATS) — returns `degraded` if any backend is down instead of silently failing.
 
@@ -107,9 +109,36 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - An API key for an OpenAI-compatible LLM provider (OpenAI, Anthropic, MiniMax, Together, etc.)
-- An API key for an OpenAI-compatible embedding provider (can be the same provider)
+- An embedding model — either remote (OpenAI-compatible API) or local (sentence-transformers)
 
 Segnog is provider-agnostic. It works with any LLM or embedding service that exposes an OpenAI-compatible `/chat/completions` and `/embeddings` endpoint. You pick your provider and model during setup.
+
+#### Embedding backends
+
+Segnog supports two embedding backends, configured in `settings.toml`:
+
+| Backend | Config | Latency | Model | Dimension |
+|---|---|---|---|---|
+| **Local** (default) | `embeddings.backend = "local"` | ~0.1s | `google/embeddinggemma-300m` | 768 |
+| **Remote** | `embeddings.backend = "remote"` | ~15-20s | Any OpenAI-compatible API | Varies |
+
+Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
+
+To use local embeddings, set in `settings.toml`:
+
+```toml
+[default.embeddings]
+backend = "local"
+model = "google/embeddinggemma-300m"
+```
+
+And set the `HF_TOKEN` environment variable when deploying so the model can be downloaded:
+
+```bash
+HF_TOKEN=hf_xxx docker-compose up -d
+```
+
+To switch back to remote embeddings, change `backend` to `"remote"` and set your API key as before.
 
 ---
 
@@ -140,9 +169,10 @@ The setup wizard will ask for:
 |---|---|---|---|
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` | `text-embedding-3-small` |
 | Anthropic | `https://api.anthropic.com/v1` | `claude-sonnet-4-20250514` | *(use OpenAI or OpenRouter)* |
-| MiniMax | `https://api.minimax.io/v1` | `MiniMax-M2.7-highspeed` | *(use OpenRouter)* |
+| MiniMax | `https://api.minimax.io/v1` | `MiniMax-M2.7-highspeed` | *(use OpenRouter or local)* |
 | Together | `https://api.together.xyz/v1` | `meta-llama/Llama-3-70b-chat-hf` | `togethercomputer/m2-bert-80M-8k-retrieval` |
 | OpenRouter | `https://openrouter.ai/api/v1` | *(any model)* | `qwen/qwen3-embedding-8b:nitro` |
+| **Local** | *(any LLM)* | *(any model)* | `google/embeddinggemma-300m` (CPU) |
 
 The wizard automatically detects port conflicts, writes all config files, pulls the Docker image, starts the container, and runs a health check.
 
@@ -183,6 +213,7 @@ The dashboard has seven pages:
 | **Sessions** | A collapsible tree of all sessions. Parent-child relationships are visualised as indented branches — click ▶/▼ to expand or collapse. Selecting a session shows its latest episodes in the right panel, with a breadcrumb trail showing the full ancestor path (e.g. `project-x › task-1 › subtask-1a`). |
 | **Memory Graph** | An interactive canvas graph of all ontology entities (nodes) and their relationships (edges). Switch between Hub, Force, Radial, Hierarchical and other layout modes. Click a node to see its Schema.org type and prose summary. |
 | **Observe** | A live playground. Type any message, set a session ID, and click Send to call `/observe` directly and inspect the returned context. |
+| **Search Memory** | Query across all memory types — episodes, knowledge, ontology entities, causal claims, and reflections. Checkboxes select which sources to search. Results show relevance scores and content previews. Supports global search across all groups. |
 | **REM Monitor** | Status of the background consolidation pipeline: pending episodes, Hebbian edge count, ontology entity count, sweep cycle latency. |
 | **Configuration** | All current configuration values from `settings.toml` — scoring weights, Hebbian parameters, background worker intervals, NATS settings. |
 

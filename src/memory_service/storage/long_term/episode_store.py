@@ -796,13 +796,14 @@ async def create_episode_store(
         get_embedding_model,
         get_embedding_base_url,
         get_embedding_api_key,
+        get_embedding_backend,
     )
 
     falkordb_url = falkordb_url or get_falkordb_url()
     graph_name = graph_name or get_falkordb_graph_name()
     embedding_model = embedding_model or get_embedding_model()
-    embedding_base_url = embedding_base_url or get_embedding_base_url()
-    embedding_api_key = embedding_api_key or get_embedding_api_key()
+    embedding_backend = get_embedding_backend()
+    local_embed = embedding_backend == "local"
 
     parsed = urlparse(falkordb_url)
 
@@ -813,19 +814,26 @@ async def create_episode_store(
     )
     graph = db.select_graph(graph_name)
 
-    if not embedding_api_key:
-        raise RuntimeError("Embedding API key not configured")
-
-    openai_client = AsyncOpenAI(
-        api_key=embedding_api_key,
-        base_url=embedding_base_url,
-    )
+    if local_embed:
+        from .embed import get_local_embedder
+        get_local_embedder(embedding_model)
+        openai_client = None
+    else:
+        embedding_base_url = embedding_base_url or get_embedding_base_url()
+        embedding_api_key = embedding_api_key or get_embedding_api_key()
+        if not embedding_api_key:
+            raise RuntimeError("Embedding API key not configured")
+        openai_client = AsyncOpenAI(
+            api_key=embedding_api_key,
+            base_url=embedding_base_url,
+        )
 
     store = EpisodeStore(
         graph=graph,
         openai_client=openai_client,
         embedding_model=embedding_model,
         group_id=group_id,
+        local_embed=local_embed,
     )
     await store.ensure_indexes()
 

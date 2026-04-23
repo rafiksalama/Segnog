@@ -3,6 +3,10 @@ Base Store
 
 Shared functionality for all FalkorDB-backed stores (EpisodeStore, KnowledgeStore, ArtifactStore).
 Provides embedding generation, result parsing, and name normalization.
+
+Embedding backends:
+  - "remote" (default): OpenAI-compatible API via AsyncOpenAI client
+  - "local": sentence-transformers (CPU) via embed module
 """
 
 import json
@@ -36,17 +40,25 @@ class BaseStore:
     def __init__(
         self,
         graph,  # falkordb.asyncio.AsyncGraph
-        openai_client,  # openai.AsyncOpenAI
+        openai_client,  # openai.AsyncOpenAI or None (when using local backend)
         embedding_model: str,
         group_id: str = "default",
+        *,
+        local_embed: bool = False,
     ):
         self._graph = graph
         self._client = openai_client
         self._model = embedding_model
         self._group_id = group_id
+        self._local_embed = local_embed
 
     async def _embed(self, text: str) -> List[float]:
-        """Generate embedding via OpenAI-compatible API with exponential-backoff retry."""
+        """Generate embedding using configured backend."""
+        if self._local_embed:
+            from .embed import aembed_single
+
+            return await aembed_single(text, model_name=self._model)
+
         import asyncio
 
         delay = _EMBED_RETRY_BASE_DELAY
@@ -77,7 +89,12 @@ class BaseStore:
         raise last_err
 
     async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Batch embedding for multiple entries with exponential-backoff retry."""
+        """Batch embedding for multiple entries using configured backend."""
+        if self._local_embed:
+            from .embed import aembed_batch
+
+            return await aembed_batch(texts, model_name=self._model)
+
         import asyncio
 
         if not texts:
