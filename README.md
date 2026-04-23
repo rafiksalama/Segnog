@@ -150,18 +150,39 @@ cd Segnog
 python setup.py
 ```
 
-The setup wizard will ask for:
+The setup wizard walks you through four steps:
+
+**Step 1 — LLM Provider.** Choose your LLM endpoint and model.
 
 | Prompt | What it configures | Default |
 |---|---|---|
 | LLM base URL | Provider endpoint (must be OpenAI-compatible) | `https://api.openai.com/v1` |
 | LLM API key | Secret key for the LLM provider | *(required)* |
-| LLM model name | Model used for extraction & reasoning | *(required, e.g. `gpt-4o`, `claude-sonnet-4-20250514`)* |
-| Embedding base URL | Provider endpoint for embeddings | `https://api.openai.com/v1` |
-| Embedding API key | Secret key (press Enter to reuse LLM key) | Same as LLM key |
-| Embedding model | Model for semantic search | *(required, e.g. `text-embedding-3-small`)* |
-| REST port | Host port for REST API + UI | `9000` |
-| gRPC port | Host port for gRPC | `50051` |
+| LLM model name | Model used for extraction & reasoning | *(required, e.g. `MiniMax-M2.7-highspeed`)* |
+
+**Step 2 — Embedding Provider.** Choose between local (CPU) or remote (API) embeddings.
+
+| Backend | Prompts |
+|---|---|
+| **Remote** | Embedding base URL, API key (Enter to reuse LLM key), model name |
+| **Local** | Embedding model name (default: `google/embeddinggemma-300m`), HuggingFace token |
+
+Local embeddings run on CPU via sentence-transformers — no API key, no network dependency, ~0.1s per embedding. The model downloads once on first startup (~600 MB, requires [HuggingFace access](https://huggingface.co/google/embeddinggemma-300m)).
+
+**Step 3 — Network Ports.** REST and gRPC ports (auto-detects conflicts).
+
+**Step 4 — Data Mount.** Optional: mount a local folder into the container for persistent data (e.g. HuggingFace model cache).
+
+After writing all config files, the wizard pulls the Docker image, starts the container, waits for health, and runs **post-deployment validation** — four automated checks confirming the service is fully operational:
+
+| Check | What it verifies |
+|---|---|
+| Health endpoint | `/health` returns `ok` or `degraded` |
+| UI stats | `/api/v1/memory/ui/stats` returns memory counts |
+| Search endpoint | `/api/v1/memory/episodes/search` validates embedding backend |
+| Web UI | `GET /` serves the dashboard |
+
+Note: first startup with local embeddings takes ~2 minutes while the model downloads. Subsequent starts are fast (~10s).
 
 **Example provider setups:**
 

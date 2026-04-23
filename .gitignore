@@ -13,11 +13,11 @@ build/
 !/data/schemaorg-current-https.jsonld
 src/memory_service/data/class_embeddings_*.json
 *.bak
+.DS_Store
 .claude/
 paper.md
 benchmarks/
 scripts/
 tests/
-src/memory_service/data/class_embeddings_*.json
 ui/node_modules/
 ui/dist/

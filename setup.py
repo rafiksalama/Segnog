@@ -38,6 +38,8 @@ DEFAULT_EMBED_URL = "https://api.openai.com/v1"
 DEFAULT_EMBED_MODEL = ""
 DEFAULT_REST_PORT = 9000
 DEFAULT_GRPC_PORT = 50051
+DEFAULT_EMBED_BACKEND = "remote"
+DEFAULT_LOCAL_EMBED_MODEL = "google/embeddinggemma-300m"
 
 
 # ── ANSI Colors ──────────────────────────────────────────────────────────────
@@ -234,22 +236,41 @@ def write_secrets_toml(llm_key, embed_key):
     print(f"  {green(f'{SECRETS_FILE.name} written')}")
 
 
-def write_env_file(llm_key, embed_key, rest_port, grpc_port):
+def write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=""):
     """Write .env for docker-compose interpolation."""
-    content = (
-        f"LLM_API_KEY={llm_key}\n"
-        f"EMBEDDINGS_API_KEY={embed_key}\n"
-        f"PORT={rest_port}\n"
-        f"GRPC_PORT={grpc_port}\n"
-    )
+    content = f"LLM_API_KEY={llm_key}\nEMBEDDINGS_API_KEY={embed_key}\n"
+    if hf_token:
+        content += f"HF_TOKEN={hf_token}\n"
+    content += f"PORT={rest_port}\nGRPC_PORT={grpc_port}\n"
     backup_file(ENV_FILE)
     ENV_FILE.write_text(content)
     os.chmod(ENV_FILE, 0o600)
     print(f"  {green(f'{ENV_FILE.name} written')}")
 
 
-def write_docker_compose(rest_port, grpc_port):
+def write_docker_compose(
+    rest_port, grpc_port, local_embed=False, mount_host="", mount_container="/app/data"
+):
     """Generate docker-compose.yml with generic env var names."""
+    env_lines = (
+        "      - MEMORY_SERVICE_REST__HOST=0.0.0.0\n"
+        f"      - MEMORY_SERVICE_REST__PORT={rest_port}\n"
+        "      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${EMBEDDINGS_API_KEY}\n"
+        "      - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}\n"
+    )
+    if local_embed:
+        env_lines += "      - HF_TOKEN=${HF_TOKEN}\n"
+
+    vol_lines = (
+        "    volumes:\n"
+        "      - dragonfly_data:/data/dragonfly\n"
+        "      - falkordb_data:/data/falkordb\n"
+        "      - nats_data:/data/nats\n"
+        "      - ./settings.toml:/app/settings.toml:ro\n"
+    )
+    if mount_host:
+        vol_lines += f"      - {mount_host}:{mount_container}\n"
+
     content = (
         "services:\n"
         "  segnog:\n"
@@ -258,15 +279,8 @@ def write_docker_compose(rest_port, grpc_port):
         f'      - "${{GRPC_PORT:-{grpc_port}}}:{grpc_port}"\n'
         f'      - "${{PORT:-{rest_port}}}:{rest_port}"\n'
         "    environment:\n"
-        "      - MEMORY_SERVICE_REST__HOST=0.0.0.0\n"
-        f"      - MEMORY_SERVICE_REST__PORT={rest_port}\n"
-        "      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${EMBEDDINGS_API_KEY}\n"
-        "      - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}\n"
-        "    volumes:\n"
-        "      - dragonfly_data:/data/dragonfly\n"
-        "      - falkordb_data:/data/falkordb\n"
-        "      - nats_data:/data/nats\n"
-        "      - ./settings.toml:/app/settings.toml:ro\n"
+        f"{env_lines}"
+        f"{vol_lines}"
         "    restart: unless-stopped\n"
         "\n"
         "volumes:\n"
@@ -418,6 +432,83 @@ def wait_for_health(port, timeout=90):
     return False
 
 
+# ── Post-Deploy Validation ────────────────────────────────────────────────
+def run_post_deploy_checks(port):
+    """Run validation checks after service is healthy."""
+    base = f"http://localhost:{port}"
+    passed = 0
+    failed = 0
+
+    print(f"\n  {bold('Running post-deployment checks...')}")
+
+    # 1. Health endpoint
+    try:
+        req = Request(f"{base}/health")
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            status = data.get("status", "")
+            if status in ("ok", "degraded"):
+                print(f"  {green('[PASS]')} Health check — {status}")
+                passed += 1
+            else:
+                print(f"  {red('[FAIL]')} Health check — unexpected status: {status}")
+                failed += 1
+    except Exception as e:
+        print(f"  {red('[FAIL]')} Health check — {e}")
+        failed += 1
+
+    # 2. UI stats
+    try:
+        req = Request(f"{base}/api/v1/memory/ui/stats")
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            ep = data.get("episodes", "?")
+            kn = data.get("knowledge_nodes", "?")
+            onto = data.get("ontology_entities", "?")
+            causal = data.get("causal_claims", "?")
+            print(
+                f"  {green('[PASS]')} UI stats — episodes={ep}, knowledge={kn}, ontology={onto}, causal={causal}"
+            )
+            passed += 1
+    except Exception as e:
+        print(f"  {yellow('[WARN]')} UI stats — {e}")
+        failed += 1
+
+    # 3. Search endpoint (validates embedding backend is working)
+    try:
+        payload = json.dumps({"query": "test", "top_k": 1, "group_id": "default"}).encode()
+        req = Request(
+            f"{base}/api/v1/memory/episodes/search",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            print(f"  {green('[PASS]')} Episode search — embedding backend working")
+            passed += 1
+    except Exception as e:
+        print(f"  {yellow('[WARN]')} Episode search — {e}")
+        failed += 1
+
+    # 4. UI serving
+    try:
+        req = Request(f"{base}/")
+        with urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                print(f"  {green('[PASS]')} Web UI — serving at /")
+                passed += 1
+            else:
+                print(f"  {yellow('[WARN]')} Web UI — status {resp.status}")
+                failed += 1
+    except Exception as e:
+        print(f"  {yellow('[WARN]')} Web UI — {e}")
+        failed += 1
+
+    print(f"\n  {bold('Results:')} {green(f'{passed} passed')}, {red(f'{failed} failed')}")
+    return failed == 0
+
+
 # ── Interactive Wizard ─────────────────────────────────────────────────────
 def run_interactive(skip_pull=False):
     """Run the full interactive setup wizard."""
@@ -486,17 +577,43 @@ def run_interactive(skip_pull=False):
     print(f"\n{bold('Step 2: Embedding Provider')}")
     print(f"{dim('Configure the embedding model used for semantic search.')}")
 
-    embed_url = prompt("Embedding base URL", defaults("embeddings", "base_url", DEFAULT_EMBED_URL))
-    embed_key = prompt(
-        "Embedding API key (Enter to use LLM key)",
-        secret_default("embeddings", "api_key"),
-        secret=True,
-    )
-    if not embed_key:
-        embed_key = llm_key
-    embed_model = prompt(
-        "Embedding model name", defaults("embeddings", "model", DEFAULT_EMBED_MODEL)
-    )
+    print("  Embedding backend options:")
+    print("    1. remote — OpenAI-compatible API (recommended for production)")
+    print("    2. local  — sentence-transformers on CPU (fast, no API needed)")
+    backend_choice = prompt("Choose embedding backend [1/2]", "1")
+    if backend_choice.strip() == "2":
+        embed_backend = "local"
+    else:
+        embed_backend = "remote"
+
+    hf_token = ""
+    if embed_backend == "local":
+        print(f"\n  {cyan('Local embedding mode selected.')}")
+        print(f"  {dim('The model will be downloaded inside the container on first start.')}")
+        embed_model = prompt(
+            "Embedding model name", defaults("embeddings", "model", DEFAULT_LOCAL_EMBED_MODEL)
+        )
+        hf_token = prompt("HuggingFace token (required for gated models)", "", secret=True)
+        while not hf_token:
+            print(f"  {red('HuggingFace token is required for downloading models.')}")
+            hf_token = prompt("HuggingFace token", "", secret=True)
+        embed_url = ""
+        embed_key = ""
+    else:
+        print(f"\n  {cyan('Remote embedding mode selected.')}")
+        embed_url = prompt(
+            "Embedding base URL", defaults("embeddings", "base_url", DEFAULT_EMBED_URL)
+        )
+        embed_key = prompt(
+            "Embedding API key (Enter to use LLM key)",
+            secret_default("embeddings", "api_key"),
+            secret=True,
+        )
+        if not embed_key:
+            embed_key = llm_key
+        embed_model = prompt(
+            "Embedding model name", defaults("embeddings", "model", DEFAULT_EMBED_MODEL)
+        )
 
     # ── Step 3: Ports ──
     print(f"\n{bold('Step 3: Network Ports')}")
@@ -514,14 +631,39 @@ def run_interactive(skip_pull=False):
     except ValueError:
         print(f"  {yellow(f'Invalid port, using {grpc_port}')}")
 
+    # ── Step 4: Mount folder ──
+    print(f"\n{bold('Step 4: Data Mount')}")
+    print(
+        f"{dim('Mount a local folder into the container for persistent data (e.g. HuggingFace cache).')}"
+    )
+
+    mount_host = prompt("Host folder path (Enter to skip)", "")
+    mount_container = "/app/data"
+    if mount_host:
+        mount_host = os.path.abspath(mount_host)
+        if not os.path.isdir(mount_host):
+            if prompt_yes_no(f"Folder {mount_host} does not exist. Create it?", default=True):
+                os.makedirs(mount_host, exist_ok=True)
+                print(f"  {green(f'Created {mount_host}')}")
+            else:
+                print(f"  {yellow('Skipping mount — folder not created.')}")
+                mount_host = ""
+        mount_container = prompt("Container mount path", "/app/data")
+
     # ── Review ──
+    embed_label = f"{embed_model} ({embed_backend})"
+    if embed_backend == "local":
+        embed_label = f"{embed_model} (local CPU)"
     print(f"\n{bold('========================================')}")
     print(f"  {bold('LLM:')}       {llm_model}")
     print(f"  {bold('LLM URL:')}   {llm_url}")
-    print(f"  {bold('Embed:')}     {embed_model}")
-    print(f"  {bold('Embed URL:')} {embed_url}")
+    print(f"  {bold('Embed:')}     {embed_label}")
+    if embed_backend == "remote":
+        print(f"  {bold('Embed URL:')} {embed_url}")
     print(f"  {bold('REST:')}      :{rest_port}")
     print(f"  {bold('gRPC:')}      :{grpc_port}")
+    if mount_host:
+        print(f"  {bold('Mount:')}     {mount_host} → {mount_container}")
     print(f"{bold('========================================')}\n")
 
     if not prompt_yes_no("Proceed with this configuration?"):
@@ -533,14 +675,20 @@ def run_interactive(skip_pull=False):
 
     config = {
         "llm": {"base_url": llm_url, "flash_model": llm_model},
-        "embeddings": {"base_url": embed_url, "model": embed_model},
+        "embeddings": {"base_url": embed_url, "model": embed_model, "backend": embed_backend},
         "rest": {"host": "0.0.0.0", "port": rest_port},
         "grpc": {"port": grpc_port},
     }
     write_settings_toml(config, existing)
     write_secrets_toml(llm_key, embed_key)
-    write_env_file(llm_key, embed_key, rest_port, grpc_port)
-    write_docker_compose(rest_port, grpc_port)
+    write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=hf_token)
+    write_docker_compose(
+        rest_port,
+        grpc_port,
+        local_embed=(embed_backend == "local"),
+        mount_host=mount_host,
+        mount_container=mount_container,
+    )
 
     # ── Pull & Start ──
     print()
@@ -552,8 +700,11 @@ def run_interactive(skip_pull=False):
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
 
-    # ── Health Check ──
-    if wait_for_health(rest_port):
+    # ── Health Check + Post-Deploy Validation ──
+    health_timeout = 300 if embed_backend == "local" else 90
+    print(f"\n  {dim(f'Waiting for service (timeout {health_timeout}s)...')}")
+    if wait_for_health(rest_port, timeout=health_timeout):
+        run_post_deploy_checks(rest_port)
         print(f"\n{bold('========================================')}")
         print(f"  {green(bold('Segnog is running!'))}")
         print(f"{bold('========================================')}")
@@ -592,6 +743,7 @@ def run_quick(skip_pull=False):
     llm_model = llm_section.get("flash_model", DEFAULT_LLM_MODEL)
     embed_url = embed_section.get("base_url", DEFAULT_EMBED_URL)
     embed_model = embed_section.get("model", DEFAULT_EMBED_MODEL)
+    embed_backend = embed_section.get("backend", DEFAULT_EMBED_BACKEND)
     rest_port = rest_section.get("port", DEFAULT_REST_PORT)
     grpc_port = grpc_section.get("port", DEFAULT_GRPC_PORT)
 
@@ -605,21 +757,26 @@ def run_quick(skip_pull=False):
         or llm_key
     )
 
+    # Get HF token from .env for local embedding
+    existing_env = load_existing_env()
+    hf_token = existing_env.get("HF_TOKEN", "")
+
     if not llm_key:
         print(f"  {red('No LLM API key found in .secrets.toml or environment.')}")
         print(f"  {dim('Run without --quick for interactive setup.')}")
         sys.exit(1)
 
+    local_embed = embed_backend == "local"
     config = {
         "llm": {"base_url": llm_url, "flash_model": llm_model},
-        "embeddings": {"base_url": embed_url, "model": embed_model},
+        "embeddings": {"base_url": embed_url, "model": embed_model, "backend": embed_backend},
         "rest": {"host": "0.0.0.0", "port": rest_port},
         "grpc": {"port": grpc_port},
     }
     write_settings_toml(config, existing)
     write_secrets_toml(llm_key, embed_key)
-    write_env_file(llm_key, embed_key, rest_port, grpc_port)
-    write_docker_compose(rest_port, grpc_port)
+    write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=hf_token)
+    write_docker_compose(rest_port, grpc_port, local_embed=local_embed)
 
     print()
     if not pull_image(skip=skip_pull):
@@ -630,7 +787,9 @@ def run_quick(skip_pull=False):
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
 
-    if wait_for_health(rest_port):
+    health_timeout = 300 if local_embed else 90
+    if wait_for_health(rest_port, timeout=health_timeout):
+        run_post_deploy_checks(rest_port)
         print(f"\n  {green(bold('Segnog is running!'))} → http://localhost:{rest_port}")
     else:
         print(f"\n  {yellow('Service did not become healthy within timeout.')}")
