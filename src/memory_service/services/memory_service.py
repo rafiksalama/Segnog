@@ -14,6 +14,17 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
+_STEP_TIMEOUT = 90  # seconds — max wall-clock per LLM step
+
+
+async def _call_with_timeout(coro, description: str, timeout: float = _STEP_TIMEOUT):
+    """Run an async coroutine with a timeout. On timeout, log and return None."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("Timeout (%.0fs) on step: %s", timeout, description)
+        return None
+
 
 class MemoryService:
     """
@@ -659,13 +670,18 @@ class MemoryService:
         try:
             from ..intelligence.synthesis.reflect import generate_reflection
 
-            reflection_sections = await generate_reflection(
-                mission_data, model=model, group_id=group_id
+            reflection_sections = (
+                await _call_with_timeout(
+                    generate_reflection(mission_data, model=model, group_id=group_id),
+                    "reflection generation",
+                )
+                or {}
             )
-            logger.info(
-                "Generated reflection sections: %s",
-                {k: len(v) for k, v in reflection_sections.items() if v},
-            )
+            if reflection_sections:
+                logger.info(
+                    "Generated reflection sections: %s",
+                    {k: len(v) for k, v in reflection_sections.items() if v},
+                )
         except Exception as e:
             logger.warning(f"Reflection generation failed (non-critical): {e}")
             reflection_sections = {"reflection": f"Mission completed with status={status}."}
@@ -720,13 +736,20 @@ class MemoryService:
             from ..intelligence.extract.knowledge import extract_knowledge
 
             data_source_type = mission_data.get("data_source_type", "mission")
-            knowledge_entries = await extract_knowledge(
-                mission_data=mission_data,
-                reflection=reflection,
-                model=model,
-                data_source_type=data_source_type,
+            knowledge_entries = (
+                await _call_with_timeout(
+                    extract_knowledge(
+                        mission_data=mission_data,
+                        reflection=reflection,
+                        model=model,
+                        data_source_type=data_source_type,
+                    ),
+                    "knowledge extraction",
+                )
+                or []
             )
-            logger.info(f"Extracted {len(knowledge_entries)} knowledge entries")
+            if knowledge_entries:
+                logger.info(f"Extracted {len(knowledge_entries)} knowledge entries")
         except Exception as e:
             logger.warning(f"Knowledge extraction failed (non-critical): {e}")
 
@@ -750,11 +773,15 @@ class MemoryService:
         try:
             from ..intelligence.extract.artifacts import extract_artifacts
 
-            artifact_entries = await extract_artifacts(
-                mission_data=mission_data,
-                model=model,
+            artifact_entries = (
+                await _call_with_timeout(
+                    extract_artifacts(mission_data=mission_data, model=model),
+                    "artifact extraction",
+                )
+                or []
             )
-            logger.info(f"Extracted {len(artifact_entries)} artifact entries")
+            if artifact_entries:
+                logger.info(f"Extracted {len(artifact_entries)} artifact entries")
         except Exception as e:
             logger.warning(f"Artifact extraction failed (non-critical): {e}")
 

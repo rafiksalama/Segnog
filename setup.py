@@ -26,7 +26,7 @@ from urllib.request import Request, urlopen
 
 # ── Constants ────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent
-DOCKER_IMAGE = "ghcr.io/rafiksalama/segnog:latest"
+DOCKER_IMAGE = "rafiksalama/segnog:latest"
 SETTINGS_FILE = PROJECT_ROOT / "settings.toml"
 SECRETS_FILE = PROJECT_ROOT / ".secrets.toml"
 ENV_FILE = PROJECT_ROOT / ".env"
