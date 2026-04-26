@@ -14,7 +14,7 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-_STEP_TIMEOUT = 90  # seconds — max wall-clock per LLM step
+_STEP_TIMEOUT = 60  # seconds — max wall-clock per LLM step
 
 
 async def _call_with_timeout(coro, description: str, timeout: float = _STEP_TIMEOUT):
@@ -44,6 +44,7 @@ class MemoryService:
         causal_store=None,
         dragonfly=None,
         short_term=None,
+        workflow_engine=None,
     ):
         self._episode_store = episode_store
         self._knowledge_store = knowledge_store
@@ -52,6 +53,7 @@ class MemoryService:
         self._causal_store = causal_store
         self._dragonfly = dragonfly
         self._short_term = short_term
+        self._engine = workflow_engine
 
     # ── Internal scope helpers ────────────────────────────────────────────
 
@@ -644,20 +646,16 @@ class MemoryService:
         model: Optional[str] = None,
     ) -> dict:
         """
-        Full curation pipeline — replaces 7-step CuratorWorkflow.
+        Curation pipeline — reflection + knowledge (sync), then graph writes.
 
-        Steps:
-          1. Generate reflection from mission data
-          2. Store reflection as episode
-          3. Extract knowledge entries
-          4. Store knowledge in graph
-          5. Extract artifact entries
-          6. Store artifacts in graph
-          7. Compress old raw events
+        When the workflow engine is available, sync LLM calls (reflection,
+        knowledge extraction) run through the engine and async stages
+        (artifacts, causals, ontology) are dispatched to NATS pipeline
+        workers.  When no engine is set, falls back to inline LLM calls
+        for the sync stages only.
         """
         ep_store = self._ep(group_id)
         kn_store = self._kn(group_id)
-        art_store = self._art(group_id)
 
         if mission_data is None:
             mission_data = {}
@@ -665,30 +663,61 @@ class MemoryService:
         status = mission_data.get("status", "")
         run_id = mission_data.get("run_id", "")
 
-        # Step 1: Generate reflection sections (returns dict with separate parts)
-        reflection_sections = {}
-        try:
-            from ..intelligence.synthesis.reflect import generate_reflection
+        # ── Sync LLM stages ──────────────────────────────────────────────
+        if self._engine:
+            from ..workflows.curation_workflow import curation_workflow
 
-            reflection_sections = (
-                await _call_with_timeout(
-                    generate_reflection(mission_data, model=model, group_id=group_id),
-                    "reflection generation",
+            context: Dict[str, Any] = {
+                "group_id": group_id,
+                "mission_data": mission_data,
+                "model": model,
+            }
+            results = await self._engine.execute(curation_workflow(), context)
+
+            reflection_result = results.get("reflection", {})
+            reflection = reflection_result.get("reflection", "")
+            reflection_sections = reflection_result.get("sections", {})
+            knowledge_entries = results.get("knowledge", {}).get("entries", [])
+        else:
+            # Fallback: inline LLM calls (no workflow engine / no NATS)
+            reflection_sections = {}
+            try:
+                from ..intelligence.synthesis.reflect import generate_reflection
+
+                reflection_sections = (
+                    await _call_with_timeout(
+                        generate_reflection(mission_data, model=model, group_id=group_id),
+                        "reflection generation",
+                    )
+                    or {}
                 )
-                or {}
-            )
-            if reflection_sections:
-                logger.info(
-                    "Generated reflection sections: %s",
-                    {k: len(v) for k, v in reflection_sections.items() if v},
+            except Exception as e:
+                logger.warning("Reflection generation failed (non-critical): %s", e)
+                reflection_sections = {"reflection": f"Mission completed with status={status}."}
+
+            reflection = reflection_sections.get("reflection", "")
+
+            knowledge_entries: List[dict] = []
+            try:
+                from ..intelligence.extract.knowledge import extract_knowledge
+
+                data_source_type = mission_data.get("data_source_type", "mission")
+                knowledge_entries = (
+                    await _call_with_timeout(
+                        extract_knowledge(
+                            mission_data=mission_data,
+                            reflection=reflection,
+                            model=model,
+                            data_source_type=data_source_type,
+                        ),
+                        "knowledge extraction",
+                    )
+                    or []
                 )
-        except Exception as e:
-            logger.warning(f"Reflection generation failed (non-critical): {e}")
-            reflection_sections = {"reflection": f"Mission completed with status={status}."}
+            except Exception as e:
+                logger.warning("Knowledge extraction failed (non-critical): %s", e)
 
-        # Backward compat: combined reflection text for knowledge extraction
-        reflection = reflection_sections.get("reflection", "")
-
+        # ── Graph writes (fast — no LLM calls) ──────────────────────────
         # Step 2: Store each reflection section as a separate typed episode
         reflection_uuid = ""
         section_uuids = {}
@@ -730,29 +759,6 @@ class MemoryService:
                 except Exception:
                     pass
 
-        # Step 3: Extract knowledge entries
-        knowledge_entries: List[dict] = []
-        try:
-            from ..intelligence.extract.knowledge import extract_knowledge
-
-            data_source_type = mission_data.get("data_source_type", "mission")
-            knowledge_entries = (
-                await _call_with_timeout(
-                    extract_knowledge(
-                        mission_data=mission_data,
-                        reflection=reflection,
-                        model=model,
-                        data_source_type=data_source_type,
-                    ),
-                    "knowledge extraction",
-                )
-                or []
-            )
-            if knowledge_entries:
-                logger.info(f"Extracted {len(knowledge_entries)} knowledge entries")
-        except Exception as e:
-            logger.warning(f"Knowledge extraction failed (non-critical): {e}")
-
         # Step 4: Store knowledge
         knowledge_count = 0
         if knowledge_entries:
@@ -768,38 +774,6 @@ class MemoryService:
             except Exception as e:
                 logger.warning(f"Failed to store knowledge (non-critical): {e}")
 
-        # Step 5: Extract artifact entries
-        artifact_entries: List[dict] = []
-        try:
-            from ..intelligence.extract.artifacts import extract_artifacts
-
-            artifact_entries = (
-                await _call_with_timeout(
-                    extract_artifacts(mission_data=mission_data, model=model),
-                    "artifact extraction",
-                )
-                or []
-            )
-            if artifact_entries:
-                logger.info(f"Extracted {len(artifact_entries)} artifact entries")
-        except Exception as e:
-            logger.warning(f"Artifact extraction failed (non-critical): {e}")
-
-        # Step 6: Store artifacts
-        artifact_count = 0
-        if artifact_entries:
-            try:
-                uuids = await art_store.store_artifacts(
-                    entries=artifact_entries,
-                    source_mission=task,
-                    mission_status=status,
-                    source_episode_uuid=reflection_uuid,
-                )
-                artifact_count = len(uuids)
-                logger.info(f"Stored {artifact_count} artifact entries")
-            except Exception as e:
-                logger.warning(f"Failed to store artifacts (non-critical): {e}")
-
         # Step 7: Compress old events
         events_compressed = False
         try:
@@ -807,158 +781,32 @@ class MemoryService:
 
             state = mission_data.get("state", {})
             state_desc = state.get("state_description", "") if isinstance(state, dict) else ""
-            result = await compress_events(
-                short_term_memory=self._short_term,
-                episode_store=ep_store,
-                run_id=run_id,
-                state_description=state_desc,
-                model=model,
+            result = (
+                await _call_with_timeout(
+                    compress_events(
+                        short_term_memory=self._short_term,
+                        episode_store=ep_store,
+                        run_id=run_id,
+                        state_description=state_desc,
+                        model=model,
+                    ),
+                    "event compression",
+                )
+                or {}
             )
             events_compressed = result.get("compressed", False)
         except Exception as e:
             logger.warning(f"Event compression failed (non-critical): {e}")
 
-        # Step 7b: Extract and store causal claims
-        causal_count = 0
-        causal_source = mission_data.get("output", "")
-        if self._causal_store and causal_source:
-            try:
-                from ..intelligence.extract.causals import extract_causal_claims
-
-                causal_claims = await extract_causal_claims(causal_source)
-                for claim in causal_claims:
-                    try:
-                        await self._causal_store.upsert_claim(
-                            cause_summary=claim["cause"],
-                            effect_summary=claim["effect"],
-                            mechanism=claim.get("mechanism", ""),
-                            confidence=claim.get("confidence", 0.8),
-                            causal_type=claim.get("causal_type", "causes"),
-                            cause_entity=claim.get("cause_norm"),
-                            effect_entity=claim.get("effect_norm"),
-                            group_id=group_id,
-                        )
-                        causal_count += 1
-                    except Exception:
-                        pass
-                if causal_count:
-                    # Auto-link knowledge as SUPPORTS evidence for causal claims
-                    if knowledge_entries:
-                        try:
-                            claims = await self._causal_store.list_claims(
-                                group_id=group_id, limit=50
-                            )
-                            for claim in claims:
-                                claim_text = f"{claim.get('cause_summary', '')} {claim.get('effect_summary', '')}"
-                                await self._causal_store._embed(claim_text)
-                                # Find knowledge that semantically matches this claim
-                                matches = await kn_store.search_hybrid(
-                                    query=claim_text,
-                                    top_k=3,
-                                    min_score=0.6,
-                                )
-                                for kn in matches:
-                                    kn_uuid = kn.get("uuid", "")
-                                    if kn_uuid:
-                                        await self._causal_store.add_evidence(
-                                            claim["uuid"],
-                                            kn_uuid,
-                                            "supports",
-                                            weight=kn.get("score", 0.7),
-                                        )
-                        except Exception as e:
-                            logger.debug(f"Auto-linking knowledge to causal claims: {e}")
-
-                    await self._causal_store.revise_beliefs(group_id)
-                    await self._causal_store.auto_chain(group_id)
-                    logger.info(f"Stored {causal_count} causal claims")
-
-                    # Store causal reflection as a separate episode
-                    causal_lines = []
-                    for claim in causal_claims:
-                        line = f"- {claim['cause']} → {claim['effect']}"
-                        if claim.get("mechanism"):
-                            line += f" ({claim['mechanism']})"
-                        line += f" [confidence={claim.get('confidence', 0.8):.2f}]"
-                        causal_lines.append(line)
-                    causal_summary = (
-                        f"Causal beliefs extracted ({causal_count} claims):\n"
-                        + "\n".join(causal_lines)
-                    )
-                    try:
-                        await ep_store.store_episode(
-                            content=f"Causal Reflection for: {task}\n\n{causal_summary}",
-                            metadata={
-                                "source": "curator",
-                                "task": task,
-                                "reflection_type": "causal_reflection",
-                                "causal_count": causal_count,
-                            },
-                            episode_type="causal_reflection",
-                        )
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Causal extraction failed (non-critical): {e}")
-
-        # Step 8: Ontology update (entity extraction + relationship + causal edges)
-        if self._ontology_store is not None:
-            try:
-                from ..intelligence.graph.ontology_pipeline import update_group_ontology
-
-                # Fetch episode content for ontology extraction
-                episodes_with_content = []
-                if source_episode_uuids:
-                    try:
-                        results = await ep_store._graph.query(
-                            """MATCH (e:Episode)
-                            WHERE e.uuid IN $uuids
-                            RETURN e.uuid AS uuid, e.content AS content""",
-                            params={"uuids": source_episode_uuids},
-                        )
-                        for row in results.result_set:
-                            if row[0]:
-                                episodes_with_content.append(
-                                    {"uuid": row[0], "content": row[1] or ""}
-                                )
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch episode content for ontology: {e}")
-                else:
-                    # No source UUIDs provided — fetch all group episodes
-                    try:
-                        results = await ep_store._graph.ro_query(
-                            """MATCH (e:Episode {group_id: $gid})
-                            WHERE coalesce(e.episode_type, 'raw') = 'raw'
-                            RETURN e.uuid AS uuid, e.content AS content
-                            ORDER BY e.created_at DESC
-                            LIMIT 20""",
-                            params={"gid": group_id},
-                        )
-                        for row in results.result_set:
-                            if row[0]:
-                                episodes_with_content.append(
-                                    {"uuid": row[0], "content": row[1] or ""}
-                                )
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch group episodes for ontology: {e}")
-
-                if episodes_with_content:
-                    await update_group_ontology(
-                        ontology_store=self._ontology_store,
-                        group_id=group_id,
-                        episodes=episodes_with_content,
-                        combined_text=state_desc,
-                        causal_store=self._causal_store,
-                    )
-            except Exception as e:
-                logger.error(f"Ontology update failed for group '{group_id}': {e}", exc_info=True)
+        # Note: artifacts, causals, ontology are handled by async pipeline
+        # workers via NATS when the workflow engine is available.
 
         return {
             "reflection": reflection,
             "reflection_uuid": reflection_uuid,
             "section_uuids": section_uuids,
             "knowledge_count": knowledge_count,
-            "artifact_count": artifact_count,
-            "causal_count": causal_count,
+            "artifact_count": 0,
+            "causal_count": 0,
             "events_compressed": events_compressed,
         }

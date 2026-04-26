@@ -12,7 +12,7 @@
 
 **One endpoint does everything.** `/observe` stores the current observation, searches for related memory, and returns a formatted context passage — all in a single call. Reading and writing are not separate operations.
 
-**Data organises itself in the background.** The agent does not decide what is important or how to structure it. After returning the context, Segnog fires background tasks that extract knowledge, identify entities, consolidate episodes, and maintain a graph of who knows what. This happens asynchronously — the agent's response is not delayed.
+**Data organises itself in the background.** The agent does not decide what is important or how to structure it. After returning the context, Segnog fires background tasks that extract knowledge, identify entities, consolidate episodes, and maintain a graph of who knows what. Heavy extraction stages (ontology, causal reasoning) run via NATS pipeline queues — each stage processed FIFO by dedicated workers, so the agent's response is never delayed by slow LLM calls.
 
 **Memory has two layers, kept separate.** DragonflyDB is the hot session cache — fast, in-memory, TTL-scoped. FalkorDB is the persistent graph — structured, searchable across sessions. The hot path never touches the graph. The graph is populated in the background, then pulled into the session on the next cold start.
 
@@ -76,7 +76,23 @@ No schema to define. No retrieval logic to write. No storage layer to configure.
 
 **REM worker.** A background sweep process runs every 2 minutes (configurable), selecting batches of un-consolidated episodes for processing. This is the "sleep cycle" — while the agent is idle, Segnog organizes what happened.
 
-**Curation pipeline.** For each batch: extract knowledge → consolidate episodes (merge duplicates above 0.90 cosine similarity) → update ontology nodes (re-summarize entity profiles) → run reflection and metacognition → store compressed episode summaries.
+**Curation pipeline with workflow engine.** The curation pipeline is defined as a DAG of extraction stages, executed by a workflow engine:
+
+```
+ reflection (sync)
+     │
+     ▼
+ knowledge (sync)
+     │
+     ├──────────┬──────────┐
+     ▼          ▼          ▼
+ artifacts  causals    ontology
+ (async)    (async)    (async)
+```
+
+Sync stages (reflection, knowledge extraction) run directly and block the caller. Async stages (artifacts, causals, ontology) are dispatched to NATS JetStream pipeline workers that process them FIFO in the background. Each stage has its own queue — ontology (the heaviest stage, ~60 LLM calls) runs independently and never blocks the response.
+
+**Singleton service.** REST and gRPC share a single `MemoryService` instance with a shared `WorkflowEngine`, NATS client, and pipeline workers — no duplicate backend initialization.
 
 **Metacognition.** After each curation, Segnog runs a two-part reflection: (1) a structured summary of what was learned, and (2) a metacognitive analysis of the agent's reasoning quality — identifying patterns, gaps, and biases in the session's decision-making.
 

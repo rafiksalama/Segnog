@@ -21,7 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 async def setup_backends(app: FastAPI) -> None:
-    """Initialize all storage backends and attach to app.state."""
+    """Initialize all storage backends and attach to app.state.
+
+    If app.state.service is already set (injected by main.py with
+    workflow_engine), skip MemoryService creation but still populate
+    app.state with backends for health checks, latency middleware, etc.
+    """
+    if getattr(app.state, "service", None) is not None:
+        logger.info("setup_backends: reusing injected MemoryService, skipping init")
+        return
+
     from ...services.memory_service import MemoryService
 
     backends = await init_backends(session_ttl=get_session_ttl())
@@ -34,7 +43,7 @@ async def setup_backends(app: FastAPI) -> None:
     app.state.ontology_store = backends["ontology_store"]
     app.state.causal_store = backends.get("causal_store")
     app.state.openai_client = backends["openai_client"]
-    app.state.nats_client = backends.get("nats_client")
+
     app.state.service = MemoryService(
         episode_store=backends["episode_store"],
         knowledge_store=backends["knowledge_store"],

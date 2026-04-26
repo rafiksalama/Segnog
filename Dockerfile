@@ -12,11 +12,22 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
+# Install CPU-only PyTorch first (saves ~2.5GB vs CUDA version)
+RUN pip install --no-cache-dir --prefix=/install \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install all other dependencies (cached unless pyproject.toml changes)
 COPY pyproject.toml ./
+RUN mkdir -p src/memory_service client && \
+    touch src/memory_service/__init__.py && \
+    pip install --no-cache-dir --prefix=/install --no-deps . && \
+    pip install --no-cache-dir --prefix=/install . && \
+    rm -rf src/ client/
+
+# Copy actual source and reinstall (fast — only our package, deps are cached)
 COPY src/ src/
 COPY client/ client/
-
-RUN pip install --no-cache-dir --prefix=/install .
+RUN pip install --no-cache-dir --prefix=/install --no-deps .
 
 # ── Build UI ───────────────────────────────────────────────────────────────
 FROM node:20-slim AS ui-builder

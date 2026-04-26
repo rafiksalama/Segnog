@@ -49,11 +49,17 @@ async def run_grpc_server(handler: MemoryServiceHandler, port: int):
         logger.info("gRPC server stopped")
 
 
-async def run_rest_server(host: str, port: int):
+async def run_rest_server(host: str, port: int, svc=None, backends=None):
     """Start and run the REST server."""
     from .transport.rest.app import create_app
 
     app = create_app()
+    if svc is not None and backends is not None:
+        # Inject the singleton service + backends so setup_backends() skips init
+        app.state.service = svc
+        app.state.dragonfly = backends["dragonfly"]
+        app.state.episode_store = backends["episode_store"]
+        app.state.openai_client = backends["openai_client"]
     config = uvicorn.Config(
         app,
         host=host,
@@ -80,6 +86,7 @@ async def main():
 
     # NATS bootstrap (messaging concerns live here, not in storage/)
     nats_client = None
+    workflow_engine = None
     if get_nats_enabled():
         from .messaging.client import NatsClient
         from .messaging.publisher import EpisodeEventPublisher
@@ -91,6 +98,11 @@ async def main():
         backends["episode_store"].set_event_publisher(publisher)
         logger.info("NATS client initialized")
 
+        # Create workflow engine for async pipeline stages
+        from .workflows.engine import WorkflowEngine
+
+        workflow_engine = WorkflowEngine(nats_client)
+
     svc = MemoryService(
         episode_store=backends["episode_store"],
         knowledge_store=backends["knowledge_store"],
@@ -99,6 +111,7 @@ async def main():
         causal_store=backends.get("causal_store"),
         dragonfly=backends["dragonfly"],
         short_term=backends["short_term"],
+        workflow_engine=workflow_engine,
     )
     handler = MemoryServiceHandler(service=svc)
 
@@ -109,7 +122,7 @@ async def main():
     # Build task list: gRPC + REST + background workers
     tasks = [
         run_grpc_server(handler, grpc_port),
-        run_rest_server(rest_host, rest_port),
+        run_rest_server(rest_host, rest_port, svc=svc, backends=backends),
     ]
 
     if nats_client:
@@ -151,6 +164,43 @@ async def main():
         tasks.append(sweep_publisher.run())
         tasks.append(sweep_worker.run())
         logger.info("NATS event workers enabled (curation + sweep)")
+
+        # Pipeline workers — async stage handlers for the workflow engine
+        from .workflows.curation_workflow import (
+            make_artifacts_handler,
+            make_causals_handler,
+            make_ontology_handler,
+        )
+        from .workers.pipeline_worker import AsyncWorker
+
+        pipeline_workers = [
+            AsyncWorker(
+                "artifacts",
+                nats_client,
+                make_artifacts_handler(backends["artifact_store"]),
+                "memory.pipeline.artifacts.*",
+            ),
+            AsyncWorker(
+                "causals",
+                nats_client,
+                make_causals_handler(backends.get("causal_store")),
+                "memory.pipeline.causals.*",
+            ),
+            AsyncWorker(
+                "ontology",
+                nats_client,
+                make_ontology_handler(
+                    backends.get("ontology_store"),
+                    backends.get("causal_store"),
+                    backends["episode_store"],
+                ),
+                "memory.pipeline.ontology.*",
+                ack_wait=600,  # ontology pipeline can be slow
+            ),
+        ]
+        for pw in pipeline_workers:
+            tasks.append(pw.run())
+        logger.info("NATS pipeline workers enabled (artifacts + causals + ontology)")
 
     elif get_background_enabled():
         # Fallback: traditional polling-based REM worker

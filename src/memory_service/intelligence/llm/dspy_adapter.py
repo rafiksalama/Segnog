@@ -72,5 +72,7 @@ def configure_dspy_lm(
         temperature=temperature,
         max_tokens=max_tokens,
         api_base=base_url,
+        timeout=60,
+        num_retries=1,
     )
     return lm

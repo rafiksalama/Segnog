@@ -262,26 +262,8 @@ class CurationWorker:
                         }
                     )
 
-                # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
-                if self._ontology_store is not None:
-                    try:
-                        from ..intelligence.graph.ontology_pipeline import update_group_ontology
-
-                        episodes_with_uuid = [
-                            {"uuid": uuid, "content": episode_contents.get(uuid, "")}
-                            for uuid in source_uuids
-                        ]
-                        await update_group_ontology(
-                            ontology_store=self._ontology_store,
-                            group_id=group_id,
-                            episodes=episodes_with_uuid,
-                            combined_text=combined,
-                            causal_store=self._causal_store,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "Ontology update failed for '%s': %s", group_id, e, exc_info=True
-                        )
+                # Ontology is now handled by async pipeline workers
+                # (dispatched via workflow engine inside run_curation())
 
                 # Mark episodes consolidated
                 consolidated = await self._episode_store.mark_episodes_consolidated(source_uuids)
