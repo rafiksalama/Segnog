@@ -58,7 +58,12 @@ async def run_rest_server(host: str, port: int, svc=None, backends=None):
         # Inject the singleton service + backends so setup_backends() skips init
         app.state.service = svc
         app.state.dragonfly = backends["dragonfly"]
+        app.state.short_term = backends["short_term"]
         app.state.episode_store = backends["episode_store"]
+        app.state.knowledge_store = backends["knowledge_store"]
+        app.state.artifact_store = backends["artifact_store"]
+        app.state.ontology_store = backends.get("ontology_store")
+        app.state.causal_store = backends.get("causal_store")
         app.state.openai_client = backends["openai_client"]
     config = uvicorn.Config(
         app,
