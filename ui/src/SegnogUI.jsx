@@ -2125,7 +2125,7 @@ const MemorySearchPage = () => {
   const [query, setQuery]           = useState("");
   const [groupId, setGroupId]       = useState("");
   const [topK, setTopK]             = useState(10);
-  const [sources, setSources]       = useState({ episodes: true, knowledge: true, ontology: true, causal: false, reflections: false });
+  const [sources, setSources]       = useState({ episodes: true, knowledge: true, ontology: true, causal: true, reflections: true });
   const [results, setResults]       = useState({});
   const [errors, setErrors]         = useState({});
   const [searching, setSearching]   = useState(false);

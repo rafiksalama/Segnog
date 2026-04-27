@@ -489,13 +489,17 @@ class EpisodeStore(BaseStore):
         else:
             group_filter = "e.group_id = $group_id"
 
-        # Exclude known garbage content patterns (reflections, metacognition, failed LLM outputs)
-        garbage_filter = """
+        # Exclude garbage from general searches, but allow reflection-type searches
+        _REFLECTION_TYPES = {"reflection", "metacognition", "causal_reflection"}
+        if episode_type and episode_type in _REFLECTION_TYPES:
+            garbage_filter = ""
+        else:
+            garbage_filter = """
             AND NOT e.content STARTS WITH 'Reflection for:'
             AND NOT e.content STARTS WITH 'Causal Reflection for:'
             AND NOT e.content STARTS WITH 'Metacognition for:'
             AND NOT e.content STARTS WITH 'Mission completed with status='
-        """
+            """
 
         cypher = f"""
             MATCH (e:Episode)

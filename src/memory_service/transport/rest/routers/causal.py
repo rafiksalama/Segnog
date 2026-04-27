@@ -24,22 +24,23 @@ def _get_causal_store(request: Request):
 @router.get("/causal/claims")
 async def search_claims(
     request: Request,
-    group_id: str = Query(...),
+    group_id: str = Query(""),
     query: str = Query(""),
     top_k: int = Query(5, ge=1, le=50),
 ):
     """Search causal claims by semantic similarity."""
     store = _get_causal_store(request)
+    gid = group_id or None
     if query:
         embedding = await store._embed(query)
         claims = await store.search_claims(
             embedding=embedding,
             top_k=top_k,
-            group_id=group_id,
+            group_id=gid,
             min_score=0.3,
         )
     else:
-        claims = await store.list_claims(group_id=group_id, limit=top_k)
+        claims = await store.list_claims(group_id=gid, limit=top_k)
     return {"claims": claims}
 
 

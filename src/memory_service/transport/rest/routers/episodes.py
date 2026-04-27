@@ -93,7 +93,7 @@ _REFLECTION_TYPES = {"reflection", "metacognition", "causal_reflection"}
 @router.get("/reflections")
 async def list_reflections(
     request: Request,
-    group_id: str = Query(...),
+    group_id: str = Query(""),
     reflection_type: str = Query(
         None, description="Filter by type: reflection, metacognition, causal_reflection"
     ),
@@ -108,6 +108,7 @@ async def list_reflections(
     - causal_reflection: causal beliefs summary (cause → effect chains)
     """
     svc = get_service(request)
+    gid = group_id or None
 
     # If a specific type is requested, use it directly; otherwise search all reflection types
     if reflection_type and reflection_type in _REFLECTION_TYPES:
@@ -119,19 +120,21 @@ async def list_reflections(
     for rtype in types_to_search:
         if query:
             raw = await svc.search_episodes(
-                group_id=group_id,
+                group_id=gid,
                 query=query,
                 top_k=top_k,
                 episode_type=rtype,
                 min_score=0.3,
+                global_search=gid is None,
             )
         else:
             raw = await svc.search_episodes(
-                group_id=group_id,
-                query=group_id,  # fallback: search by group_id text
+                group_id=gid,
+                query=gid or "reflection",
                 top_k=top_k,
                 episode_type=rtype,
                 min_score=0.0,
+                global_search=gid is None,
             )
         for r in raw:
             all_results.append(
