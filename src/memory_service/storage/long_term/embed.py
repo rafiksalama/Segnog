@@ -25,9 +25,15 @@ def get_local_embedder(model_name: str = "all-MiniLM-L6-v2"):
     if _model is None:
         with _lock:
             if _model is None:
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError:
+                    raise ImportError(
+                        "sentence-transformers is not installed. "
+                        "Install it with: pip install 'agent-memory-service[local-embed]' "
+                        "or run the setup wizard with local embedding enabled."
+                    )
                 logger.info("Loading local embedding model: %s", model_name)
-                from sentence_transformers import SentenceTransformer
-
                 _model = SentenceTransformer(model_name)
                 logger.info(
                     "Local embedding model loaded: %s (dim=%d)",

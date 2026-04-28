@@ -510,6 +510,56 @@ def run_post_deploy_checks(port):
 
 
 # ── Interactive Wizard ─────────────────────────────────────────────────────
+def install_local_embed_deps():
+    """Install sentence-transformers inside the running container and restart the service."""
+    print(f"\n  {cyan('Installing local embedding dependencies (torch + sentence-transformers)...')}")
+    print(f"  {dim('This is a one-time install. It will persist across container restarts.')}")
+
+    # Check if already installed
+    check_rc = run_command(
+        compose_cmd() + [
+            "exec", "segnog", "python", "-c",
+            "import sentence_transformers",
+        ],
+        description="Checking if sentence-transformers is already installed",
+    )
+    if check_rc == 0:
+        print(f"  {green('sentence-transformers already installed — skipping.')}")
+        # Still restart in case the service crashed on first boot
+        run_command(
+            compose_cmd() + ["restart", "segnog"],
+            description="Restarting container to load embedding library",
+        )
+        return
+
+    # Install CPU-only torch first, then sentence-transformers
+    run_command(
+        compose_cmd() + [
+            "exec", "segnog", "pip", "install", "--no-cache-dir",
+            "torch", "--index-url", "https://download.pytorch.org/whl/cpu",
+        ],
+        description="Installing CPU-only PyTorch",
+    )
+
+    rc = run_command(
+        compose_cmd() + [
+            "exec", "segnog", "pip", "install", "--no-cache-dir",
+            "sentence-transformers>=3.0.0",
+        ],
+        description="Installing sentence-transformers in container",
+    )
+    if rc != 0:
+        print(f"  {yellow('Warning: pip install failed. Local embeddings may not work.')}")
+        print(f"  {dim('You can retry later: docker compose exec segnog pip install sentence-transformers')}")
+    else:
+        print(f"  {green('Local embedding dependencies installed.')}")
+        # Restart the container so the service picks up the new package
+        run_command(
+            compose_cmd() + ["restart", "segnog"],
+            description="Restarting container to load embedding library",
+        )
+
+
 def run_interactive(skip_pull=False):
     """Run the full interactive setup wizard."""
     print(f"\n{bold('========================================')}")
@@ -700,8 +750,12 @@ def run_interactive(skip_pull=False):
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
 
+    # ── Install local embedding deps if needed ──
+    if embed_backend == "local":
+        install_local_embed_deps()
+
     # ── Health Check + Post-Deploy Validation ──
-    health_timeout = 300 if embed_backend == "local" else 90
+    health_timeout = 600 if embed_backend == "local" else 90
     print(f"\n  {dim(f'Waiting for service (timeout {health_timeout}s)...')}")
     if wait_for_health(rest_port, timeout=health_timeout):
         run_post_deploy_checks(rest_port)
@@ -722,7 +776,7 @@ def run_interactive(skip_pull=False):
         print(f"  {dim('Check logs: docker compose logs -f')}")
 
 
-def run_quick(skip_pull=False):
+def run_quick(skip_pull=False, hf_token=""):
     """Non-interactive setup using existing config."""
     print(f"\n  {bold('Quick setup — using existing configuration...')}")
 
@@ -757,9 +811,13 @@ def run_quick(skip_pull=False):
         or llm_key
     )
 
-    # Get HF token from .env for local embedding
+    # Get HF token from CLI arg, .env, or shell environment for local embedding
     existing_env = load_existing_env()
-    hf_token = existing_env.get("HF_TOKEN", "")
+    resolved_hf_token = (
+        hf_token
+        or existing_env.get("HF_TOKEN", "")
+        or os.environ.get("HF_TOKEN", "")
+    )
 
     if not llm_key:
         print(f"  {red('No LLM API key found in .secrets.toml or environment.')}")
@@ -775,7 +833,7 @@ def run_quick(skip_pull=False):
     }
     write_settings_toml(config, existing)
     write_secrets_toml(llm_key, embed_key)
-    write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=hf_token)
+    write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=resolved_hf_token)
     write_docker_compose(rest_port, grpc_port, local_embed=local_embed)
 
     print()
@@ -787,7 +845,10 @@ def run_quick(skip_pull=False):
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
 
-    health_timeout = 300 if local_embed else 90
+    if local_embed:
+        install_local_embed_deps()
+
+    health_timeout = 600 if local_embed else 90
     if wait_for_health(rest_port, timeout=health_timeout):
         run_post_deploy_checks(rest_port)
         print(f"\n  {green(bold('Segnog is running!'))} → http://localhost:{rest_port}")
@@ -810,6 +871,7 @@ def main():
         "--quick", action="store_true", help="Non-interactive (use existing config)"
     )
     parser.add_argument("--skip-pull", action="store_true", help="Skip Docker image pull")
+    parser.add_argument("--hf-token", default="", help="HuggingFace token for gated models")
     parser.add_argument("--stop", action="store_true", help="Stop running containers")
     parser.add_argument("--status", action="store_true", help="Show container status")
 
@@ -820,7 +882,7 @@ def main():
     elif args.status:
         show_status()
     elif args.quick:
-        run_quick(skip_pull=args.skip_pull)
+        run_quick(skip_pull=args.skip_pull, hf_token=args.hf_token)
     else:
         run_interactive(skip_pull=args.skip_pull)
 

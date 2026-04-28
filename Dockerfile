@@ -12,10 +12,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only PyTorch first (saves ~2.5GB vs CUDA version)
-RUN pip install --no-cache-dir --prefix=/install \
-    torch --index-url https://download.pytorch.org/whl/cpu
-
 # Install all other dependencies (cached unless pyproject.toml changes)
 COPY pyproject.toml ./
 RUN mkdir -p src/memory_service client && \
