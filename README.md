@@ -140,21 +140,7 @@ Segnog supports two embedding backends, configured in `settings.toml`:
 
 Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The setup wizard automatically installs sentence-transformers and CPU-only PyTorch (~150 MB) inside the container when you choose local embeddings. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
 
-To use local embeddings, set in `settings.toml`:
-
-```toml
-[default.embeddings]
-backend = "local"
-model = "google/embeddinggemma-300m"
-```
-
-And set the `HF_TOKEN` environment variable when deploying so the model can be downloaded:
-
-```bash
-HF_TOKEN=hf_xxx docker-compose up -d
-```
-
-To switch back to remote embeddings, change `backend` to `"remote"` and set your API key as before.
+To switch back to remote embeddings, re-run the setup wizard and choose "remote" in Step 2.
 
 ---
 
@@ -213,24 +199,36 @@ Note: first startup with local embeddings takes ~2 minutes while the model downl
 
 The wizard automatically detects port conflicts, writes all config files, pulls the Docker image, starts the container, and runs a health check.
 
-**Other modes:**
+#### Quick mode
+
+Run non-interactively — reads existing config from `settings.toml` and `.secrets.toml`. Override any value via CLI flags:
 
 ```bash
-python setup.py --quick                                           # Use existing config, no prompts
-python setup.py --quick --llm-key sk-xxx --llm-url https://api.openai.com/v1 --llm-model gpt-4o
-python setup.py --quick --hf-token hf_xxx                        # Pass HuggingFace token for gated models
-python setup.py --skip-pull                                       # Don't re-pull the image
-python setup.py --stop                                            # Stop the container
-python setup.py --status                                          # Show container health
+# Minimal — uses all saved config
+python setup.py --quick
+
+# Full override — everything from the command line
+python setup.py --quick \
+  --llm-key sk-xxx \
+  --llm-url https://api.openai.com/v1 \
+  --llm-model gpt-4o \
+  --hf-token hf_xxx
 ```
 
-**HuggingFace token.** Some local embedding models (e.g. `google/embeddinggemma-300m`) are gated and require a [HuggingFace access token](https://huggingface.co/settings/tokens). You can provide it three ways:
+| Flag | What it overrides | Resolution order |
+|---|---|---|
+| `--llm-key` | LLM provider API key | CLI → `.secrets.toml` → `MEMORY_SERVICE_LLM__API_KEY` env |
+| `--llm-url` | LLM provider base URL | CLI → `settings.toml` → default |
+| `--llm-model` | LLM model name | CLI → `settings.toml` → default |
+| `--hf-token` | HuggingFace token (for gated models like `embeddinggemma-300m`) | CLI → `.env` → `HF_TOKEN` env |
 
-| Method | How |
-|---|---|
-| Interactive wizard | Prompted during Step 2 (embedding provider) |
-| `--hf-token` flag | `python setup.py --quick --hf-token hf_xxx` |
-| `.env` file | Add `HF_TOKEN=hf_xxx` to the `.env` file before running setup |
+#### Other commands
+
+```bash
+python setup.py --skip-pull   # Start without re-pulling the Docker image
+python setup.py --stop        # Stop running containers
+python setup.py --status      # Show container health
+```
 
 ---
 
