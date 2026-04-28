@@ -138,7 +138,7 @@ Segnog supports two embedding backends, configured in `settings.toml`:
 | **Local** (default) | `embeddings.backend = "local"` | ~0.1s | `google/embeddinggemma-300m` | 768 |
 | **Remote** | `embeddings.backend = "remote"` | ~15-20s | Any OpenAI-compatible API | Varies |
 
-Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
+Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The setup wizard automatically installs sentence-transformers and CPU-only PyTorch (~150 MB) inside the container when you choose local embeddings. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
 
 To use local embeddings, set in `settings.toml`:
 
@@ -216,11 +216,20 @@ The wizard automatically detects port conflicts, writes all config files, pulls 
 **Other modes:**
 
 ```bash
-python setup.py --quick      # Use existing config, no prompts
-python setup.py --skip-pull  # Don't re-pull the image
-python setup.py --stop       # Stop the container
-python setup.py --status     # Show container health
+python setup.py --quick                     # Use existing config, no prompts
+python setup.py --quick --hf-token hf_xxx   # Pass HuggingFace token for gated models
+python setup.py --skip-pull                 # Don't re-pull the image
+python setup.py --stop                      # Stop the container
+python setup.py --status                    # Show container health
 ```
+
+**HuggingFace token.** Some local embedding models (e.g. `google/embeddinggemma-300m`) are gated and require a [HuggingFace access token](https://huggingface.co/settings/tokens). You can provide it three ways:
+
+| Method | How |
+|---|---|
+| Interactive wizard | Prompted during Step 2 (embedding provider) |
+| `--hf-token` flag | `python setup.py --quick --hf-token hf_xxx` |
+| `.env` file | Add `HF_TOKEN=hf_xxx` to the `.env` file before running setup |
 
 ---
 
