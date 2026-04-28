@@ -216,11 +216,12 @@ The wizard automatically detects port conflicts, writes all config files, pulls 
 **Other modes:**
 
 ```bash
-python setup.py --quick                     # Use existing config, no prompts
-python setup.py --quick --hf-token hf_xxx   # Pass HuggingFace token for gated models
-python setup.py --skip-pull                 # Don't re-pull the image
-python setup.py --stop                      # Stop the container
-python setup.py --status                    # Show container health
+python setup.py --quick                                           # Use existing config, no prompts
+python setup.py --quick --llm-key sk-xxx --llm-url https://api.openai.com/v1 --llm-model gpt-4o
+python setup.py --quick --hf-token hf_xxx                        # Pass HuggingFace token for gated models
+python setup.py --skip-pull                                       # Don't re-pull the image
+python setup.py --stop                                            # Stop the container
+python setup.py --status                                          # Show container health
 ```
 
 **HuggingFace token.** Some local embedding models (e.g. `google/embeddinggemma-300m`) are gated and require a [HuggingFace access token](https://huggingface.co/settings/tokens). You can provide it three ways:

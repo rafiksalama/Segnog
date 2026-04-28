@@ -776,7 +776,7 @@ def run_interactive(skip_pull=False):
         print(f"  {dim('Check logs: docker compose logs -f')}")
 
 
-def run_quick(skip_pull=False, hf_token=""):
+def run_quick(skip_pull=False, hf_token="", llm_key="", llm_url="", llm_model=""):
     """Non-interactive setup using existing config."""
     print(f"\n  {bold('Quick setup — using existing configuration...')}")
 
@@ -793,22 +793,25 @@ def run_quick(skip_pull=False, hf_token=""):
     rest_section = defaults_section.get("rest", {})
     grpc_section = defaults_section.get("grpc", {})
 
-    llm_url = llm_section.get("base_url", DEFAULT_LLM_URL)
-    llm_model = llm_section.get("flash_model", DEFAULT_LLM_MODEL)
+    # CLI args override config file values
+    resolved_llm_url = llm_url or llm_section.get("base_url", DEFAULT_LLM_URL)
+    resolved_llm_model = llm_model or llm_section.get("flash_model", DEFAULT_LLM_MODEL)
     embed_url = embed_section.get("base_url", DEFAULT_EMBED_URL)
     embed_model = embed_section.get("model", DEFAULT_EMBED_MODEL)
     embed_backend = embed_section.get("backend", DEFAULT_EMBED_BACKEND)
     rest_port = rest_section.get("port", DEFAULT_REST_PORT)
     grpc_port = grpc_section.get("port", DEFAULT_GRPC_PORT)
 
-    # Get API keys from secrets or env
-    llm_key = secrets.get("default", {}).get("llm", {}).get("api_key") or os.environ.get(
-        "MEMORY_SERVICE_LLM__API_KEY", ""
+    # Get API keys: CLI arg → secrets file → env var
+    resolved_llm_key = (
+        llm_key
+        or secrets.get("default", {}).get("llm", {}).get("api_key")
+        or os.environ.get("MEMORY_SERVICE_LLM__API_KEY", "")
     )
     embed_key = (
         secrets.get("default", {}).get("embeddings", {}).get("api_key")
         or os.environ.get("MEMORY_SERVICE_EMBEDDINGS__API_KEY", "")
-        or llm_key
+        or resolved_llm_key
     )
 
     # Get HF token from CLI arg, .env, or shell environment for local embedding
@@ -819,21 +822,21 @@ def run_quick(skip_pull=False, hf_token=""):
         or os.environ.get("HF_TOKEN", "")
     )
 
-    if not llm_key:
-        print(f"  {red('No LLM API key found in .secrets.toml or environment.')}")
+    if not resolved_llm_key:
+        print(f"  {red('No LLM API key found. Use --llm-key or set it in .secrets.toml.')}")
         print(f"  {dim('Run without --quick for interactive setup.')}")
         sys.exit(1)
 
     local_embed = embed_backend == "local"
     config = {
-        "llm": {"base_url": llm_url, "flash_model": llm_model},
+        "llm": {"base_url": resolved_llm_url, "flash_model": resolved_llm_model},
         "embeddings": {"base_url": embed_url, "model": embed_model, "backend": embed_backend},
         "rest": {"host": "0.0.0.0", "port": rest_port},
         "grpc": {"port": grpc_port},
     }
     write_settings_toml(config, existing)
-    write_secrets_toml(llm_key, embed_key)
-    write_env_file(llm_key, embed_key, rest_port, grpc_port, hf_token=resolved_hf_token)
+    write_secrets_toml(resolved_llm_key, embed_key)
+    write_env_file(resolved_llm_key, embed_key, rest_port, grpc_port, hf_token=resolved_hf_token)
     write_docker_compose(rest_port, grpc_port, local_embed=local_embed)
 
     print()
@@ -872,6 +875,9 @@ def main():
     )
     parser.add_argument("--skip-pull", action="store_true", help="Skip Docker image pull")
     parser.add_argument("--hf-token", default="", help="HuggingFace token for gated models")
+    parser.add_argument("--llm-key", default="", help="LLM provider API key")
+    parser.add_argument("--llm-url", default="", help="LLM provider base URL (e.g. https://api.openai.com/v1)")
+    parser.add_argument("--llm-model", default="", help="LLM model name (e.g. gpt-4o)")
     parser.add_argument("--stop", action="store_true", help="Stop running containers")
     parser.add_argument("--status", action="store_true", help="Show container status")
 
@@ -882,7 +888,13 @@ def main():
     elif args.status:
         show_status()
     elif args.quick:
-        run_quick(skip_pull=args.skip_pull, hf_token=args.hf_token)
+        run_quick(
+            skip_pull=args.skip_pull,
+            hf_token=args.hf_token,
+            llm_key=args.llm_key,
+            llm_url=args.llm_url,
+            llm_model=args.llm_model,
+        )
     else:
         run_interactive(skip_pull=args.skip_pull)
 
