@@ -138,9 +138,7 @@ Segnog supports two embedding backends, configured in `settings.toml`:
 | **Local** (default) | `embeddings.backend = "local"` | ~0.1s | `google/embeddinggemma-300m` | 768 |
 | **Remote** | `embeddings.backend = "remote"` | ~15-20s | Any OpenAI-compatible API | Varies |
 
-Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The setup wizard automatically installs sentence-transformers and CPU-only PyTorch (~150 MB) inside the container when you choose local embeddings. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
-
-To switch back to remote embeddings, re-run the setup wizard and choose "remote" in Step 2.
+Local embeddings run on CPU via [sentence-transformers](https://www.sbert.net/) — no API key, no network dependency, no per-call cost. The container entrypoint automatically installs sentence-transformers and CPU-only PyTorch (~150 MB) on first boot when `embeddings.backend = "local"`. The install persists across `docker compose down && up` via a named volume. The model downloads once on first startup (~600 MB for embeddinggemma-300m, requires a [HuggingFace account](https://huggingface.co/google/embeddinggemma-300m) with access granted). After that, inference is ~50ms per embedding on CPU — a 150x speedup over remote API calls.
 
 ---
 

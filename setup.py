@@ -257,15 +257,15 @@ def write_docker_compose(
         f"      - MEMORY_SERVICE_REST__PORT={rest_port}\n"
         "      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${EMBEDDINGS_API_KEY}\n"
         "      - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}\n"
+        "      - HF_TOKEN=${HF_TOKEN}\n"
     )
-    if local_embed:
-        env_lines += "      - HF_TOKEN=${HF_TOKEN}\n"
 
     vol_lines = (
         "    volumes:\n"
         "      - dragonfly_data:/data/dragonfly\n"
         "      - falkordb_data:/data/falkordb\n"
         "      - nats_data:/data/nats\n"
+        "      - pip_packages:/pip-install\n"
         "      - ./settings.toml:/app/settings.toml:ro\n"
     )
     if mount_host:
@@ -287,6 +287,7 @@ def write_docker_compose(
         "  dragonfly_data:\n"
         "  falkordb_data:\n"
         "  nats_data:\n"
+        "  pip_packages:\n"
     )
     backup_file(COMPOSE_FILE)
     COMPOSE_FILE.write_text(content)
@@ -510,76 +511,6 @@ def run_post_deploy_checks(port):
 
 
 # ── Interactive Wizard ─────────────────────────────────────────────────────
-def install_local_embed_deps():
-    """Install sentence-transformers inside the running container and restart the service."""
-    print(
-        f"\n  {cyan('Installing local embedding dependencies (torch + sentence-transformers)...')}"
-    )
-    print(f"  {dim('This is a one-time install. It will persist across container restarts.')}")
-
-    # Check if already installed
-    check_rc = run_command(
-        compose_cmd()
-        + [
-            "exec",
-            "segnog",
-            "python",
-            "-c",
-            "import sentence_transformers",
-        ],
-        description="Checking if sentence-transformers is already installed",
-    )
-    if check_rc == 0:
-        print(f"  {green('sentence-transformers already installed — skipping.')}")
-        # Still restart in case the service crashed on first boot
-        run_command(
-            compose_cmd() + ["restart", "segnog"],
-            description="Restarting container to load embedding library",
-        )
-        return
-
-    # Install CPU-only torch first, then sentence-transformers
-    run_command(
-        compose_cmd()
-        + [
-            "exec",
-            "segnog",
-            "pip",
-            "install",
-            "--no-cache-dir",
-            "torch",
-            "--index-url",
-            "https://download.pytorch.org/whl/cpu",
-        ],
-        description="Installing CPU-only PyTorch",
-    )
-
-    rc = run_command(
-        compose_cmd()
-        + [
-            "exec",
-            "segnog",
-            "pip",
-            "install",
-            "--no-cache-dir",
-            "sentence-transformers>=3.0.0",
-        ],
-        description="Installing sentence-transformers in container",
-    )
-    if rc != 0:
-        print(f"  {yellow('Warning: pip install failed. Local embeddings may not work.')}")
-        print(
-            f"  {dim('You can retry later: docker compose exec segnog pip install sentence-transformers')}"
-        )
-    else:
-        print(f"  {green('Local embedding dependencies installed.')}")
-        # Restart the container so the service picks up the new package
-        run_command(
-            compose_cmd() + ["restart", "segnog"],
-            description="Restarting container to load embedding library",
-        )
-
-
 def run_interactive(skip_pull=False):
     """Run the full interactive setup wizard."""
     print(f"\n{bold('========================================')}")
@@ -770,10 +701,6 @@ def run_interactive(skip_pull=False):
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
 
-    # ── Install local embedding deps if needed ──
-    if embed_backend == "local":
-        install_local_embed_deps()
-
     # ── Health Check + Post-Deploy Validation ──
     health_timeout = 600 if embed_backend == "local" else 90
     print(f"\n  {dim(f'Waiting for service (timeout {health_timeout}s)...')}")
@@ -865,9 +792,6 @@ def run_quick(skip_pull=False, hf_token="", llm_key="", llm_url="", llm_model=""
     if not start_containers():
         print(f"  {red('Failed to start containers.')}")
         sys.exit(1)
-
-    if local_embed:
-        install_local_embed_deps()
 
     health_timeout = 600 if local_embed else 90
     if wait_for_health(rest_port, timeout=health_timeout):

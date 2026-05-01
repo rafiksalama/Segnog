@@ -77,48 +77,14 @@ COPY settings.toml ./
 # ── Copy built UI ─────────────────────────────────────────────────────────
 COPY --from=ui-builder /ui/dist /app/ui/dist
 
-# ── Data directories (local — mmap doesn't work over SMB Azure Files) ───
-# /data/*  = local container filesystem (fast, mmap-safe)
-# /backup/* = Azure Files mount (used for sync on start/stop)
-RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /backup/dragonfly /backup/falkordb /backup/nats /var/log/supervisor
+# ── Entrypoint + eventlistener stub ───────────────────────────────────────
+COPY entrypoint.sh /app/entrypoint.sh
+COPY sync-data.sh /app/sync-data.sh
+RUN chmod +x /app/entrypoint.sh /app/sync-data.sh
 
-# ── Sync script (called by supervisord on shutdown) ──────────────────────
-COPY <<'SYNC' /app/sync-data.sh
-#!/bin/bash
-echo "[sync] Syncing /data to /backup..."
-for svc in dragonfly falkordb nats; do
-  if [ -d "/data/$svc" ] && [ "$(ls -A /data/$svc 2>/dev/null)" ]; then
-    mkdir -p /backup/$svc
-    cp -a /data/$svc/. /backup/$svc/ 2>/dev/null || true
-    echo "[sync] $svc done"
-  fi
-done
-echo "[sync] Complete."
-SYNC
-RUN chmod +x /app/sync-data.sh
-
-# ── Entrypoint wrapper (restore on start only, exec supervisord) ────────
-COPY <<'ENTRYPOINT' /app/entrypoint.sh
-#!/bin/bash
-set -e
-
-# Clean local data dirs to prevent crash loops
-for svc in dragonfly falkordb nats; do
-  rm -rf /data/$svc/* 2>/dev/null || true
-done
-
-# Restore from Azure Files backup
-echo "[entrypoint] Restoring from /backup..."
-for svc in dragonfly falkordb nats; do
-  if [ -d "/backup/$svc" ] && [ "$(ls -A /backup/$svc 2>/dev/null)" ]; then
-    cp -a /backup/$svc/. /data/$svc/ 2>/dev/null || true
-    echo "[entrypoint]   $svc restored"
-  fi
-done
-echo "[entrypoint] Starting supervisord..."
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/segnog.conf
-ENTRYPOINT
-RUN chmod +x /app/entrypoint.sh
+# ── Data directories + pip-install volume mount point ──────────────────────
+RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /var/log/supervisor /pip-install
+ENV PYTHONPATH="/pip-install"
 
 # ── Supervisord config ────────────────────────────────────────────────────
 COPY <<'EOF' /etc/supervisor/conf.d/segnog.conf
@@ -168,7 +134,7 @@ stdout_logfile=/dev/fd/1
 stdout_logfile_maxbytes=0
 stderr_logfile=/dev/fd/2
 stderr_logfile_maxbytes=0
-environment=MEMORY_SERVICE_DRAGONFLY__URL="redis://localhost:6381",MEMORY_SERVICE_FALKORDB__URL="redis://localhost:6380",MEMORY_SERVICE_NATS__URL="nats://localhost:4222",MEMORY_SERVICE_NATS__ENABLED="true"
+environment=MEMORY_SERVICE_DRAGONFLY__URL="redis://localhost:6381",MEMORY_SERVICE_FALKORDB__URL="redis://localhost:6380",MEMORY_SERVICE_NATS__URL="nats://localhost:4222",MEMORY_SERVICE_NATS__ENABLED="true",PYTHONPATH="/pip-install"
 
 [eventlistener:sync-on-exit]
 command=/app/sync-data.sh
@@ -185,7 +151,7 @@ EOF
 EXPOSE 50051 9000
 
 # Persist database state via Azure Files (mounted at /backup/*)
-VOLUME ["/backup/dragonfly", "/backup/falkordb", "/backup/nats"]
+VOLUME ["/backup/dragonfly", "/backup/falkordb", "/backup/nats", "/pip-install"]
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')" || exit 1
