@@ -1,6 +1,6 @@
 services:
   segnog:
-    image: ghcr.io/rafiksalama/segnog:latest
+    image: rafiksalama/segnog:latest
     ports:
       - "${GRPC_PORT:-50051}:50051"
       - "${PORT:-9000}:9000"
