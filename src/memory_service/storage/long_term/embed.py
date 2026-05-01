@@ -50,9 +50,7 @@ def embed_single(text: str, model_name: str = "all-MiniLM-L6-v2") -> List[float]
     return vec[0].tolist()
 
 
-def embed_batch(
-    texts: List[str], model_name: str = "all-MiniLM-L6-v2"
-) -> List[List[float]]:
+def embed_batch(texts: List[str], model_name: str = "all-MiniLM-L6-v2") -> List[List[float]]:
     """Synchronous batch embedding. Returns list[list[float]]."""
     if not texts:
         return []
@@ -61,17 +59,13 @@ def embed_batch(
     return [v.tolist() for v in vecs]
 
 
-async def aembed_single(
-    text: str, model_name: str = "all-MiniLM-L6-v2"
-) -> List[float]:
+async def aembed_single(text: str, model_name: str = "all-MiniLM-L6-v2") -> List[float]:
     """Async wrapper for single embedding (runs in thread pool)."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, embed_single, text, model_name)
 
 
-async def aembed_batch(
-    texts: List[str], model_name: str = "all-MiniLM-L6-v2"
-) -> List[List[float]]:
+async def aembed_batch(texts: List[str], model_name: str = "all-MiniLM-L6-v2") -> List[List[float]]:
     """Async wrapper for batch embedding (runs in thread pool)."""
     if not texts:
         return []

@@ -512,13 +512,19 @@ def run_post_deploy_checks(port):
 # ── Interactive Wizard ─────────────────────────────────────────────────────
 def install_local_embed_deps():
     """Install sentence-transformers inside the running container and restart the service."""
-    print(f"\n  {cyan('Installing local embedding dependencies (torch + sentence-transformers)...')}")
+    print(
+        f"\n  {cyan('Installing local embedding dependencies (torch + sentence-transformers)...')}"
+    )
     print(f"  {dim('This is a one-time install. It will persist across container restarts.')}")
 
     # Check if already installed
     check_rc = run_command(
-        compose_cmd() + [
-            "exec", "segnog", "python", "-c",
+        compose_cmd()
+        + [
+            "exec",
+            "segnog",
+            "python",
+            "-c",
             "import sentence_transformers",
         ],
         description="Checking if sentence-transformers is already installed",
@@ -534,23 +540,37 @@ def install_local_embed_deps():
 
     # Install CPU-only torch first, then sentence-transformers
     run_command(
-        compose_cmd() + [
-            "exec", "segnog", "pip", "install", "--no-cache-dir",
-            "torch", "--index-url", "https://download.pytorch.org/whl/cpu",
+        compose_cmd()
+        + [
+            "exec",
+            "segnog",
+            "pip",
+            "install",
+            "--no-cache-dir",
+            "torch",
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
         ],
         description="Installing CPU-only PyTorch",
     )
 
     rc = run_command(
-        compose_cmd() + [
-            "exec", "segnog", "pip", "install", "--no-cache-dir",
+        compose_cmd()
+        + [
+            "exec",
+            "segnog",
+            "pip",
+            "install",
+            "--no-cache-dir",
             "sentence-transformers>=3.0.0",
         ],
         description="Installing sentence-transformers in container",
     )
     if rc != 0:
         print(f"  {yellow('Warning: pip install failed. Local embeddings may not work.')}")
-        print(f"  {dim('You can retry later: docker compose exec segnog pip install sentence-transformers')}")
+        print(
+            f"  {dim('You can retry later: docker compose exec segnog pip install sentence-transformers')}"
+        )
     else:
         print(f"  {green('Local embedding dependencies installed.')}")
         # Restart the container so the service picks up the new package
@@ -817,9 +837,7 @@ def run_quick(skip_pull=False, hf_token="", llm_key="", llm_url="", llm_model=""
     # Get HF token from CLI arg, .env, or shell environment for local embedding
     existing_env = load_existing_env()
     resolved_hf_token = (
-        hf_token
-        or existing_env.get("HF_TOKEN", "")
-        or os.environ.get("HF_TOKEN", "")
+        hf_token or existing_env.get("HF_TOKEN", "") or os.environ.get("HF_TOKEN", "")
     )
 
     if not resolved_llm_key:
@@ -876,7 +894,9 @@ def main():
     parser.add_argument("--skip-pull", action="store_true", help="Skip Docker image pull")
     parser.add_argument("--hf-token", default="", help="HuggingFace token for gated models")
     parser.add_argument("--llm-key", default="", help="LLM provider API key")
-    parser.add_argument("--llm-url", default="", help="LLM provider base URL (e.g. https://api.openai.com/v1)")
+    parser.add_argument(
+        "--llm-url", default="", help="LLM provider base URL (e.g. https://api.openai.com/v1)"
+    )
     parser.add_argument("--llm-model", default="", help="LLM model name (e.g. gpt-4o)")
     parser.add_argument("--stop", action="store_true", help="Stop running containers")
     parser.add_argument("--status", action="store_true", help="Show container status")

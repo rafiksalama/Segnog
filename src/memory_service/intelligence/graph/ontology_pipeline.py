@@ -12,7 +12,6 @@ Two extraction passes:
   Pass 2 (multi-episode, batch_size=N): Cross-episode extraction from combined text
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Set
 
@@ -78,7 +77,10 @@ async def _extract_and_store_batch(
     except Exception as e:
         logger.error(
             "Ontology 8a [%s]: entity extraction failed for '%s': %s",
-            batch_label, group_id, e, exc_info=True,
+            batch_label,
+            group_id,
+            e,
+            exc_info=True,
         )
         raise
 
@@ -128,7 +130,9 @@ async def _extract_and_store_batch(
                 "Ontology 8b [%s]: upserted '%s' (%s)", batch_label, display_name, schema_type
             )
         except Exception as e:
-            logger.warning("Ontology 8b [%s]: upsert failed for '%s': %s", batch_label, display_name, e)
+            logger.warning(
+                "Ontology 8b [%s]: upsert failed for '%s': %s", batch_label, display_name, e
+            )
 
     # ── Relationships: extract → store immediately ──
     try:
@@ -178,9 +182,7 @@ async def _extract_and_store_batch(
                 except Exception:
                     pass
             if stored_claims:
-                logger.info(
-                    "Ontology 8e [%s]: stored %d causal claims", batch_label, stored_claims
-                )
+                logger.info("Ontology 8e [%s]: stored %d causal claims", batch_label, stored_claims)
         except Exception as e:
             logger.warning("Ontology 8e [%s]: causal extraction failed: %s", batch_label, e)
 
@@ -195,7 +197,9 @@ async def _extract_and_store_batch(
 
     logger.info(
         "Ontology 8 [%s]: %d entities, %d relationships, done",
-        batch_label, len(new_entity_norms), len(new_relationships),
+        batch_label,
+        len(new_entity_norms),
+        len(new_relationships),
     )
 
 

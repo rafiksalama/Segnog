@@ -820,6 +820,7 @@ async def create_episode_store(
 
     if local_embed:
         from .embed import get_local_embedder
+
         get_local_embedder(embedding_model)
         openai_client = None
     else:

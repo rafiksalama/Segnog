@@ -121,7 +121,9 @@ async def init_backends(session_ttl: int = 3600) -> dict:
     artifact_store = ArtifactStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await artifact_store.ensure_indexes()
 
-    ontology_store = OntologyStore(graph, openai_client, embedding_model, schema_ontology, local_embed=local_embed)
+    ontology_store = OntologyStore(
+        graph, openai_client, embedding_model, schema_ontology, local_embed=local_embed
+    )
     await ontology_store.ensure_indexes()
 
     causal_store = CausalClaimStore(graph, openai_client, embedding_model, local_embed=local_embed)
