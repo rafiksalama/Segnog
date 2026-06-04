@@ -303,6 +303,61 @@ class CausalClaimStore(BaseStore):
             logger.debug("auto_chain failed: %s", e)
             return 0
 
+    async def auto_chain_embedding(
+        self, group_id: Optional[str] = None, threshold: float = 0.7
+    ) -> int:
+        """Chain claims via embedding similarity: A's embedding ≈ B's embedding.
+
+        Creates CAUSES_EMB edges when the composite embedding of one claim
+        is semantically similar to another's, regardless of entity overlap.
+        Processes per-group to avoid O(n²) all-pairs blowup.
+        """
+        total = 0
+        gid = group_id or self._group_id
+        if gid:
+            groups = [gid]
+        else:
+            # Discover distinct group_ids
+            dist = await self._graph.ro_query(
+                "MATCH (c:CausalClaim) WHERE c.status <> 'refuted' "
+                "RETURN DISTINCT c.group_id AS gid"
+            )
+            groups = [r[0] for r in (dist.result_set or []) if r[0]]
+        for group in groups:
+            try:
+                result = await self._graph.query(
+                    """
+                    MATCH (a:CausalClaim), (b:CausalClaim)
+                    WHERE a.group_id = $gid AND b.group_id = $gid
+                      AND a.uuid <> b.uuid
+                      AND a.status <> 'refuted'
+                      AND b.status <> 'refuted'
+                    WITH a, b,
+                         (2 - vec.cosineDistance(a.embedding, b.embedding)) / 2 AS score
+                    WHERE score >= $threshold
+                    MERGE (a)-[r:CAUSES_EMB]->(b)
+                    ON CREATE SET r.provenance = 'embedding', r.score = score, r.created_at = $now
+                    RETURN count(*) AS created
+                    """,
+                    params={"gid": group, "threshold": threshold, "now": time.time()},
+                )
+                created = result.result_set[0][0] if result.result_set else 0
+                total += created
+                if created:
+                    logger.info(
+                        "Auto-chained %d CAUSES_EMB edges for group %s (threshold=%.2f)",
+                        created,
+                        group,
+                        threshold,
+                    )
+            except Exception as e:
+                logger.debug("auto_chain_embedding failed for group %s: %s", group, e)
+        if total:
+            logger.info(
+                "Auto-chained %d total CAUSES_EMB edges across %d groups", total, len(groups)
+            )
+        return total
+
     # ------------------------------------------------------------------
     # Read: get single claim
     # ------------------------------------------------------------------

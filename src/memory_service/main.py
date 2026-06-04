@@ -191,21 +191,33 @@ async def main():
                 make_causals_handler(backends.get("causal_store")),
                 "memory.pipeline.causals.*",
             ),
-            AsyncWorker(
-                "ontology",
-                nats_client,
-                make_ontology_handler(
-                    backends.get("ontology_store"),
-                    backends.get("causal_store"),
-                    backends["episode_store"],
-                ),
-                "memory.pipeline.ontology.*",
-                ack_wait=600,  # ontology pipeline can be slow
-            ),
         ]
         for pw in pipeline_workers:
             tasks.append(pw.run())
-        logger.info("NATS pipeline workers enabled (artifacts + causals + ontology)")
+
+        # Ontology worker: priority-aware (fast coverage + normal deepening)
+        from .workflows.fast_ontology_workflow import make_fast_ontology_handler
+        from .workers.pipeline_worker import PriorityAsyncWorker
+
+        ontology_worker = PriorityAsyncWorker(
+            name="ontology",
+            nats_client=nats_client,
+            fast_handler=make_fast_ontology_handler(
+                backends.get("ontology_store"),
+                backends.get("causal_store"),
+                backends["episode_store"],
+            ),
+            normal_handler=make_ontology_handler(
+                backends.get("ontology_store"),
+                backends.get("causal_store"),
+                backends["episode_store"],
+            ),
+            fast_subject="memory.pipeline.ontology_fast.*",
+            normal_subject="memory.pipeline.ontology.*",
+            ack_wait=600,
+        )
+        tasks.append(ontology_worker.run())
+        logger.info("NATS pipeline workers enabled (artifacts + causals + ontology [priority])")
 
     elif get_background_enabled():
         # Fallback: traditional polling-based REM worker

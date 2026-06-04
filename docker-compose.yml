@@ -7,7 +7,6 @@ services:
     environment:
       - MEMORY_SERVICE_REST__HOST=0.0.0.0
       - MEMORY_SERVICE_REST__PORT=9000
-      - MEMORY_SERVICE_EMBEDDINGS__API_KEY=${EMBEDDINGS_API_KEY}
       - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
     volumes:
@@ -15,6 +14,7 @@ services:
       - falkordb_data:/data/falkordb
       - nats_data:/data/nats
       - pip_packages:/pip-install
+      - hf_cache:/root/.cache/huggingface
       - ./settings.toml:/app/settings.toml:ro
     restart: unless-stopped
 
@@ -23,3 +23,4 @@ volumes:
   falkordb_data:
   nats_data:
   pip_packages:
+  hf_cache:

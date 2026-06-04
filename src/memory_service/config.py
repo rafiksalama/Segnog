@@ -304,3 +304,9 @@ def get_pipeline_hebbian_reinforcement() -> bool:
     """Run Hebbian co-activation reinforcement after retrieval."""
     s = get_settings()
     return bool(s.get("pipeline.hebbian_reinforcement", True))
+
+
+def get_allow_global_search() -> bool:
+    """Allow search without group_id (cross-group/global). False = enforce isolation."""
+    s = get_settings()
+    return bool(s.get("security.allow_global_search", True))

@@ -1,6 +1,6 @@
 """Episodes router — store, search, and link episodes in FalkorDB."""
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..dto.episodes import (
     StoreEpisodeRequest,
@@ -14,6 +14,7 @@ from ..dto.episodes import (
     LinkEpisodesResponse,
 )
 from ..dependencies import get_service
+from ....config import get_allow_global_search
 
 router = APIRouter()
 
@@ -34,6 +35,10 @@ async def store_episode(body: StoreEpisodeRequest, request: Request):
 async def search_episodes(body: SearchEpisodesRequest, request: Request):
     svc = get_service(request)
     do_global = body.global_search or body.group_id is None
+    if do_global and not get_allow_global_search():
+        raise HTTPException(
+            status_code=400, detail="Global search is disabled. Provide a group_id."
+        )
     raw = await svc.search_episodes(
         group_id=body.group_id or "default",
         query=body.query,
@@ -109,6 +114,11 @@ async def list_reflections(
     """
     svc = get_service(request)
     gid = group_id or None
+
+    if gid is None and not get_allow_global_search():
+        raise HTTPException(
+            status_code=400, detail="Global search is disabled. Provide a group_id."
+        )
 
     # If a specific type is requested, use it directly; otherwise search all reflection types
     if reflection_type and reflection_type in _REFLECTION_TYPES:

@@ -273,3 +273,187 @@ async def update_group_ontology(
             logger.warning("Ontology 8: belief revision failed for '%s': %s", group_id, e)
 
     logger.info("Ontology 8: complete for group '%s'", group_id)
+
+
+# ---------------------------------------------------------------------------
+# Fast coverage pipeline — separate from full pipeline, no flags
+# ---------------------------------------------------------------------------
+
+
+async def fast_coverage_ontology(
+    ontology_store,
+    group_id: str,
+    episodes: List[Dict[str, Any]],
+    combined_text: str,
+    causal_store=None,
+) -> None:
+    """Fast coverage pipeline: Pass 2 only, auto summaries.
+
+    Creates OntologyNodes + RELATES edges + CausalClaims for a group.
+    ABOUT edges are created separately via create_about_edges_by_similarity().
+    """
+    from ..extract.entities import extract_entities
+    from ..extract.relationships import extract_relationships
+    from ...ontology.names import normalize_name
+    from ...config import get_ontology_extraction_window_size
+
+    logger.info(
+        "Fast ontology: starting for group '%s' with %d episodes",
+        group_id,
+        len(episodes),
+    )
+
+    window_size = get_ontology_extraction_window_size()
+    seen_names: Set[str] = set()
+
+    # Pass 2 only — no per-episode extraction
+    if len(episodes) >= 2:
+        for batch_start in range(0, len(episodes), window_size):
+            batch = episodes[batch_start : batch_start + window_size]
+            if len(batch) < 2:
+                continue
+            content = _batch_content(batch)
+            if not content or len(content.strip()) < 20:
+                continue
+
+            label = f"fast/win{batch_start // window_size}"
+
+            # Entities → upsert with auto-generated summary (no LLM)
+            try:
+                entities = await extract_entities(content)
+            except Exception as e:
+                logger.error("Fast ontology [%s]: entity extraction failed: %s", label, e)
+                continue
+
+            entity_count = 0
+            for ent in entities:
+                raw_name = ent.get("name")
+                if not raw_name:
+                    continue
+                norm = normalize_name(raw_name)
+                if not norm:
+                    continue
+                if raw_name.lower() in seen_names:
+                    continue
+                seen_names.add(raw_name.lower())
+
+                schema_type = ent.get("schema_type", "Thing")
+                if schema_type in _IMAGE_TYPES:
+                    continue
+                if len(raw_name.split()) > get_ontology_entity_max_name_words():
+                    continue
+
+                summary = f"{raw_name} ({schema_type})"
+                try:
+                    await ontology_store.upsert_node(
+                        name=raw_name,
+                        schema_type=schema_type,
+                        display_name=raw_name,
+                        summary=summary,
+                        group_id=group_id,
+                    )
+                    entity_count += 1
+                except Exception as e:
+                    logger.warning(
+                        "Fast ontology [%s]: upsert failed for '%s': %s", label, raw_name, e
+                    )
+
+            # Relationships → RELATES edges
+            rel_count = 0
+            try:
+                rels = await extract_relationships(content)
+                for rel in rels:
+                    try:
+                        ok = await ontology_store.store_relates(
+                            subject_norm=rel["subject_norm"],
+                            predicate=rel["predicate"],
+                            object_norm=rel["object_norm"],
+                            group_id=group_id,
+                            confidence=rel.get("confidence", 1.0),
+                        )
+                        if ok:
+                            rel_count += 1
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning("Fast ontology [%s]: relationship extraction failed: %s", label, e)
+
+            # Causal claims
+            claim_count = 0
+            if causal_store is not None:
+                try:
+                    from ..extract.causals import extract_causal_claims
+
+                    claims = await extract_causal_claims(content)
+                    for claim in claims:
+                        try:
+                            await causal_store.upsert_claim(
+                                cause_summary=claim["cause"],
+                                effect_summary=claim["effect"],
+                                mechanism=claim.get("mechanism", ""),
+                                confidence=claim.get("confidence", 0.8),
+                                causal_type=claim.get("causal_type", "causes"),
+                                cause_entity=claim.get("cause_norm"),
+                                effect_entity=claim.get("effect_norm"),
+                                group_id=group_id,
+                            )
+                            claim_count += 1
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.warning("Fast ontology [%s]: causal extraction failed: %s", label, e)
+
+            logger.info(
+                "Fast ontology [%s]: %d entities, %d relationships, %d claims",
+                label,
+                entity_count,
+                rel_count,
+                claim_count,
+            )
+
+    # Causal post-processing
+    if causal_store is not None:
+        try:
+            await causal_store.revise_beliefs(group_id)
+            await causal_store.auto_chain(group_id)
+        except Exception as e:
+            logger.warning("Fast ontology: belief revision failed for '%s': %s", group_id, e)
+
+    logger.info("Fast ontology: complete for group '%s'", group_id)
+
+
+async def create_about_edges_by_similarity(
+    group_id: str,
+    ontology_store,
+    min_score: float = 0.5,
+) -> int:
+    """Create ABOUT edges by embedding cosine similarity.
+
+    Pure FalkorDB operation — both Episodes and OntologyNodes already
+    have embeddings stored. Uses vec.cosineDistance for semantic matching.
+    """
+    try:
+        result = await ontology_store._graph.query(
+            """
+            MATCH (e:Episode {group_id: $group_id})
+            WHERE e.embedding IS NOT NULL
+            MATCH (n:OntologyNode)
+            WHERE n.embedding IS NOT NULL
+            WITH e, n, (2 - vec.cosineDistance(e.embedding, n.embedding)) / 2 AS score
+            WHERE score >= $min_score
+            MERGE (e)-[:ABOUT]->(n)
+            RETURN count(*) AS created
+            """,
+            params={"group_id": group_id, "min_score": min_score},
+        )
+        created = result.result_set[0][0] if result.result_set else 0
+        if created:
+            logger.info(
+                "Post-hoc ABOUT edges: %d created for group '%s'",
+                created,
+                group_id,
+            )
+        return created
+    except Exception as e:
+        logger.warning("Post-hoc ABOUT edges failed for '%s': %s", group_id, e)
+        return 0

@@ -1,6 +1,6 @@
 """Knowledge router — store and search knowledge in FalkorDB."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ..dto.knowledge import (
     StoreKnowledgeRequest,
@@ -11,6 +11,7 @@ from ..dto.knowledge import (
     SearchByLabelsRequest,
 )
 from ..dependencies import get_service, parse_json_labels
+from ....config import get_allow_global_search
 
 router = APIRouter()
 
@@ -31,6 +32,10 @@ async def store_knowledge(body: StoreKnowledgeRequest, request: Request):
 
 @router.post("/knowledge/search", response_model=SearchKnowledgeResponse)
 async def search_knowledge(body: SearchKnowledgeRequest, request: Request):
+    if body.group_id is None and not get_allow_global_search():
+        raise HTTPException(
+            status_code=400, detail="Global search is disabled. Provide a group_id."
+        )
     svc = get_service(request)
     raw = await svc.search_knowledge(
         group_id=body.group_id,

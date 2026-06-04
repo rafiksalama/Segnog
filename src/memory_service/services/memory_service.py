@@ -12,6 +12,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from ..config import get_allow_global_search
+
 logger = logging.getLogger(__name__)
 
 _STEP_TIMEOUT = 60  # seconds — max wall-clock per LLM step
@@ -105,6 +107,8 @@ class MemoryService:
         before_time: Optional[float] = None,
         global_search: bool = False,
     ) -> List[Dict[str, Any]]:
+        if global_search and not get_allow_global_search():
+            global_search = False
         return await self._ep(group_id).search_episodes(
             query=query,
             top_k=top_k,
@@ -441,7 +445,7 @@ class MemoryService:
                 query=search_query,
                 top_k=10,
                 min_score=0.55,
-                global_search=True,  # search across ALL sessions
+                global_search=get_allow_global_search(),
             )
             if results:
                 lines = ["## Related Memory (Episode Search)"]
@@ -525,6 +529,8 @@ class MemoryService:
 
         async def _search_reflections():
             """Search metacognition, causal_reflection, and reflection episodes globally."""
+            if not get_allow_global_search():
+                return ""
             try:
                 embedding = await ep_store._embed(search_query)
                 result = await ep_store._graph.ro_query(

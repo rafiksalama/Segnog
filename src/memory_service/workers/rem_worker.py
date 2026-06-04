@@ -105,13 +105,46 @@ class REMWorker:
 
     async def _find_pending_groups(self) -> List[Dict[str, Any]]:
         """
-        Discover groups with new pending raw episodes since last sweep.
+        Two-phase group discovery: priority (no ontology) → normal (has ontology).
 
-        Only considers episodes created after the last sweep timestamp,
-        ensuring each cycle processes only newly-arrived episodes.
-        Priority = raw_count * 0.5 + age_hours * 0.5.
+        Phase 1 — Priority: groups with pending episodes AND no ABOUT edges.
+        Phase 2 — Normal: groups with pending episodes that already have ABOUT edges.
+        """
+        limit = self._batch_size
+
+        # Phase 1: Priority — groups with NO ontology data
+        priority = await self._query_pending_groups(has_ontology=False, limit=limit)
+        for g in priority:
+            g["is_priority"] = True
+
+        if len(priority) >= limit:
+            return priority[:limit]
+
+        # Phase 2: Normal — groups with existing ontology data
+        remaining = limit - len(priority)
+        normal = await self._query_pending_groups(has_ontology=True, limit=remaining)
+        return priority + normal
+
+    async def _query_pending_groups(self, has_ontology: bool, limit: int) -> List[Dict[str, Any]]:
+        """Query pending groups filtered by ontology data existence.
+
+        Uses two-step approach: find groups with ABOUT edges first,
+        then filter pending groups accordingly.
         """
         now = time.time()
+
+        # Step 1: Get set of group_ids that have ABOUT edges
+        try:
+            about_result = await self._episode_store._graph.ro_query(
+                """MATCH (e:Episode)-[:ABOUT]->(:OntologyNode)
+                RETURN DISTINCT e.group_id AS gid""",
+            )
+            groups_with_ontology = {row[0] for row in about_result.result_set if row[0]}
+        except Exception as e:
+            logger.warning(f"REM ontology check failed: {e}")
+            groups_with_ontology = set()
+
+        # Step 2: Get all pending groups
         cypher = """
             MATCH (e:Episode)
             WHERE e.consolidation_status = 'pending'
@@ -129,7 +162,7 @@ class REMWorker:
                 params={
                     "since_ts": self._last_sweep_ts,
                     "min_episodes": self._min_episodes,
-                    "limit": self._batch_size * 3,
+                    "limit": limit,
                 },
             )
         except Exception as e:
@@ -140,6 +173,12 @@ class REMWorker:
         for row in result.result_set:
             gid, raw_count, oldest_ts = row[0], row[1], row[2]
             if not gid:
+                continue
+            # Filter by ontology existence
+            has_about = gid in groups_with_ontology
+            if has_ontology and not has_about:
+                continue
+            if not has_ontology and has_about:
                 continue
             age_hours = (now - (oldest_ts or now)) / 3600
             score = (raw_count * 0.5) + (age_hours * 0.5)
@@ -152,7 +191,7 @@ class REMWorker:
             )
 
         groups.sort(key=lambda x: x["score"], reverse=True)
-        return groups[: self._batch_size]
+        return groups
 
     async def _consolidate_group(self, group_info: dict) -> dict:
         """
@@ -165,6 +204,7 @@ class REMWorker:
         5. Temporal compression of unique episodes
         """
         group_id = group_info["group_id"]
+        is_priority = group_info.get("is_priority", False)
 
         # Fetch pending raw episodes with embeddings, oldest first
         cypher = """
@@ -246,7 +286,9 @@ class REMWorker:
         # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
         # CRITICAL: failure halts consolidation — episodes stay 'pending' for retry
         if self._ontology_store is not None:
-            await self._update_ontology(group_id, unique_episodes, combined_content)
+            await self._update_ontology(
+                group_id, unique_episodes, combined_content, is_priority=is_priority
+            )
 
         consolidated_count = await self._episode_store.mark_episodes_consolidated(source_uuids)
 
@@ -268,18 +310,38 @@ class REMWorker:
         }
 
     async def _update_ontology(
-        self, group_id: str, unique_episodes: list, combined_text: str
+        self,
+        group_id: str,
+        unique_episodes: list,
+        combined_text: str,
+        is_priority: bool = False,
     ) -> None:
         """Step 8: Update OntologyStore from consolidated episode text."""
-        from ..intelligence.graph.ontology_pipeline import update_group_ontology
+        if is_priority:
+            from ..intelligence.graph.ontology_pipeline import fast_coverage_ontology
 
-        await update_group_ontology(
-            ontology_store=self._ontology_store,
-            group_id=group_id,
-            episodes=unique_episodes,
-            combined_text=combined_text,
-            causal_store=self._causal_store,
-        )
+            logger.info("Using FAST coverage pipeline for %s (no ontology data yet)", group_id)
+            await fast_coverage_ontology(
+                ontology_store=self._ontology_store,
+                group_id=group_id,
+                episodes=unique_episodes,
+                combined_text=combined_text,
+                causal_store=self._causal_store,
+            )
+            # Post-hoc ABOUT edges via embedding similarity
+            from ..intelligence.graph.ontology_pipeline import create_about_edges_by_similarity
+
+            await create_about_edges_by_similarity(group_id, self._ontology_store)
+        else:
+            from ..intelligence.graph.ontology_pipeline import update_group_ontology
+
+            await update_group_ontology(
+                ontology_store=self._ontology_store,
+                group_id=group_id,
+                episodes=unique_episodes,
+                combined_text=combined_text,
+                causal_store=self._causal_store,
+            )
 
     async def _find_similar_consolidated(
         self, group_id: str, embedding: list, threshold: float

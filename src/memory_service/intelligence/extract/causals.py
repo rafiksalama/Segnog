@@ -54,9 +54,7 @@ async def extract_causal_claims(
     if not content or len(content.strip()) < 20:
         return []
 
-    MAX_INPUT = 16000
-    if len(content) > MAX_INPUT:
-        content = content[:MAX_INPUT]
+    # No truncation — LLM can handle full window content
 
     try:
         raw = await llm_call(

@@ -130,3 +130,50 @@ async def search_chain(
         chain = [claims[0]]
 
     return {"seed": seed_uuid, "chain": chain}
+
+
+@router.get("/causal/chain/embedding")
+async def search_chain_embedding(
+    request: Request,
+    group_id: str = Query(""),
+    query: str = Query(""),
+):
+    """Find the most relevant causal claim and traverse its CAUSES_EMB chain."""
+    store = _get_causal_store(request)
+    embedding = await store._embed(query)
+    claims = await store.search_claims(
+        embedding=embedding,
+        top_k=1,
+        group_id=group_id or None,
+        min_score=0.3,
+    )
+    if not claims:
+        return {"chain": []}
+
+    seed_uuid = claims[0]["uuid"]
+    try:
+        result = await store._graph.ro_query(
+            """
+            MATCH path = (seed:CausalClaim {uuid: $uuid})-[:CAUSES_EMB*0..10]->(c:CausalClaim)
+            WITH c, length(path) AS depth
+            RETURN DISTINCT c.uuid AS uuid, c.cause_summary AS cause_summary,
+                   c.effect_summary AS effect_summary, c.mechanism AS mechanism,
+                   c.confidence AS confidence, c.status AS status, depth
+            ORDER BY depth
+            """,
+            params={"uuid": seed_uuid},
+        )
+        chain = store._parse_results(result)
+    except Exception as e:
+        logger.warning("Embedding chain traversal failed: %s", e)
+        chain = [claims[0]]
+
+    return {"seed": seed_uuid, "chain": chain}
+
+
+@router.post("/causal/chain/embedding/build")
+async def build_embedding_chain(request: Request, threshold: float = Query(0.7)):
+    """Build CAUSES_EMB edges between semantically similar claims."""
+    store = _get_causal_store(request)
+    created = await store.auto_chain_embedding(threshold=threshold)
+    return {"created": created}
