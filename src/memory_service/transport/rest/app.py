@@ -122,6 +122,7 @@ def create_app() -> FastAPI:
         all_ok = all(checks.values())
         return {
             "status": "ok" if all_ok else "degraded",
+            "version": "racefix-b79928f",
             "service": "agent-memory-service",
             "checks": checks,
         }
