@@ -292,8 +292,8 @@ class MemoryService:
         from .observe import observe_core
 
         return await observe_core(
-            episode_store=self._episode_store,
-            knowledge_store=self._knowledge_store,
+            episode_store=self._ep(session_id),
+            knowledge_store=self._kn(session_id),
             dragonfly=self._dragonfly,
             ontology_store=self._ontology_store,
             session_id=session_id,

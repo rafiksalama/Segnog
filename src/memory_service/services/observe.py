@@ -722,41 +722,32 @@ async def observe_core(
     FalkorDB and ancestor context is included in all FalkorDB searches
     (inherited scope: current session + all ancestors).
     """
-    # Scope
-    episode_store._group_id = session_id
-    knowledge_store._group_id = session_id
-
+    # Scope: _group_id already set by MemoryService._ep()/_kn() scoped copies.
     # Resolve inherited scope (current session + all ancestors).
-    # Always reset _scope_group_ids on exit so subsequent requests from other
-    # sessions (e.g. direct /knowledge/search calls) are not polluted.
     ancestor_ids = await episode_store.get_ancestor_session_ids(session_id)
     scope_ids = [session_id] + ancestor_ids
     episode_store._scope_group_ids = scope_ids if len(scope_ids) > 1 else None
     knowledge_store._scope_group_ids = scope_ids if len(scope_ids) > 1 else None
 
-    try:
-        return await _observe_core_inner(
-            episode_store=episode_store,
-            knowledge_store=knowledge_store,
-            dragonfly=dragonfly,
-            session_id=session_id,
-            content=content,
-            timestamp=timestamp,
-            source=source,
-            metadata=metadata,
-            read_only=read_only,
-            summarize=summarize,
-            top_k=top_k,
-            knowledge_top_k=knowledge_top_k,
-            minimal=minimal,
-            ontology_store=ontology_store,
-            ontology_top_k=ontology_top_k,
-            causal_store=causal_store,
-            parent_session_id=parent_session_id,
-        )
-    finally:
-        episode_store._scope_group_ids = None
-        knowledge_store._scope_group_ids = None
+    return await _observe_core_inner(
+        episode_store=episode_store,
+        knowledge_store=knowledge_store,
+        dragonfly=dragonfly,
+        session_id=session_id,
+        content=content,
+        timestamp=timestamp,
+        source=source,
+        metadata=metadata,
+        read_only=read_only,
+        summarize=summarize,
+        top_k=top_k,
+        knowledge_top_k=knowledge_top_k,
+        minimal=minimal,
+        ontology_store=ontology_store,
+        ontology_top_k=ontology_top_k,
+        causal_store=causal_store,
+        parent_session_id=parent_session_id,
+    )
 
 
 async def _observe_core_inner(
