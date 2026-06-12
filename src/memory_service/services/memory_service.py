@@ -291,6 +291,8 @@ class MemoryService:
     ) -> dict:
         from .observe import observe_core
 
+        # Use scoped copies to avoid race condition: concurrent observe calls
+        # from different sessions must not mutate the same shared store's _group_id.
         return await observe_core(
             episode_store=self._ep(session_id),
             knowledge_store=self._kn(session_id),
