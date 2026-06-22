@@ -98,6 +98,7 @@ class CausalClaimStore(BaseStore):
             MERGE (c:CausalClaim {merge_key: $merge_key})
             ON CREATE SET
                 c.uuid           = $uuid,
+                c.group_id       = $group_id,
                 c.cause_summary  = $cause_summary,
                 c.effect_summary = $effect_summary,
                 c.mechanism      = $mechanism,
@@ -110,6 +111,7 @@ class CausalClaimStore(BaseStore):
                 c.created_at     = $now,
                 c.updated_at     = $now
             ON MATCH SET
+                c.group_id       = coalesce(c.group_id, $group_id),
                 c.mechanism      = CASE WHEN size($mechanism) > size(coalesce(c.mechanism, ''))
                                         THEN $mechanism ELSE c.mechanism END,
                 c.confidence     = $confidence,
@@ -142,25 +144,65 @@ class CausalClaimStore(BaseStore):
 
         return claim_uuid
 
+    # Min cosine similarity to accept an embedding-resolved entity match.
+    _ENTITY_RESOLVE_THRESHOLD = 0.60
+
     async def _link_entity(
         self, claim_uuid: str, entity_name: str, edge_type: str, group_id: str
     ) -> None:
+        """Link a claim to an OntologyNode.
+
+        The causal extractor emits free-text cause/effect phrases that rarely
+        match a canonical OntologyNode.name exactly, so a hard name MATCH almost
+        always no-ops. We therefore: (1) try the exact normalized-name match;
+        (2) fall back to embedding resolution — link to the nearest OntologyNode
+        above a similarity threshold. If neither resolves, we skip (rather than
+        create a low-quality entity), but log at INFO so misses are visible.
+        """
         norm = normalize_name(entity_name)
+        link_cypher = f"""
+            MATCH (c:CausalClaim {{uuid: $claim_uuid}})
+            MATCH (n:OntologyNode {{name: $name}})
+            MERGE (c)-[:{edge_type}]->(n)
+            RETURN n.name AS name
+        """
+        # 1. exact normalized-name match
         try:
-            await self._graph.query(
-                f"""
-                MATCH (c:CausalClaim {{uuid: $claim_uuid}})
-                MATCH (n:OntologyNode {{name: $entity_name}})
-                MERGE (c)-[:{edge_type}]->(n)
-                """,
-                params={
-                    "claim_uuid": claim_uuid,
-                    "entity_name": norm,
-                    "group_id": group_id,
-                },
+            res = await self._graph.query(
+                link_cypher, params={"claim_uuid": claim_uuid, "name": norm}
             )
+            if self._parse_results(res):
+                return
         except Exception as e:
-            logger.debug("_link_entity %s failed: %s", edge_type, e)
+            logger.debug("_link_entity %s exact-match failed: %s", edge_type, e)
+
+        # 2. embedding resolution — nearest OntologyNode above threshold
+        try:
+            emb = await self._embed(entity_name)
+            res = await self._graph.ro_query(
+                """
+                MATCH (n:OntologyNode)
+                WHERE n.embedding IS NOT NULL
+                WITH n, (2 - vec.cosineDistance(n.embedding, vecf32($qvec))) / 2 AS s
+                WHERE s >= $thr
+                RETURN n.name AS name ORDER BY s DESC LIMIT 1
+                """,
+                params={"qvec": emb, "thr": self._ENTITY_RESOLVE_THRESHOLD},
+            )
+            rows = self._parse_results(res)
+            if rows:
+                target = rows[0]["name"]
+                await self._graph.query(
+                    link_cypher, params={"claim_uuid": claim_uuid, "name": target}
+                )
+                return
+        except Exception as e:
+            logger.debug("_link_entity %s embedding-resolve failed: %s", edge_type, e)
+
+        logger.info(
+            "_link_entity %s: no OntologyNode resolved for %r (claim %s)",
+            edge_type, entity_name, claim_uuid[:8],
+        )
 
     # ------------------------------------------------------------------
     # Write: add evidence
