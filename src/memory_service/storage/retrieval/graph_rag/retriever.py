@@ -1,9 +1,14 @@
 """Orchestrate causal-aware Graph RAG retrieval for knowledge search.
 
-Stages: vector seed (index-backed) + entity anchors -> bounded entity+causal
-subgraph -> seeded PPR -> map entity scores to Knowledge/CausalClaim
-candidates -> blended rerank. Falls back to plain vector hits when no entities
+Stages: embed query once -> vector seed (index-backed) + entity anchors ->
+bounded entity+causal subgraph -> seeded PPR -> map entity scores to
+Knowledge/CausalClaim candidates -> score EVERY candidate against the query
+vector -> blended rerank. Falls back to plain vector hits when no entities
 anchor the query.
+
+Query relevance (vector_score) is computed for *every* candidate, including
+graph-expanded ones, so query-independent graph-central hubs cannot dominate
+the ranking (the failure mode the first live benchmark exposed).
 """
 import logging
 from typing import Any, Dict, List
@@ -24,20 +29,24 @@ _TEMPORAL_HALF_LIFE_HOURS = 720.0  # ~30 days
 class GraphRetriever:
     def __init__(self, knowledge_store, ontology_store, graph):
         self._kn = knowledge_store
+        self._graph = graph
         self._anchors = EntityAnchorResolver(ontology_store, knowledge_store._embed)
         self._subgraph = PPRSubgraphBuilder(graph)
         self._candidates = CandidateMapper(graph)
 
     async def search(self, query: str, group_id: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        # Stage 1: vector seed (existing, index-backed) — for vector_score + non-entity hits.
+        q_emb = await self._kn._embed(query)
+
+        # Stage 1: vector seed (index-backed) — for non-entity hits + a relevance floor.
         vector_hits = await self._kn.search_by_vector(query, top_k=top_k * 2)
         vec_by_uuid = {h["uuid"]: h.get("score", 0.0) for h in vector_hits}
 
-        # Stage 1b: entity anchors (PPR seeds).
+        # Stage 1b: entity anchors (PPR seeds) — tightly scoped so PPR is query-anchored.
         seeds = await self._anchors.resolve(
             query, group_id,
-            top_n=int(get_search_setting("ppr_seed_top_n", 10)),
-            min_score=float(get_search_setting("ppr_min_seed_score", 0.5)),
+            top_n=int(get_search_setting("ppr_seed_top_n", 6)),
+            min_score=float(get_search_setting("ppr_min_seed_score", 0.7)),
+            query_embedding=q_emb,
         )
         if not seeds:
             return vector_hits[:top_k]   # no entities matched → plain vector search
@@ -64,10 +73,12 @@ class GraphRetriever:
         if not cands:
             return vector_hits[:top_k]
 
-        # Normalise PPR mass to [0,1] and attach the remaining sub-signals.
+        # Stage 4b (the fix): real query relevance for EVERY candidate.
+        vscore = await self._score_by_vector([c["uuid"] for c in cands], q_emb)
+
         _norm(cands, "ppr_mass")
         for c in cands:
-            c["vector_score"] = vec_by_uuid.get(c["uuid"], c.get("score", 0.0))
+            c["vector_score"] = vscore.get(c["uuid"], vec_by_uuid.get(c["uuid"], 0.0))
             c["hebbian"] = min(1.0, (c.get("activation_count", 0) or 0) / 10.0)
             c["temporal"] = compute_freshness(
                 c.get("created_at", 0.0) or 0.0, _TEMPORAL_HALF_LIFE_HOURS
@@ -79,6 +90,23 @@ class GraphRetriever:
             "w_temporal": 0.10, "w_hebbian": 0.05,
         }.items()}
         return rerank(cands, weights, top_k=top_k)
+
+    async def _score_by_vector(self, uuids: List[str], q_emb: List[float]) -> Dict[str, float]:
+        """Cosine similarity of each candidate (Knowledge or CausalClaim) vs the query."""
+        if not uuids:
+            return {}
+        res = await self._graph.ro_query(
+            """
+            UNWIND $uuids AS u
+            OPTIONAL MATCH (k:Knowledge {uuid: u})
+            OPTIONAL MATCH (c:CausalClaim {uuid: u})
+            WITH u, COALESCE(k, c) AS n
+            WHERE n IS NOT NULL AND n.embedding IS NOT NULL
+            RETURN u AS uuid, (2 - vec.cosineDistance(n.embedding, vecf32($qvec))) / 2 AS vscore
+            """,
+            params={"uuids": uuids, "qvec": q_emb},
+        )
+        return {row[0]: float(row[1]) for row in (res.result_set or [])}
 
 
 def _norm(items: List[Dict[str, Any]], key: str) -> None:
