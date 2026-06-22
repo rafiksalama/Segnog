@@ -28,8 +28,12 @@ Research basis:
 - **LightRAG** (EMNLP 2025, arXiv:2410.05779) — dual-level (entity/theme) retrieval + incremental graph updates; validates the fast/accurate tiering and fits our constantly-changing graph.
 - **Microsoft GraphRAG** (arXiv:2404.16130) — community summaries for global synthesis; parked as a future UI-synthesis option.
 
-### Feasibility note (PPR on FalkorDB)
-FalkorDB ships standard `algo.pageRank(label, rel)` but **not** Personalized (seeded) PageRank. The entity graph is small (~1,600 `OntologyNode`s), so PPR is computed **in Python (scipy sparse)** over a bounded seed-relevant subgraph per query — milliseconds, negligible CPU. No dependency on a FalkorDB feature that doesn't exist.
+### Why PPR is computed in Python (not in FalkorDB)
+PPR runs in **Python (scipy sparse)** over a bounded seed-relevant subgraph — by design, not as a workaround:
+
+1. **We need a weighted, heterogeneous graph.** PPR must propagate along `RELATES` edges *and* causal edges, each **typed and confidence-weighted**. FalkorDB's built-in `algo.pageRank(label, relationship-type)` takes a single relationship-type filter and treats edges as unweighted — it cannot express "propagate along RELATES *and* causal-with-confidence-0.8." We assemble that weighted graph ourselves from Cypher query results.
+2. **It must be seeded (personalized).** Verified against the FalkorDB docs: `algo.pageRank` exposes only `label` + `relationship-type` — no `sourceNodes`/seed/teleport-vector parameter, so it computes *global* importance, not query-relevance. (True as of 2026-06; FalkorDB may add seeded PPR later, at which point reconsider.)
+3. **It's effectively free in Python.** The entity graph is small (~1,600 `OntologyNode`s); seeded PPR over a bounded subgraph is sub-millisecond in scipy, negligible CPU. Native execution would save nothing.
 
 ---
 
