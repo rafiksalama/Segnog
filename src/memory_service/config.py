@@ -310,3 +310,24 @@ def get_allow_global_search() -> bool:
     """Allow search without group_id (cross-group/global). False = enforce isolation."""
     s = get_settings()
     return bool(s.get("security.allow_global_search", True))
+
+
+def get_graph_rag_enabled() -> bool:
+    """Kill-switch for causal-aware Graph RAG search. False = legacy vector search."""
+    s = get_settings()
+    return os.environ.get(
+        "MEMORY_SERVICE_SEARCH__GRAPH_RAG_ENABLED",
+        str(s.get("search.graph_rag_enabled", True)),
+    ).lower() in ("1", "true", "yes")
+
+
+def get_search_setting(key: str, default):
+    """Numeric/string search tunables under [search].
+
+    Env override: MEMORY_SERVICE_SEARCH__<KEY> (cast to type(default)).
+    """
+    s = get_settings()
+    env = os.environ.get(f"MEMORY_SERVICE_SEARCH__{key.upper()}")
+    if env is not None:
+        return type(default)(env)
+    return s.get(f"search.{key}", default)
