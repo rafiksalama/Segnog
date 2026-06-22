@@ -105,7 +105,7 @@ stderr_logfile=/dev/fd/2
 stderr_logfile_maxbytes=0
 
 [program:falkordb]
-command=falkordb-server --port 6380 --dir /data/falkordb --loadmodule /opt/falkordb/falkordb.so --appendonly yes
+command=falkordb-server --port 6380 --dir /data/falkordb --loadmodule /opt/falkordb/falkordb.so TIMEOUT_DEFAULT 5000 TIMEOUT_MAX 10000 --appendonly yes
 autostart=true
 autorestart=true
 startsecs=5
