@@ -171,6 +171,22 @@ class MemoryService:
         end_date: Optional[str] = None,
         include_embedding: bool = False,
     ) -> List[Dict[str, Any]]:
+        # Causal-aware Graph RAG path (default-on; kill-switch reverts to vector).
+        from ..config import get_graph_rag_enabled
+        if get_graph_rag_enabled() and group_id is not None:
+            try:
+                from ..storage.retrieval.graph_rag.retriever import GraphRetriever
+                retriever = GraphRetriever(
+                    self._kn(group_id), self._ontology_store, self._knowledge_store._graph
+                )
+                results = await retriever.search(query, group_id, top_k=top_k)
+                if results:
+                    return results
+                # empty → fall through to legacy path below
+            except Exception as e:
+                logger.warning("Graph RAG search failed (%s); falling back to vector", e)
+
+        # ---- legacy vector path (unchanged) ----
         # Search knowledge store
         knowledge = await self._kn(group_id).search_hybrid(
             query=query,
