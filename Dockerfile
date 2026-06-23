@@ -20,6 +20,15 @@ RUN mkdir -p src/memory_service client && \
     pip install --no-cache-dir --prefix=/install . && \
     rm -rf src/ client/
 
+# Bake local-embedding deps into the image (CPU torch + sentence-transformers).
+# Previously these were pip-installed at container start into an ephemeral
+# /pip-install, which crash-looped on Azure when the 2-3 min boot-time install
+# was cut short by the startup probe (or skipped via a stale sentinel). Baking
+# them makes startup fast, deterministic, and free of any network dependency.
+RUN pip install --no-cache-dir --prefix=/install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch "sentence-transformers>=3.0.0"
+
 # Copy actual source and reinstall (fast — only our package, deps are cached)
 COPY src/ src/
 COPY client/ client/
