@@ -331,3 +331,16 @@ def get_search_setting(key: str, default):
     if env is not None:
         return type(default)(env)
     return s.get(f"search.{key}", default)
+
+
+def get_search_deterministic() -> bool:
+    """Deterministic search mode: rank on PPR+vector+causal only, zeroing the
+    time-varying signals (Hebbian activation, temporal freshness) so the same
+    query returns identical results given a stable corpus. Default False (memory
+    keeps learning/evolving rankings).
+    """
+    s = get_settings()
+    return os.environ.get(
+        "MEMORY_SERVICE_SEARCH__DETERMINISTIC",
+        str(s.get("search.deterministic", False)),
+    ).lower() in ("1", "true", "yes")

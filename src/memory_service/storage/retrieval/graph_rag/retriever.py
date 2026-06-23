@@ -19,7 +19,7 @@ from .candidates import CandidateMapper
 from .ppr import personalized_pagerank
 from .rerank import rerank
 from ..scoring import compute_freshness
-from ....config import get_search_setting
+from ....config import get_search_setting, get_search_deterministic
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,12 @@ class GraphRetriever:
             "w_ppr": 0.45, "w_vector": 0.30, "w_causal_evidence": 0.10,
             "w_temporal": 0.10, "w_hebbian": 0.05,
         }.items()}
+        # Deterministic mode: drop the time-varying signals (Hebbian activation,
+        # temporal freshness) so the same query yields identical ranking given a
+        # stable corpus. PPR + vector + causal_evidence are corpus-deterministic.
+        if get_search_deterministic():
+            weights["w_hebbian"] = 0.0
+            weights["w_temporal"] = 0.0
         return rerank(cands, weights, top_k=top_k)
 
     # ── Knowledge search ───────────────────────────────────────────────────
