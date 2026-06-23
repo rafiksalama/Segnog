@@ -20,14 +20,6 @@ RUN mkdir -p src/memory_service client && \
     pip install --no-cache-dir --prefix=/install . && \
     rm -rf src/ client/
 
-# Bake local-embedding deps into the image (CPU torch + sentence-transformers).
-# Previously these were pip-installed at container start into an ephemeral
-# /pip-install, which crash-looped on Azure when the 2-3 min boot-time install
-# was cut short by the startup probe (or skipped via a stale sentinel). Baking
-# them makes startup fast, deterministic, and free of any network dependency.
-RUN pip install --no-cache-dir --prefix=/install \
-    --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch "sentence-transformers>=3.0.0"
 
 # Copy actual source and reinstall (fast — only our package, deps are cached)
 COPY src/ src/
@@ -91,9 +83,20 @@ COPY entrypoint.sh /app/entrypoint.sh
 COPY sync-data.sh /app/sync-data.sh
 RUN chmod +x /app/entrypoint.sh /app/sync-data.sh
 
-# ── Data directories + pip-install volume mount point ──────────────────────
+# ── Data directories + pip-install dir ─────────────────────────────────────
 RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /var/log/supervisor /pip-install
 ENV PYTHONPATH="/pip-install"
+
+# Bake local-embedding deps (CPU torch + sentence-transformers) into /pip-install.
+# Installed with --target into an ISOLATED dir (not /usr/local) so the set is
+# self-consistent — merging into /usr/local clashed with the app's tokenizers
+# (transformers needs tokenizers<=0.23.0, the base image has 0.23.1). PYTHONPATH
+# puts /pip-install first, shadowing the incompatible /usr/local copies.
+# This is the exact layout the entrypoint produced at runtime, but baked in so
+# the cold start is fast, deterministic, and needs no network.
+RUN pip install --no-cache-dir --target /pip-install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch "sentence-transformers>=3.0.0"
 
 # ── Supervisord config ────────────────────────────────────────────────────
 # Kept as a real file (not a BuildKit heredoc) so both local BuildKit and the
@@ -103,8 +106,9 @@ COPY supervisor-segnog.conf /etc/supervisor/conf.d/segnog.conf
 # gRPC + REST (port 9000 also serves the UI at http://localhost:9000/)
 EXPOSE 50051 9000
 
-# Persist database state via Azure Files (mounted at /backup/*)
-VOLUME ["/backup/dragonfly", "/backup/falkordb", "/backup/nats", "/pip-install"]
+# Persist database state via Azure Files (mounted at /backup/*).
+# Note: /pip-install is NOT a volume — it holds baked local-embed deps (image content).
+VOLUME ["/backup/dragonfly", "/backup/falkordb", "/backup/nats"]
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')" || exit 1
