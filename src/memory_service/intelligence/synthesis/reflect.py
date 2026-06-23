@@ -79,8 +79,8 @@ Be concise but specific. Reference actual content from the reflection and traces
             prompt,
             model=model,
             temperature=0.3,
-            max_tokens=16000,
-            reasoning_effort="high",
+            max_tokens=4000,
+            reasoning_effort="low",
         )
         logger.info(
             "Generated metacognition: %d chars (traces: %d)",
@@ -169,8 +169,8 @@ Produce a concise reflection covering:
             prompt,
             model=model,
             temperature=0.3,
-            max_tokens=16000,
-            reasoning_effort="high",
+            max_tokens=4000,
+            reasoning_effort="low",
             group_id=group_id,
             caller="generate_reflection",
         )
