@@ -43,9 +43,13 @@ class CandidateMapper:
             })
 
         # CausalClaims whose cause/effect entity is in scope.
+        # NB: CausalClaims are MERGEd globally (by cause→effect), so they are NOT
+        # group-scoped — group relevance comes from the entities ($names are the
+        # group's PPR-scoped entities). Filtering claims by group_id here would
+        # return nothing (claim.group_id is unreliable/unset for global claims).
         cz = await self._graph.ro_query(
             """
-            MATCH (c:CausalClaim {group_id: $gid})-[:CAUSE_ENTITY|EFFECT_ENTITY]->(n:OntologyNode)
+            MATCH (c:CausalClaim)-[:CAUSE_ENTITY|EFFECT_ENTITY]->(n:OntologyNode)
             WHERE n.name IN $names
             OPTIONAL MATCH (:Knowledge)-[s:SUPPORTS]->(c)
             WITH c, collect(DISTINCT n.name) AS ents, COALESCE(sum(s.weight), 0.0) AS support
