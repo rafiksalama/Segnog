@@ -145,11 +145,14 @@ class REMWorker:
             groups_with_ontology = set()
 
         # Step 2: Get all pending groups
+        # NB: no created_at > since_ts filter. consolidation_status='pending' is the
+        # correct gate (episodes become 'consolidated'/'duplicate' once processed and
+        # are never re-picked). A since_ts filter permanently skips any backlog older
+        # than the last sweep — which silently stranded ~300 pending episodes.
         cypher = """
             MATCH (e:Episode)
             WHERE e.consolidation_status = 'pending'
               AND e.episode_type = 'raw'
-              AND e.created_at > $since_ts
             WITH e.group_id AS gid, count(e) AS raw_count, min(e.created_at) AS oldest_ts
             WHERE raw_count >= $min_episodes
             RETURN gid, raw_count, oldest_ts
@@ -160,7 +163,6 @@ class REMWorker:
             result = await self._episode_store._graph.query(
                 cypher,
                 params={
-                    "since_ts": self._last_sweep_ts,
                     "min_episodes": self._min_episodes,
                     "limit": limit,
                 },
