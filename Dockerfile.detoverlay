@@ -1,0 +1,17 @@
+# Determinism overlay — patches the determinism changes (PR #4527) onto the
+# proven graphrag-test7 image (keeps FalkorDB /tmp restore+sync persistence,
+# redis 8.6.3, working embeddinggemma, causal/REM fixes). Deploying determinism
+# as a full repo build regressed persistence + RDB version — overlay avoids that.
+FROM mcpregistryuk2.azurecr.io/segnog:graphrag-test7
+
+# Patch the installed package (site-packages is the imported path at runtime).
+COPY src/memory_service/config.py /usr/local/lib/python3.11/site-packages/memory_service/config.py
+COPY src/memory_service/storage/retrieval/graph_rag/retriever.py /usr/local/lib/python3.11/site-packages/memory_service/storage/retrieval/graph_rag/retriever.py
+COPY src/memory_service/storage/retrieval/graph_rag/rerank.py /usr/local/lib/python3.11/site-packages/memory_service/storage/retrieval/graph_rag/rerank.py
+COPY src/memory_service/storage/long_term/knowledge_store.py /usr/local/lib/python3.11/site-packages/memory_service/storage/long_term/knowledge_store.py
+COPY src/memory_service/storage/long_term/episode_store.py /usr/local/lib/python3.11/site-packages/memory_service/storage/long_term/episode_store.py
+COPY src/memory_service/services/memory_service.py /usr/local/lib/python3.11/site-packages/memory_service/services/memory_service.py
+COPY settings.toml /app/settings.toml
+
+# Clear stale bytecode so the patched .py files recompile.
+RUN find /usr/local/lib/python3.11/site-packages/memory_service -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null; true
