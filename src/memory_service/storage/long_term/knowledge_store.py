@@ -369,6 +369,15 @@ class KnowledgeStore(BaseStore):
             result = await self._graph.ro_query(brute_cypher, params=params)
         rows = self._parse_results(result)
 
+        # Deterministic mode (default): skip the time-varying re-ranking so the
+        # same query is reproducible on a stable corpus. Rank on pure vector
+        # similarity with a uuid tie-break (the ANN/brute scan can return
+        # equal-score rows in an unstable order across runs).
+        from ...config import get_search_deterministic
+        if get_search_deterministic():
+            rows.sort(key=lambda r: (-r.get("score", 0.0), r.get("uuid", "")))
+            return rows[:top_k]
+
         # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
         from ..retrieval.scoring import apply_temporal_score, apply_hebbian_score
         from ...config import (

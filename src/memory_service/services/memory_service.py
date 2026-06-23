@@ -259,8 +259,8 @@ class MemoryService:
         except Exception as e:
             logger.debug(f"Reflection episode search failed: {e}")
 
-        # Sort merged results by score descending, cap to top_k
-        knowledge.sort(key=lambda x: x.get("score", 0), reverse=True)
+        # Sort merged results by score descending (uuid tie-break for determinism), cap to top_k
+        knowledge.sort(key=lambda x: (-x.get("score", 0), x.get("uuid", "")))
         return knowledge[:top_k]
 
     async def search_knowledge_by_labels(

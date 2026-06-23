@@ -336,11 +336,13 @@ def get_search_setting(key: str, default):
 def get_search_deterministic() -> bool:
     """Deterministic search mode: rank on PPR+vector+causal only, zeroing the
     time-varying signals (Hebbian activation, temporal freshness) so the same
-    query returns identical results given a stable corpus. Default False (memory
-    keeps learning/evolving rankings).
+    query returns identical results given a stable corpus. Default True so the
+    same query is reproducible; set false to let Hebbian/temporal adapt rankings.
+    Hebbian activation is still recorded either way — the flag only governs
+    whether it (and freshness) influence the ranking blend.
     """
     s = get_settings()
     return os.environ.get(
         "MEMORY_SERVICE_SEARCH__DETERMINISTIC",
-        str(s.get("search.deterministic", False)),
+        str(s.get("search.deterministic", True)),
     ).lower() in ("1", "true", "yes")
