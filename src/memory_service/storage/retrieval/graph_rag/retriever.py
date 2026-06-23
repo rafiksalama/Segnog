@@ -1,17 +1,17 @@
-"""Orchestrate causal-aware Graph RAG retrieval for knowledge search.
+"""Orchestrate causal-aware Graph RAG retrieval for knowledge + episode search.
 
 Stages: embed query once -> vector seed (index-backed) + entity anchors ->
 bounded entity+causal subgraph -> seeded PPR -> map entity scores to
-Knowledge/CausalClaim candidates -> score EVERY candidate against the query
-vector -> blended rerank. Falls back to plain vector hits when no entities
-anchor the query.
+candidates (Knowledge/CausalClaim, or Episode) -> score EVERY candidate
+against the query vector -> blended rerank. Falls back to plain vector hits
+when no entities anchor the query.
 
 Query relevance (vector_score) is computed for *every* candidate, including
 graph-expanded ones, so query-independent graph-central hubs cannot dominate
 the ranking (the failure mode the first live benchmark exposed).
 """
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .anchors import EntityAnchorResolver
 from .subgraph import PPRSubgraphBuilder
@@ -27,55 +27,44 @@ _TEMPORAL_HALF_LIFE_HOURS = 720.0  # ~30 days
 
 
 class GraphRetriever:
-    def __init__(self, knowledge_store, ontology_store, graph):
+    def __init__(self, knowledge_store, ontology_store, graph, episode_store=None):
         self._kn = knowledge_store
+        self._ep = episode_store
         self._graph = graph
-        self._anchors = EntityAnchorResolver(ontology_store, knowledge_store._embed)
+        embed_fn = (knowledge_store or episode_store)._embed
+        self._anchors = EntityAnchorResolver(ontology_store, embed_fn)
         self._subgraph = PPRSubgraphBuilder(graph)
         self._candidates = CandidateMapper(graph)
 
-    async def search(self, query: str, group_id: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        q_emb = await self._kn._embed(query)
+    # ── Shared stages ──────────────────────────────────────────────────────
 
-        # Stage 1: vector seed (index-backed) — for non-entity hits + a relevance floor.
-        vector_hits = await self._kn.search_by_vector(query, top_k=top_k * 2)
-        vec_by_uuid = {h["uuid"]: h.get("score", 0.0) for h in vector_hits}
-
-        # Stage 1b: entity anchors (PPR seeds) — tightly scoped so PPR is query-anchored.
-        seeds = await self._anchors.resolve(
+    async def _seed_entities(self, query: str, group_id: str, q_emb) -> Dict[str, float]:
+        return await self._anchors.resolve(
             query, group_id,
             top_n=int(get_search_setting("ppr_seed_top_n", 6)),
             min_score=float(get_search_setting("ppr_min_seed_score", 0.7)),
             query_embedding=q_emb,
         )
-        if not seeds:
-            return vector_hits[:top_k]   # no entities matched → plain vector search
 
-        # Stage 2: bounded subgraph (RELATES + causal edges).
+    async def _ppr(self, seeds: Dict[str, float], group_id: str) -> Dict[str, float]:
         nodes, edges = await self._subgraph.build(
             list(seeds.keys()), group_id,
             max_hops=int(get_search_setting("ppr_max_hops", 2)),
         )
-        # Stage 3: seeded Personalized PageRank.
-        entity_scores = personalized_pagerank(
+        return personalized_pagerank(
             nodes, edges, seeds, damping=float(get_search_setting("ppr_damping", 0.85))
         )
-        # Stage 4: map to Knowledge/CausalClaim candidates.
-        cands = await self._candidates.map_candidates(
-            entity_scores, group_id, cap=int(get_search_setting("candidate_cap", 200))
-        )
-        # Merge in vector-only hits not already entity-linked.
+
+    async def _finalize(self, cands, vector_hits, vec_by_uuid, q_emb, top_k):
+        """Merge vector hits, score every candidate vs query vector, blend, rerank."""
         seen = {c["uuid"] for c in cands}
         for h in vector_hits:
             if h["uuid"] not in seen:
                 cands.append({**h, "ppr_mass": 0.0, "source": "vector"})
-
         if not cands:
             return vector_hits[:top_k]
 
-        # Stage 4b (the fix): real query relevance for EVERY candidate.
         vscore = await self._score_by_vector([c["uuid"] for c in cands], q_emb)
-
         _norm(cands, "ppr_mass")
         for c in cands:
             c["vector_score"] = vscore.get(c["uuid"], vec_by_uuid.get(c["uuid"], 0.0))
@@ -91,8 +80,53 @@ class GraphRetriever:
         }.items()}
         return rerank(cands, weights, top_k=top_k)
 
+    # ── Knowledge search ───────────────────────────────────────────────────
+
+    async def search(self, query: str, group_id: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        q_emb = await self._kn._embed(query)
+        vector_hits = await self._kn.search_by_vector(query, top_k=top_k * 2)
+        vec_by_uuid = {h["uuid"]: h.get("score", 0.0) for h in vector_hits}
+
+        seeds = await self._seed_entities(query, group_id, q_emb)
+        if not seeds:
+            return vector_hits[:top_k]
+
+        entity_scores = await self._ppr(seeds, group_id)
+        cands = await self._candidates.map_candidates(
+            entity_scores, group_id, cap=int(get_search_setting("candidate_cap", 200))
+        )
+        return await self._finalize(cands, vector_hits, vec_by_uuid, q_emb, top_k)
+
+    # ── Episode search ─────────────────────────────────────────────────────
+
+    async def search_episodes(
+        self, query: str, group_id: str, top_k: int = 25,
+        episode_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self._ep is None:
+            raise RuntimeError("GraphRetriever has no episode_store")
+        q_emb = await self._ep._embed(query)
+        vector_hits = await self._ep.search_episodes(
+            query, top_k=top_k * 2, episode_type=episode_type
+        )
+        vec_by_uuid = {h["uuid"]: h.get("score", 0.0) for h in vector_hits}
+
+        seeds = await self._seed_entities(query, group_id, q_emb)
+        if not seeds:
+            return vector_hits[:top_k]
+
+        entity_scores = await self._ppr(seeds, group_id)
+        cands = await self._candidates.map_episode_candidates(
+            entity_scores, group_id,
+            cap=int(get_search_setting("candidate_cap", 200)),
+            episode_type=episode_type,
+        )
+        return await self._finalize(cands, vector_hits, vec_by_uuid, q_emb, top_k)
+
+    # ── Per-candidate query relevance ──────────────────────────────────────
+
     async def _score_by_vector(self, uuids: List[str], q_emb: List[float]) -> Dict[str, float]:
-        """Cosine similarity of each candidate (Knowledge or CausalClaim) vs the query."""
+        """Cosine similarity of each candidate (Knowledge, CausalClaim, or Episode) vs query."""
         if not uuids:
             return {}
         res = await self._graph.ro_query(
@@ -100,7 +134,8 @@ class GraphRetriever:
             UNWIND $uuids AS u
             OPTIONAL MATCH (k:Knowledge {uuid: u})
             OPTIONAL MATCH (c:CausalClaim {uuid: u})
-            WITH u, COALESCE(k, c) AS n
+            OPTIONAL MATCH (e:Episode {uuid: u})
+            WITH u, COALESCE(k, c, e) AS n
             WHERE n IS NOT NULL AND n.embedding IS NOT NULL
             RETURN u AS uuid, (2 - vec.cosineDistance(n.embedding, vecf32($qvec))) / 2 AS vscore
             """,

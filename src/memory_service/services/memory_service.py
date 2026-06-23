@@ -109,6 +109,30 @@ class MemoryService:
     ) -> List[Dict[str, Any]]:
         if global_search and not get_allow_global_search():
             global_search = False
+
+        # Causal-aware Graph RAG path (default-on; kill-switch reverts to vector).
+        # Only for plain group-scoped search — time filters / adjacency expansion /
+        # global search fall through to the legacy vector path below.
+        from ..config import get_graph_rag_enabled
+        if (
+            get_graph_rag_enabled() and group_id and not global_search
+            and not expand_adjacent and after_time is None and before_time is None
+        ):
+            try:
+                from ..storage.retrieval.graph_rag.retriever import GraphRetriever
+                retriever = GraphRetriever(
+                    self._kn(group_id), self._ontology_store,
+                    self._knowledge_store._graph, episode_store=self._ep(group_id),
+                )
+                results = await retriever.search_episodes(
+                    query, group_id, top_k=top_k, episode_type=episode_type
+                )
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("Graph RAG episode search failed (%s); falling back to vector", e)
+
+        # ---- legacy vector path (unchanged) ----
         return await self._ep(group_id).search_episodes(
             query=query,
             top_k=top_k,
