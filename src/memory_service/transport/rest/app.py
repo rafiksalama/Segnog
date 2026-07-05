@@ -104,6 +104,19 @@ def create_app() -> FastAPI:
     app.include_router(ui.router, prefix=prefix, tags=["ui"])
     app.include_router(causal.router, prefix=prefix, tags=["causal"])
 
+    @app.get("/livez")
+    async def livez():
+        """Liveness probe — confirms the process is alive and serving HTTP.
+
+        Deliberately does NO dependency checks. FalkorDB runs queries
+        single-threaded per graph, so a long-running query (search, REM
+        sweep) can block /health's DB check past the probe timeout and get
+        the whole container killed even though the service is healthy. The
+        liveness probe should target this endpoint; use /health for
+        readiness/diagnostics.
+        """
+        return {"status": "ok", "service": "agent-memory-service"}
+
     @app.get("/health")
     async def health():
         checks = {}

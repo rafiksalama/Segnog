@@ -540,28 +540,36 @@ class EpisodeStore(BaseStore):
         result = await self._graph.ro_query(cypher, params=params)
         rows = self._parse_results(result, json_columns=("metadata",))
 
-        # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
-        from ..retrieval.scoring import apply_temporal_score, apply_hebbian_score
-        from ...config import (
-            get_episode_half_life,
-            get_episode_alpha,
-            get_hebbian_enabled,
-            get_hebbian_beta_episode,
-        )
+        # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled).
+        # Deterministic mode (default) skips this time-varying re-ranking so the
+        # same query is reproducible on a stable corpus — rank on pure vector
+        # similarity with a uuid tie-break instead.
+        from ...config import get_search_deterministic
 
-        if get_hebbian_enabled():
-            rows = apply_hebbian_score(
-                rows,
-                beta=get_hebbian_beta_episode(),
-                alpha=get_episode_alpha(),
-                half_life_hours=get_episode_half_life(),
-            )
+        if get_search_deterministic():
+            rows.sort(key=lambda r: (-r.get("score", 0.0), r.get("uuid", "")))
         else:
-            rows = apply_temporal_score(
-                rows,
-                alpha=get_episode_alpha(),
-                half_life_hours=get_episode_half_life(),
+            from ..retrieval.scoring import apply_temporal_score, apply_hebbian_score
+            from ...config import (
+                get_episode_half_life,
+                get_episode_alpha,
+                get_hebbian_enabled,
+                get_hebbian_beta_episode,
             )
+
+            if get_hebbian_enabled():
+                rows = apply_hebbian_score(
+                    rows,
+                    beta=get_hebbian_beta_episode(),
+                    alpha=get_episode_alpha(),
+                    half_life_hours=get_episode_half_life(),
+                )
+            else:
+                rows = apply_temporal_score(
+                    rows,
+                    alpha=get_episode_alpha(),
+                    half_life_hours=get_episode_half_life(),
+                )
         rows = rows[:top_k]
 
         if not expand_adjacent:

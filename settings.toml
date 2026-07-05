@@ -19,6 +19,25 @@ graph_name = "episode_store"
 backend = "local"
 model = "google/embeddinggemma-300m"
 
+[default.search]
+graph_rag_enabled = true
+ppr_max_hops = 2
+ppr_damping = 0.85
+ppr_seed_top_n = 6
+ppr_min_seed_score = 0.7
+candidate_cap = 200
+w_ppr = 0.45
+w_vector = 0.30
+w_causal_evidence = 0.10
+w_temporal = 0.10
+w_hebbian = 0.05
+ui_llm_rerank = true
+# Deterministic mode (DEFAULT): zero the time-varying ranking signals (Hebbian
+# activation + temporal freshness) so the same query returns identical results
+# on a stable corpus. Ranking depends only on PPR + vector + causal_evidence.
+# Set false to let Hebbian/temporal adapt rankings over time.
+deterministic = true
+
 [default.llm]
 flash_model = "MiniMax-M2.7-highspeed"
 base_url = "https://api.minimax.io/v1"

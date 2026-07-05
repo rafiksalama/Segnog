@@ -21,6 +21,19 @@ logger = logging.getLogger(__name__)
 # Backwards-compatible alias
 normalize_label = normalize_name
 
+# Embedding dimension for the configured model (google/embeddinggemma-300m = 768).
+# Must match the model in settings.toml [embeddings].model. The vector index is
+# created with this dimension; if the model changes, the index must be rebuilt.
+EMBEDDING_DIM = 768
+
+# Filtered-ANN over-fetch: db.idx.vector.queryNodes returns the globally nearest
+# nodes, which we then filter by group_id/type/garbage. We over-fetch so enough
+# survive the post-filter. For a small group in a large multi-tenant graph the ANN
+# may still under-deliver — search_by_vector falls back to the brute-force scan
+# (cheap, bounded by the group_id range index) when that happens.
+_VECTOR_OVERFETCH = 20
+_VECTOR_MIN_K = 200
+
 
 class KnowledgeStore(BaseStore):
     """
@@ -57,6 +70,18 @@ class KnowledgeStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass  # Index may already exist
+
+        # Vector (ANN) index on embeddings — turns search_by_vector from an O(n)
+        # brute-force cosine scan into an approximate-nearest-neighbour lookup.
+        # Idempotent: raises if it already exists, which we swallow.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (k:Knowledge) ON (k.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("KnowledgeStore vector index created on Knowledge.embedding")
+        except Exception:
+            pass  # Index already exists (or backend lacks vector support → fallback path covers search)
 
         # Backfill activation_count for Hebbian learning
         try:
@@ -273,12 +298,8 @@ class KnowledgeStore(BaseStore):
             AND NOT k.content STARTS WITH 'Metacognition for:'
         """
 
-        cypher = f"""
-            MATCH (k:Knowledge)
-            WHERE {group_filter} {type_filter} {garbage_filter}
-            WITH k, (2 - vec.cosineDistance(k.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score > $min_score
-            RETURN
+        # Columns are identical for both query paths so re-ranking downstream is unaffected.
+        return_cols = f"""
                 k.uuid AS uuid,
                 k.content AS content,
                 k.knowledge_type AS knowledge_type,
@@ -288,7 +309,35 @@ class KnowledgeStore(BaseStore):
                 k.created_at AS created_at,
                 COALESCE(k.event_date, '') AS event_date,
                 score,
-                COALESCE(k.activation_count, 0) AS activation_count{embedding_return}
+                COALESCE(k.activation_count, 0) AS activation_count{embedding_return}"""
+
+        # Primary path: ANN via the vector index (O(log n)). queryNodes returns the
+        # globally nearest nodes ranked by cosine DISTANCE; (2 - distance) / 2 maps it
+        # back to the [0,1] similarity the rest of the code expects. We over-fetch
+        # knn_k so enough candidates survive the group/type/garbage post-filter.
+        knn_k = max(top_k * _VECTOR_OVERFETCH, _VECTOR_MIN_K)
+        # knn_k is inlined as an int literal (server-computed, not user input): some
+        # FalkorDB builds require the K arg to queryNodes to be a literal, not a param.
+        index_cypher = f"""
+            CALL db.idx.vector.queryNodes('Knowledge', 'embedding', {int(knn_k)}, vecf32($query_vec))
+            YIELD node AS k, score
+            WITH k, (2 - score) / 2 AS score
+            WHERE {group_filter} {type_filter} {garbage_filter}
+              AND score > $min_score
+            RETURN{return_cols}
+            ORDER BY score DESC
+            LIMIT $top_k
+        """
+
+        # Fallback path: brute-force cosine scan. For group-scoped searches the
+        # group_id range index bounds this to the group's nodes, so it stays cheap
+        # for small/sparse groups where the ANN under-delivers after filtering.
+        brute_cypher = f"""
+            MATCH (k:Knowledge)
+            WHERE {group_filter} {type_filter} {garbage_filter}
+            WITH k, (2 - vec.cosineDistance(k.embedding, vecf32($query_vec))) / 2 AS score
+            WHERE score > $min_score
+            RETURN{return_cols}
             ORDER BY score DESC
             LIMIT $top_k
         """
@@ -305,8 +354,28 @@ class KnowledgeStore(BaseStore):
         if knowledge_type:
             params["knowledge_type"] = knowledge_type
 
-        result = await self._graph.ro_query(cypher, params=params)
+        # Try the index; fall back to brute-force if the index is missing/errors,
+        # or if filtered-ANN returned fewer than requested (small group in a large graph).
+        result = None
+        try:
+            result = await self._graph.ro_query(index_cypher, params=params)
+            got = len(result.result_set) if result and result.result_set else 0
+            if got < min(top_k, params["top_k"]):
+                result = await self._graph.ro_query(brute_cypher, params=params)
+        except Exception as e:
+            logger.warning("Vector index search unavailable (%s); using brute-force scan", e)
+            result = await self._graph.ro_query(brute_cypher, params=params)
         rows = self._parse_results(result)
+
+        # Deterministic mode (default): skip the time-varying re-ranking so the
+        # same query is reproducible on a stable corpus. Rank on pure vector
+        # similarity with a uuid tie-break (the ANN/brute scan can return
+        # equal-score rows in an unstable order across runs).
+        from ...config import get_search_deterministic
+
+        if get_search_deterministic():
+            rows.sort(key=lambda r: (-r.get("score", 0.0), r.get("uuid", "")))
+            return rows[:top_k]
 
         # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled)
         from ..retrieval.scoring import apply_temporal_score, apply_hebbian_score

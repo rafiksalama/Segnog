@@ -115,7 +115,7 @@ async def summarize_context(
         lm = configure_dspy_lm(
             model=model,
             temperature=0.2,
-            max_tokens=196000,
+            max_tokens=8000,
         )
         predictor = dspy.Predict(ContextSummarizationSignature)
 
