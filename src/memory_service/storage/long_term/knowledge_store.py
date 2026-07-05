@@ -71,18 +71,6 @@ class KnowledgeStore(BaseStore):
             except Exception:
                 pass  # Index may already exist
 
-        # Vector (ANN) index on embeddings — turns search_by_vector from an O(n)
-        # brute-force cosine scan into an approximate-nearest-neighbour lookup.
-        # Idempotent: raises if it already exists, which we swallow.
-        try:
-            await self._graph.query(
-                f"CREATE VECTOR INDEX FOR (k:Knowledge) ON (k.embedding) "
-                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
-            )
-            logger.info("KnowledgeStore vector index created on Knowledge.embedding")
-        except Exception:
-            pass  # Index already exists (or backend lacks vector support → fallback path covers search)
-
         # Backfill activation_count for Hebbian learning
         try:
             await self._graph.query("""
@@ -102,6 +90,19 @@ class KnowledgeStore(BaseStore):
             """)
         except Exception:
             pass
+
+        # Vector (ANN) index — CREATED LAST so the backfill SET queries above
+        # finish before the index build starts. Otherwise the massive concurrent
+        # AttributeSet_Update (writing all Knowledge nodes) races with the index
+        # build in FalkorDB's bio thread → heap corruption → SIGSEGV.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (k:Knowledge) ON (k.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("KnowledgeStore vector index created on Knowledge.embedding")
+        except Exception:
+            pass  # Index already exists (or backend lacks vector support → fallback path covers search)
 
         logger.debug("KnowledgeStore indexes ensured")
 
