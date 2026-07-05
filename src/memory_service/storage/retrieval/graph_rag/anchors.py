@@ -3,16 +3,21 @@
 Reuses OntologyStore.search_nodes (cosine over entity-summary embeddings) to
 find the entities a query is "about", which become the PPR teleport seeds.
 """
+
 from typing import Dict
 
 
 class EntityAnchorResolver:
     def __init__(self, ontology_store, embed_fn):
-        self._onto = ontology_store          # OntologyStore
-        self._embed = embed_fn               # async callable: str -> List[float]
+        self._onto = ontology_store  # OntologyStore
+        self._embed = embed_fn  # async callable: str -> List[float]
 
     async def resolve(
-        self, query: str, group_id: str, top_n: int = 10, min_score: float = 0.5,
+        self,
+        query: str,
+        group_id: str,
+        top_n: int = 10,
+        min_score: float = 0.5,
         query_embedding=None,
     ) -> Dict[str, float]:
         """Return {entity_name: seed_mass} where mass = similarity score."""

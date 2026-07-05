@@ -4,6 +4,7 @@ Given a relevance score per entity (from PPR), fetch the Knowledge nodes and
 CausalClaims linked to those entities and attach the summed PPR mass of their
 linked entities. Bounded by `cap`. All reads use ro_query (timeout-bounded).
 """
+
 from typing import Any, Dict, List, Optional
 
 
@@ -32,15 +33,21 @@ class CandidateMapper:
             """,
             params={"gid": group_id, "names": names, "cap": cap},
         )
-        for row in (kn.result_set or []):
+        for row in kn.result_set or []:
             ents = row[6] or []
             ppr_mass = sum(entity_scores.get(e, 0.0) for e in ents)
-            candidates.append({
-                "uuid": row[0], "content": row[1], "knowledge_type": row[2],
-                "confidence": row[3], "created_at": row[4],
-                "activation_count": row[5], "ppr_mass": ppr_mass,
-                "source": "knowledge",
-            })
+            candidates.append(
+                {
+                    "uuid": row[0],
+                    "content": row[1],
+                    "knowledge_type": row[2],
+                    "confidence": row[3],
+                    "created_at": row[4],
+                    "activation_count": row[5],
+                    "ppr_mass": ppr_mass,
+                    "source": "knowledge",
+                }
+            )
 
         # CausalClaims whose cause/effect entity is in scope.
         # NB: CausalClaims are MERGEd globally (by cause→effect), so they are NOT
@@ -60,23 +67,31 @@ class CandidateMapper:
             """,
             params={"gid": group_id, "names": names, "cap": cap},
         )
-        for row in (cz.result_set or []):
+        for row in cz.result_set or []:
             ents = row[6] or []
             ppr_mass = sum(entity_scores.get(e, 0.0) for e in ents)
-            candidates.append({
-                "uuid": row[0],
-                "content": f"{row[1]} —[{row[3]}]→ {row[2]}",
-                "knowledge_type": "causal_claim",
-                "confidence": row[4], "created_at": row[5],
-                "activation_count": 0, "ppr_mass": ppr_mass,
-                "causal_evidence": float(row[7] or 0.0),
-                "causal_type": row[3], "source": "causal_claim",
-            })
+            candidates.append(
+                {
+                    "uuid": row[0],
+                    "content": f"{row[1]} —[{row[3]}]→ {row[2]}",
+                    "knowledge_type": "causal_claim",
+                    "confidence": row[4],
+                    "created_at": row[5],
+                    "activation_count": 0,
+                    "ppr_mass": ppr_mass,
+                    "causal_evidence": float(row[7] or 0.0),
+                    "causal_type": row[3],
+                    "source": "causal_claim",
+                }
+            )
         return candidates
 
     async def map_episode_candidates(
-        self, entity_scores: Dict[str, float], group_id: str,
-        cap: int = 200, episode_type: Optional[str] = None,
+        self,
+        entity_scores: Dict[str, float],
+        group_id: str,
+        cap: int = 200,
+        episode_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Episodes linked to the scored entities (directly via ABOUT edges)."""
         if not entity_scores:
@@ -99,12 +114,18 @@ class CandidateMapper:
             params=params,
         )
         candidates: List[Dict[str, Any]] = []
-        for row in (res.result_set or []):
+        for row in res.result_set or []:
             ents = row[5] or []
             ppr_mass = sum(entity_scores.get(e, 0.0) for e in ents)
-            candidates.append({
-                "uuid": row[0], "content": row[1], "episode_type": row[2],
-                "created_at": row[3], "activation_count": row[4],
-                "ppr_mass": ppr_mass, "source": "episode",
-            })
+            candidates.append(
+                {
+                    "uuid": row[0],
+                    "content": row[1],
+                    "episode_type": row[2],
+                    "created_at": row[3],
+                    "activation_count": row[4],
+                    "ppr_mass": ppr_mass,
+                    "source": "episode",
+                }
+            )
         return candidates

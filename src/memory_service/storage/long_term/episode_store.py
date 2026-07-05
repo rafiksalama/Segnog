@@ -545,6 +545,7 @@ class EpisodeStore(BaseStore):
         # same query is reproducible on a stable corpus — rank on pure vector
         # similarity with a uuid tie-break instead.
         from ...config import get_search_deterministic
+
         if get_search_deterministic():
             rows.sort(key=lambda r: (-r.get("score", 0.0), r.get("uuid", "")))
         else:

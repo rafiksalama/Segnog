@@ -5,6 +5,7 @@ Expands outward from seed entities up to `max_hops`, collecting RELATES
 CAUSE_ENTITY/EFFECT_ENTITY). All reads use ro_query (inherits the FalkorDB
 query timeout); every query is LIMIT-capped and the hop count is bounded.
 """
+
 from typing import List, Tuple
 import logging
 
@@ -44,10 +45,10 @@ class PPRSubgraphBuilder:
                 """,
                 params={"frontier": list(frontier), "lim": _EDGE_LIMIT},
             )
-            for row in (rel.result_set or []):
+            for row in rel.result_set or []:
                 src, dst, w = row[0], row[1], float(row[2] or 1.0)
                 edges.append((src, dst, w))
-                edges.append((dst, src, w))   # symmetric
+                edges.append((dst, src, w))  # symmetric
                 if dst not in all_nodes:
                     new_nodes.add(dst)
 
@@ -63,10 +64,10 @@ class PPRSubgraphBuilder:
                 """,
                 params={"frontier": list(frontier), "lim": _EDGE_LIMIT},
             )
-            for row in (cz.result_set or []):
+            for row in cz.result_set or []:
                 src, dst, ctype, conf = row[0], row[1], row[2], float(row[3] or 0.5)
                 w = _CAUSAL_BASE_W.get(ctype, 1.0) * conf
-                edges.append((src, dst, w))   # directed (causal)
+                edges.append((src, dst, w))  # directed (causal)
                 for nm in (src, dst):
                     if nm not in all_nodes:
                         new_nodes.add(nm)

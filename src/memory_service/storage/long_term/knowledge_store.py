@@ -363,9 +363,7 @@ class KnowledgeStore(BaseStore):
             if got < min(top_k, params["top_k"]):
                 result = await self._graph.ro_query(brute_cypher, params=params)
         except Exception as e:
-            logger.warning(
-                "Vector index search unavailable (%s); using brute-force scan", e
-            )
+            logger.warning("Vector index search unavailable (%s); using brute-force scan", e)
             result = await self._graph.ro_query(brute_cypher, params=params)
         rows = self._parse_results(result)
 
@@ -374,6 +372,7 @@ class KnowledgeStore(BaseStore):
         # similarity with a uuid tie-break (the ANN/brute scan can return
         # equal-score rows in an unstable order across runs).
         from ...config import get_search_deterministic
+
         if get_search_deterministic():
             rows.sort(key=lambda r: (-r.get("score", 0.0), r.get("uuid", "")))
             return rows[:top_k]

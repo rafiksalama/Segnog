@@ -201,7 +201,9 @@ class CausalClaimStore(BaseStore):
 
         logger.info(
             "_link_entity %s: no OntologyNode resolved for %r (claim %s)",
-            edge_type, entity_name, claim_uuid[:8],
+            edge_type,
+            entity_name,
+            claim_uuid[:8],
         )
 
     # ------------------------------------------------------------------

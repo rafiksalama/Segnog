@@ -10,6 +10,7 @@ Query relevance (vector_score) is computed for *every* candidate, including
 graph-expanded ones, so query-independent graph-central hubs cannot dominate
 the ranking (the failure mode the first live benchmark exposed).
 """
+
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -40,7 +41,8 @@ class GraphRetriever:
 
     async def _seed_entities(self, query: str, group_id: str, q_emb) -> Dict[str, float]:
         return await self._anchors.resolve(
-            query, group_id,
+            query,
+            group_id,
             top_n=int(get_search_setting("ppr_seed_top_n", 6)),
             min_score=float(get_search_setting("ppr_min_seed_score", 0.7)),
             query_embedding=q_emb,
@@ -48,7 +50,8 @@ class GraphRetriever:
 
     async def _ppr(self, seeds: Dict[str, float], group_id: str) -> Dict[str, float]:
         nodes, edges = await self._subgraph.build(
-            list(seeds.keys()), group_id,
+            list(seeds.keys()),
+            group_id,
             max_hops=int(get_search_setting("ppr_max_hops", 2)),
         )
         return personalized_pagerank(
@@ -74,10 +77,16 @@ class GraphRetriever:
             )
             c.setdefault("causal_evidence", 0.0)
 
-        weights = {k: float(get_search_setting(k, d)) for k, d in {
-            "w_ppr": 0.45, "w_vector": 0.30, "w_causal_evidence": 0.10,
-            "w_temporal": 0.10, "w_hebbian": 0.05,
-        }.items()}
+        weights = {
+            k: float(get_search_setting(k, d))
+            for k, d in {
+                "w_ppr": 0.45,
+                "w_vector": 0.30,
+                "w_causal_evidence": 0.10,
+                "w_temporal": 0.10,
+                "w_hebbian": 0.05,
+            }.items()
+        }
         # Deterministic mode: drop the time-varying signals (Hebbian activation,
         # temporal freshness) so the same query yields identical ranking given a
         # stable corpus. PPR + vector + causal_evidence are corpus-deterministic.
@@ -106,7 +115,10 @@ class GraphRetriever:
     # ── Episode search ─────────────────────────────────────────────────────
 
     async def search_episodes(
-        self, query: str, group_id: str, top_k: int = 25,
+        self,
+        query: str,
+        group_id: str,
+        top_k: int = 25,
         episode_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if self._ep is None:
@@ -123,7 +135,8 @@ class GraphRetriever:
 
         entity_scores = await self._ppr(seeds, group_id)
         cands = await self._candidates.map_episode_candidates(
-            entity_scores, group_id,
+            entity_scores,
+            group_id,
             cap=int(get_search_setting("candidate_cap", 200)),
             episode_type=episode_type,
         )

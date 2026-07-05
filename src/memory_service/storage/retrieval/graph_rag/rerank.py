@@ -1,4 +1,5 @@
 """Blend PPR + vector + causal-evidence + temporal + Hebbian into a final score."""
+
 from typing import Any, Dict, List
 
 
@@ -12,7 +13,9 @@ def blend_score(c: Dict[str, Any], w: Dict[str, float]) -> float:
     )
 
 
-def rerank(candidates: List[Dict[str, Any]], w: Dict[str, float], top_k: int) -> List[Dict[str, Any]]:
+def rerank(
+    candidates: List[Dict[str, Any]], w: Dict[str, float], top_k: int
+) -> List[Dict[str, Any]]:
     for c in candidates:
         c["score"] = blend_score(c, w)
     # Sort by score desc, breaking ties on uuid asc. The deterministic tie-break

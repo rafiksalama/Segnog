@@ -4,6 +4,7 @@ Pure function — no I/O. Used to propagate query relevance across the entity
 graph (RELATES + causal edges). Power-iteration on a scipy sparse column-
 stochastic matrix; the teleport vector is the (normalised) seed distribution.
 """
+
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -12,8 +13,8 @@ from scipy.sparse import csr_matrix
 
 def personalized_pagerank(
     nodes: List[str],
-    edges: List[Tuple[str, str, float]],   # (src, dst, weight)
-    seeds: Dict[str, float],               # node -> teleport mass (unnormalised ok)
+    edges: List[Tuple[str, str, float]],  # (src, dst, weight)
+    seeds: Dict[str, float],  # node -> teleport mass (unnormalised ok)
     damping: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
@@ -37,7 +38,7 @@ def personalized_pagerank(
     A = csr_matrix((data, (rows, cols)), shape=(n, n)) if data else csr_matrix((n, n))
     col_sums = np.asarray(A.sum(axis=0)).ravel()
     col_sums[col_sums == 0] = 1.0
-    M = A.multiply(1.0 / col_sums)          # column-stochastic
+    M = A.multiply(1.0 / col_sums)  # column-stochastic
 
     # Teleport vector from seeds (normalised).
     tele = np.zeros(n)
