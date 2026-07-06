@@ -197,6 +197,10 @@ class CurationWorker:
                 episode_contents = {row[0]: row[1] for row in result.result_set if row[0]}
                 all_knowledge_extracted = all(row[2] for row in result.result_set if row[0])
                 combined = "\n---\n".join(episode_contents.get(uuid, "") for uuid in source_uuids)
+                # Cap the prompt so reflection/knowledge stay fast (~5-8s/call on
+                # MiniMax-M3). Developer-work episodes + 100 Dragonfly tool events can
+                # balloon to 50-100K+ chars and blow the per-job latency budget.
+                combined = combined[:8000]
 
                 # Pull tool events from DragonflyDB to enrich knowledge extraction
                 tool_context = ""
@@ -225,7 +229,7 @@ class CurationWorker:
                                 else:
                                     content = str(data.get("content", str(data)))
                                     lines.append(f"[{etype}] {content}")
-                            tool_context = "\n".join(lines)
+                            tool_context = "\n".join(lines)[:4000]
                     except Exception as exc:
                         logger.warning("Could not fetch tool events for '%s': %s", group_id, exc)
 

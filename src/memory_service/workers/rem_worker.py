@@ -297,10 +297,27 @@ class REMWorker:
 
         # --- Curation on unique episodes only ---
         source_uuids = [ep["uuid"] for ep in unique_episodes]
-        combined_content = (
-            "\n---\n".join(ep["content"] for ep in unique_episodes[:10] if ep.get("content"))
-            or "(no content available)"
-        )
+        # Cap the concatenated content so the reflection/knowledge LLM prompts stay
+        # small. Developer-work episodes are bulky (tool calls, code, output); 10 of
+        # them can be 50-100K chars (~25K tokens), which makes each MiniMax-M3 call
+        # take 30-60s and blows the per-job 60s budget. 12K chars (~3K tokens) keeps
+        # each call ~5-8s while still capturing the recent/relevant content for
+        # periodic background consolidation.
+        _MAX_CONTENT_CHARS = 12000
+        parts = []
+        total = 0
+        for ep in unique_episodes[:10]:
+            c = ep.get("content") or ""
+            if not c:
+                continue
+            if total + len(c) > _MAX_CONTENT_CHARS:
+                c = c[: _MAX_CONTENT_CHARS - total]
+                if c:
+                    parts.append(c)
+                break
+            parts.append(c)
+            total += len(c)
+        combined_content = "\n---\n".join(parts) or "(no content available)"
 
         mission_data = {
             "task": f"Background consolidation for group '{group_id}'",
