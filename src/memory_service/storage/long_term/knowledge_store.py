@@ -128,28 +128,32 @@ class KnowledgeStore(BaseStore):
         now = time.time()
 
         for entry, embedding in zip(entries, embeddings):
-            # --- Dedup check: find most similar existing knowledge ---
+            # --- Dedup check: find most similar existing knowledge (indexed ANN) ---
+            # Runs on every write, so it must NOT fall back to a brute-force scan on
+            # a no-match result (the common case for genuinely new knowledge) — that
+            # would re-introduce the per-write full scan this replaces. The ANN
+            # over-fetch window (200) is large enough that any >=0.90 near-duplicate
+            # ranks within it globally, so dedup correctness is preserved; missing a
+            # 0.75–0.90 match only drops a SIMILAR_TO edge (cosmetic). Brute force is
+            # still used if the index is missing/errors (rare).
             similar_uuid = None
             similar_score = 0.0
             if embedding:
                 try:
-                    dedup_result = await self._graph.ro_query(
-                        """MATCH (k:Knowledge)
-                        WHERE k.group_id = $group_id
-                        WITH k, (2 - vec.cosineDistance(k.embedding, vecf32($query_vec))) / 2 AS score
-                        WHERE score >= $threshold
-                        RETURN k.uuid AS uuid, score
-                        ORDER BY score DESC
-                        LIMIT 1""",
-                        params={
-                            "group_id": self._group_id,
-                            "query_vec": embedding,
-                            "threshold": 0.75,  # Capture both duplicates and near-similar
-                        },
+                    rows = await self._vector_search(
+                        label="Knowledge",
+                        embedding=embedding,
+                        top_k=1,
+                        min_score=0.75,  # Capture both duplicates and near-similar
+                        min_score_op=">=",
+                        where_predicates="k.group_id = $group_id",
+                        return_cols="k.uuid AS uuid, score",
+                        params={"group_id": self._group_id},
+                        fallback_on_underdeliver=False,
                     )
-                    if dedup_result.result_set:
-                        similar_uuid = dedup_result.result_set[0][0]
-                        similar_score = dedup_result.result_set[0][1]
+                    if rows:
+                        similar_uuid = rows[0].get("uuid")
+                        similar_score = rows[0].get("score") or 0.0
                 except Exception as e:
                     logger.debug("Knowledge similarity check failed (non-fatal): %s", e)
 
