@@ -188,20 +188,19 @@ class CausalClaimStore(BaseStore):
         except Exception as e:
             logger.debug("_link_entity %s exact-match failed: %s", edge_type, e)
 
-        # 2. embedding resolution — nearest OntologyNode above threshold
+        # 2. embedding resolution — nearest OntologyNode above threshold (indexed ANN)
         try:
             emb = await self._embed(entity_name)
-            res = await self._graph.ro_query(
-                """
-                MATCH (n:OntologyNode)
-                WHERE n.embedding IS NOT NULL
-                WITH n, (2 - vec.cosineDistance(n.embedding, vecf32($qvec))) / 2 AS s
-                WHERE s >= $thr
-                RETURN n.name AS name ORDER BY s DESC LIMIT 1
-                """,
-                params={"qvec": emb, "thr": self._ENTITY_RESOLVE_THRESHOLD},
+            rows = await self._vector_search(
+                label="OntologyNode",
+                embedding=emb,
+                top_k=1,
+                min_score=self._ENTITY_RESOLVE_THRESHOLD,
+                min_score_op=">=",
+                return_cols="n.name AS name",
+                node_var="n",
+                fallback_on_underdeliver=False,
             )
-            rows = self._parse_results(res)
             if rows:
                 target = rows[0]["name"]
                 await self._graph.query(
@@ -447,30 +446,26 @@ class CausalClaimStore(BaseStore):
         group_id: Optional[str] = None,
         min_score: float = 0.4,
     ) -> List[Dict[str, Any]]:
-        gid = group_id or self._group_id
-        result = await self._graph.ro_query(
-            """
-            MATCH (c:CausalClaim)
-            WHERE c.status <> 'refuted'
-            WITH c,
-                 (2 - vec.cosineDistance(c.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score >= $min_score
-            RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
-                   c.effect_summary AS effect_summary, c.mechanism AS mechanism,
-                   c.confidence AS confidence, c.certainty AS certainty,
-                   c.evidence_count AS evidence_count,
-                   c.status AS status, c.created_at AS created_at, score
-            ORDER BY score DESC
-            LIMIT $top_k
-            """,
-            params={
-                "group_id": gid,
-                "query_vec": embedding,
-                "min_score": min_score,
-                "top_k": top_k,
-            },
+        # group_id is accepted for API compatibility but (as in the prior
+        # brute-force query) not applied — causal-claim search is intentionally
+        # global, filtered only to non-refuted claims.
+        del group_id
+        return await self._vector_search(
+            label="CausalClaim",
+            embedding=embedding,
+            top_k=top_k,
+            min_score=min_score,
+            min_score_op=">=",
+            where_predicates="c.status <> 'refuted'",
+            return_cols=(
+                "c.uuid AS uuid, c.cause_summary AS cause_summary, "
+                "c.effect_summary AS effect_summary, c.mechanism AS mechanism, "
+                "c.confidence AS confidence, c.certainty AS certainty, "
+                "c.evidence_count AS evidence_count, c.status AS status, "
+                "c.created_at AS created_at, score"
+            ),
+            node_var="c",
         )
-        return self._parse_results(result)
 
     # ------------------------------------------------------------------
     # Read: list claims

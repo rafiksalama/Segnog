@@ -223,41 +223,29 @@ class ArtifactStore(BaseStore):
         artifact_type: Optional[str] = None,
         min_score: float = 0.50,
     ) -> List[Dict[str, Any]]:
-        """Vector similarity search on Artifact embeddings."""
+        """Vector similarity search on Artifact embeddings (indexed ANN)."""
         query_embedding = await self._embed(query)
 
-        type_filter = "AND a.artifact_type = $artifact_type" if artifact_type else ""
-
-        cypher = f"""
-            MATCH (a:Artifact)
-            WHERE a.group_id = $group_id {type_filter}
-            WITH a, (2 - vec.cosineDistance(a.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score > $min_score
-            RETURN
-                a.uuid AS uuid,
-                a.name AS name,
-                a.artifact_type AS artifact_type,
-                a.path AS path,
-                a.description AS description,
-                a.labels AS labels,
-                a.source_mission AS source_mission,
-                a.created_at AS created_at,
-                score
-            ORDER BY score DESC
-            LIMIT $top_k
-        """
-
-        params = {
-            "group_id": self._group_id,
-            "query_vec": query_embedding,
-            "min_score": min_score,
-            "top_k": top_k,
-        }
+        where_predicates = "a.group_id = $group_id"
+        params: Dict[str, Any] = {"group_id": self._group_id}
         if artifact_type:
+            where_predicates += " AND a.artifact_type = $artifact_type"
             params["artifact_type"] = artifact_type
 
-        result = await self._graph.ro_query(cypher, params=params)
-        return self._parse_results(result)
+        return await self._vector_search(
+            label="Artifact",
+            embedding=query_embedding,
+            top_k=top_k,
+            min_score=min_score,
+            where_predicates=where_predicates,
+            return_cols=(
+                "a.uuid AS uuid, a.name AS name, a.artifact_type AS artifact_type, "
+                "a.path AS path, a.description AS description, a.labels AS labels, "
+                "a.source_mission AS source_mission, a.created_at AS created_at, score"
+            ),
+            params=params,
+            node_var="a",
+        )
 
     async def search_hybrid(
         self,

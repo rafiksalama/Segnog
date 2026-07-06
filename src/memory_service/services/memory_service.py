@@ -236,33 +236,30 @@ class MemoryService:
         try:
             ep_store = self._ep(group_id or "default")
             embedding = await ep_store._embed(query)
-            refl_result = await ep_store._graph.ro_query(
-                """
-                MATCH (e:Episode)
-                WHERE e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']
-                WITH e,
-                     (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
-                WHERE score >= $min_score
-                RETURN e.uuid AS uuid, e.content AS content, e.episode_type AS knowledge_type,
-                       e.group_id AS group_id, score
-                ORDER BY score DESC
-                LIMIT $top_k
-                """,
-                params={
-                    "query_vec": embedding,
-                    "min_score": min_score or 0.4,
-                    "top_k": max(3, top_k // 3),
-                },
+            refl_rows = await ep_store._vector_search(
+                label="Episode",
+                embedding=embedding,
+                top_k=max(3, top_k // 3),
+                min_score=min_score or 0.4,
+                min_score_op=">=",
+                where_predicates=(
+                    "e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']"
+                ),
+                return_cols=(
+                    "e.uuid AS uuid, e.content AS content, "
+                    "e.episode_type AS knowledge_type, e.group_id AS group_id, score"
+                ),
+                node_var="e",
             )
-            for row in refl_result.result_set:
+            for row in refl_rows:
                 knowledge.append(
                     {
-                        "uuid": row[0],
-                        "content": row[1] or "",
-                        "knowledge_type": row[2] or "reflection",
+                        "uuid": row.get("uuid"),
+                        "content": row.get("content") or "",
+                        "knowledge_type": row.get("knowledge_type") or "reflection",
                         "labels": [],
                         "confidence": 0.9,
-                        "score": row[4],
+                        "score": row.get("score"),
                         "source": "reflection_episode",
                     }
                 )
@@ -585,27 +582,28 @@ class MemoryService:
                 return ""
             try:
                 embedding = await ep_store._embed(search_query)
-                result = await ep_store._graph.ro_query(
-                    """
-                    MATCH (e:Episode)
-                    WHERE e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']
-                    WITH e,
-                         (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
-                    WHERE score >= 0.45
-                    RETURN e.uuid AS uuid, e.content AS content, e.episode_type AS episode_type,
-                           e.group_id AS group_id, score
-                    ORDER BY score DESC
-                    LIMIT 5
-                    """,
-                    params={"query_vec": embedding},
+                rows = await ep_store._vector_search(
+                    label="Episode",
+                    embedding=embedding,
+                    top_k=5,
+                    min_score=0.45,
+                    min_score_op=">=",
+                    where_predicates=(
+                        "e.episode_type IN ['metacognition', 'causal_reflection', 'reflection']"
+                    ),
+                    return_cols=(
+                        "e.uuid AS uuid, e.content AS content, "
+                        "e.episode_type AS episode_type, e.group_id AS group_id, score"
+                    ),
+                    node_var="e",
                 )
-                if not result.result_set:
+                if not rows:
                     return ""
                 lines = ["## Prior Reflections & Metacognition"]
-                for i, r in enumerate(result.result_set, 1):
-                    etype = r[2] or "reflection"
-                    content = r[1] or ""
-                    score = r[4]
+                for i, r in enumerate(rows, 1):
+                    etype = r.get("episode_type") or "reflection"
+                    content = r.get("content") or ""
+                    score = r.get("score") or 0.0
                     lines.append(f"{i}. [{etype}] {content} (score={score:.2f})")
                 return "\n".join(lines)
             except Exception as e:
