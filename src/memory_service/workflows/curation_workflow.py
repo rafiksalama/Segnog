@@ -35,6 +35,16 @@ async def handle_reflection(payload: Dict[str, Any]) -> Dict[str, Any]:
     model = payload.get("model")
     group_id = payload.get("group_id")
 
+    # Background REM consolidation (large backlog groups, 60s-capped) skips the
+    # reflection+metacognition LLM calls. MiniMax-M3 reasons heavily on these (~42s
+    # per call, 2 calls = ~84s) which alone blows the job budget, and reflection is
+    # a synthesis nicety, not required for knowledge extraction (which works on the
+    # raw report). The real-time CurationWorker (fresh episodes, no 60s cap) still
+    # gets full reflection. Detected via the REMWorker's mission task prefix.
+    task = mission_data.get("task") or ""
+    if task.startswith("Background consolidation"):
+        return {"reflection": "", "sections": {}, "skipped": True}
+
     try:
         sections = await generate_reflection(mission_data, model=model, group_id=group_id)
         reflection = sections.get("reflection", "")
