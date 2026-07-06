@@ -128,23 +128,15 @@ class REMWorker:
     async def _query_pending_groups(self, has_ontology: bool, limit: int) -> List[Dict[str, Any]]:
         """Query pending groups filtered by ontology data existence.
 
-        Uses two-step approach: find groups with ABOUT edges first,
-        then filter pending groups accordingly.
+        Gets pending groups first (indexed, fast), then does a per-group bounded
+        ABOUT-edge existence check. This avoids the old global
+        ``MATCH (e:Episode)-[:ABOUT]->(:OntologyNode) RETURN DISTINCT e.group_id``
+        which scanned the full ABOUT-edge set (millions of edges at the 0.5
+        linker threshold) and timed out at FalkorDB's 5s ceiling every REM cycle.
         """
         now = time.time()
 
-        # Step 1: Get set of group_ids that have ABOUT edges
-        try:
-            about_result = await self._episode_store._graph.ro_query(
-                """MATCH (e:Episode)-[:ABOUT]->(:OntologyNode)
-                RETURN DISTINCT e.group_id AS gid""",
-            )
-            groups_with_ontology = {row[0] for row in about_result.result_set if row[0]}
-        except Exception as e:
-            logger.warning(f"REM ontology check failed: {e}")
-            groups_with_ontology = set()
-
-        # Step 2: Get all pending groups
+        # Step 1: Get all pending groups (fast via consolidation_status index).
         # NB: no created_at > since_ts filter. consolidation_status='pending' is the
         # correct gate (episodes become 'consolidated'/'duplicate' once processed and
         # are never re-picked). A since_ts filter permanently skips any backlog older
@@ -171,13 +163,24 @@ class REMWorker:
             logger.warning(f"REM group discovery failed: {e}")
             return []
 
+        # Step 2: per-group bounded ontology check. Uses the group_id index and
+        # stops at the first ABOUT edge (LIMIT 1) — bounded per group, not a
+        # global edge scan.
         groups = []
         for row in result.result_set:
             gid, raw_count, oldest_ts = row[0], row[1], row[2]
             if not gid:
                 continue
-            # Filter by ontology existence
-            has_about = gid in groups_with_ontology
+            try:
+                about_result = await self._episode_store._graph.ro_query(
+                    "MATCH (e:Episode {group_id: $gid})-[:ABOUT]->(:OntologyNode) "
+                    "RETURN true LIMIT 1",
+                    params={"gid": gid},
+                )
+                has_about = bool(about_result.result_set)
+            except Exception as e:
+                logger.debug("REM per-group ontology check failed for %s: %s", gid, e)
+                has_about = False
             if has_ontology and not has_about:
                 continue
             if not has_ontology and has_about:
