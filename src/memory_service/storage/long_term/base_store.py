@@ -11,7 +11,7 @@ Embedding backends:
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -167,3 +167,92 @@ class BaseStore:
             rows.append(record)
 
         return rows
+
+    async def _vector_search(
+        self,
+        *,
+        label: str,
+        embedding: List[float],
+        top_k: int,
+        min_score: float,
+        where_predicates: str = "",
+        return_cols: str = "",
+        params: Optional[Dict[str, Any]] = None,
+        node_var: str = "n",
+        min_score_op: str = ">",
+        knn_k: Optional[int] = None,
+        fallback_on_underdeliver: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Indexed vector similarity search (ANN) with a brute-force fallback.
+
+        Tries ``db.idx.vector.queryNodes`` first (O(log n), uses the label's
+        VECTOR index on ``.embedding``). The queryNodes ``score`` is a cosine
+        DISTANCE; we map it back to [0,1] similarity via ``(2 - score)/2`` so the
+        post-filter / ORDER / LIMIT work on the same scale every store expects.
+
+        Falls back to a brute-force ``vec.cosineDistance`` scan when:
+          - the index is missing or the call errors, OR
+          - ``fallback_on_underdeliver`` is True (the default, for read paths) AND
+            the filtered ANN returned fewer than ``top_k`` rows (a small group in
+            a large multi-tenant graph can fall outside the over-fetch window).
+
+        Write-path callers that only need a top-1 match (e.g. per-write dedup,
+        entity resolution) pass ``fallback_on_underdeliver=False`` and rely on the
+        over-fetch window alone, so a no-match result doesn't trigger a full scan
+        on every write.
+
+        Args:
+            label: node label, e.g. ``"Knowledge"``. Must have a VECTOR index on
+                ``.embedding`` (created in the store's ``ensure_indexes``).
+            embedding: query vector, already embedded by the caller.
+            top_k: number of rows to return.
+            min_score: minimum similarity (post ``(2-distance)/2`` mapping).
+            where_predicates: extra predicates on the node/score, e.g.
+                ``"n.group_id = $group_id AND n.status <> 'refuted'"``. Joined to
+                the ``min_score`` check with ``AND``. Bindings come from ``params``.
+            return_cols: the RETURN body, e.g.
+                ``"n.uuid AS uuid, n.content AS content, score"``.
+            params: bindings referenced in ``where_predicates``. ``query_vec``,
+                ``min_score`` and ``top_k`` are added automatically.
+            node_var: Cypher node variable name (default ``"n"``).
+            min_score_op: comparison operator for ``min_score`` (``">"`` or ``">="``).
+            knn_k: override the ANN over-fetch K (default ``max(top_k*20, 200)``).
+            fallback_on_underdeliver: see above.
+        """
+        knn = knn_k or max(top_k * _VECTOR_OVERFETCH, _VECTOR_MIN_K)
+        p: Dict[str, Any] = {"query_vec": embedding, "min_score": min_score, "top_k": top_k}
+        if params:
+            p.update(params)
+        n = node_var
+        filt = (
+            (where_predicates + " AND " if where_predicates else "")
+            + f"score {min_score_op} $min_score"
+        )
+        suffix = f"WHERE {filt} RETURN {return_cols} ORDER BY score DESC LIMIT $top_k"
+        ann_cypher = (
+            f"CALL db.idx.vector.queryNodes('{label}', 'embedding', {int(knn)}, "
+            f"vecf32($query_vec)) YIELD node AS {n}, score "
+            f"WITH {n}, (2 - score)/2 AS score {suffix}"
+        )
+        brute_cypher = (
+            f"MATCH ({n}:{label}) "
+            f"WITH {n}, (2 - vec.cosineDistance({n}.embedding, "
+            f"vecf32($query_vec)))/2 AS score {suffix}"
+        )
+
+        try:
+            result = await self._graph.ro_query(ann_cypher, params=p)
+            got = len(result.result_set) if result and result.result_set else 0
+            if got >= top_k or not fallback_on_underdeliver:
+                return self._parse_results(result)
+            logger.debug(
+                "ANN under-delivered on %s (%d < %d); brute-force fallback",
+                label, got, top_k,
+            )
+        except Exception as e:
+            logger.debug(
+                "Vector index search unavailable on %s (%s); brute-force scan",
+                label, e,
+            )
+        result = await self._graph.ro_query(brute_cypher, params=p)
+        return self._parse_results(result)
