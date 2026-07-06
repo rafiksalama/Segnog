@@ -225,9 +225,8 @@ class BaseStore:
             p.update(params)
         n = node_var
         filt = (
-            (where_predicates + " AND " if where_predicates else "")
-            + f"score {min_score_op} $min_score"
-        )
+            where_predicates + " AND " if where_predicates else ""
+        ) + f"score {min_score_op} $min_score"
         suffix = f"WHERE {filt} RETURN {return_cols} ORDER BY score DESC LIMIT $top_k"
         ann_cypher = (
             f"CALL db.idx.vector.queryNodes('{label}', 'embedding', {int(knn)}, "
@@ -247,12 +246,15 @@ class BaseStore:
                 return self._parse_results(result)
             logger.debug(
                 "ANN under-delivered on %s (%d < %d); brute-force fallback",
-                label, got, top_k,
+                label,
+                got,
+                top_k,
             )
         except Exception as e:
             logger.debug(
                 "Vector index search unavailable on %s (%s); brute-force scan",
-                label, e,
+                label,
+                e,
             )
         result = await self._graph.ro_query(brute_cypher, params=p)
         return self._parse_results(result)
