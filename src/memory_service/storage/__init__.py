@@ -13,7 +13,9 @@ Sub-packages:
   retrieval/   — temporal scoring and Hebbian co-activation ranking
 """
 
+import asyncio
 import logging
+import os
 from urllib.parse import urlparse
 
 from .long_term.base_store import BaseStore, normalize_name
@@ -26,6 +28,75 @@ from .long_term.ontology_store import OntologyStore
 from .long_term.causal_store import CausalClaimStore
 
 logger = logging.getLogger(__name__)
+
+
+def getenv_int(name: str, default: int) -> int:
+    """Read a positive int from the environment, falling back to default."""
+    try:
+        val = int(os.getenv(name, ""))
+        return val if val > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+# Labels that carry a vector index on .embedding. The readiness gate waits for
+# every one of these to be OPERATIONAL before init_backends returns.
+_VECTOR_INDEXED_LABELS = ("Knowledge", "Episode", "OntologyNode", "CausalClaim", "Artifact")
+
+
+async def _await_vector_indexes(graph, timeout: int = 600, poll_interval: float = 2.0) -> None:
+    """Block until every vector index is OPERATIONAL, or until timeout.
+
+    FalkorDB rebuilds all persisted vector indexes asynchronously on each load.
+    Writes (CREATE Episode + dedup from /observe) during that rebuild corrupt
+    the heap (SIGSEGV). Callers run this before starting the API servers so no
+    /observe can land during the rebuild window.
+
+    On timeout we log loudly and return anyway — FalkorDB may simply be slow,
+    and the per-store brute-force fallbacks keep reads correct without the
+    index. A timeouted start still risks the write-during-build segfault, but
+    that is strictly better than hanging startup forever on a stuck build.
+    """
+    expected = set(_VECTOR_INDEXED_LABELS)
+    deadline = asyncio.get_event_loop().time() + timeout
+    last_status: dict = {}
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            # Cap each poll so a query hung on a saturated FalkorDB (99% CPU
+            # loading the dataset) can't stall the loop — it'll time out,
+            # fall through, and we retry after poll_interval.
+            result = await asyncio.wait_for(
+                graph.query(
+                    "CALL db.indexes() YIELD label, types, status RETURN label, types, status"
+                ),
+                timeout=15.0,
+            )
+            vec_status = {}
+            for row in result.result_set or []:
+                label, types, status = row[0], row[1], row[2]
+                if "VECTOR" in str(types):
+                    vec_status[str(label)] = str(status)
+            last_status = vec_status
+            operational = {lbl for lbl, st in vec_status.items() if "OPERATIONAL" in st}
+            if expected <= operational:
+                logger.info("All vector indexes OPERATIONAL: %s", sorted(operational))
+                return
+            logger.info(
+                "Awaiting vector index rebuild before accepting writes: %s",
+                vec_status,
+            )
+        except Exception as e:
+            # FalkorDB is typically just saturated loading the dataset here.
+            logger.debug("Vector index poll failed (FalkorDB busy?): %s", e)
+        await asyncio.sleep(poll_interval)
+    logger.warning(
+        "Vector indexes not all OPERATIONAL after %ds (last=%s); starting anyway "
+        "(brute-force fallbacks remain correct). If FalkorDB is still rebuilding, "
+        "this risks the write-during-build segfault — check FalkorDB stability.",
+        timeout,
+        last_status,
+    )
+
 
 __all__ = [
     "BaseStore",
@@ -128,6 +199,18 @@ async def init_backends(session_ttl: int = 3600) -> dict:
 
     causal_store = CausalClaimStore(graph, openai_client, embedding_model, local_embed=local_embed)
     await causal_store.ensure_indexes()
+
+    # Wait for every vector index to finish building before accepting writes.
+    # FalkorDB rebuilds ALL persisted vector indexes asynchronously on every
+    # load (cold start AND every restart). Concurrent /observe writes (CREATE
+    # Episode + dedup) during that rebuild window corrupt FalkorDB's heap →
+    # SIGSEGV restart loop (seen in production: a single index survived this
+    # for weeks, 5 concurrent rebuilds + live traffic did not). Blocking here
+    # keeps the REST/gRPC/MCP servers from starting — and thus from accepting
+    # /observe — until every index is OPERATIONAL, so the rebuild runs
+    # write-free. The per-store brute-force fallbacks keep reads correct even
+    # if an index is slow to come up.
+    await _await_vector_indexes(graph, timeout=getenv_int("VECTOR_INDEX_BUILD_TIMEOUT_S", 600))
 
     logger.info("All storage backends initialized")
 
