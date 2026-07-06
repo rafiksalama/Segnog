@@ -284,10 +284,17 @@ class CausalClaimStore(BaseStore):
         """
         gid = group_id or self._group_id
         now = time.time()
+        # Scope to the group when provided so concurrent REM jobs (different
+        # groups) don't double-decay / race on each other's claims. Global when
+        # group_id is None (e.g. a maintenance sweep).
+        group_filter = "AND c.group_id = $group_id" if gid else ""
+        params: Dict[str, Any] = {"now": now}
+        if gid:
+            params["group_id"] = gid
         result = await self._graph.query(
-            """
+            f"""
             MATCH (c:CausalClaim)
-            WHERE c.status <> 'refuted'
+            WHERE c.status <> 'refuted' {group_filter}
             OPTIONAL MATCH (k1:Knowledge)-[s:SUPPORTS]->(c)
             OPTIONAL MATCH (k2:Knowledge)-[d:CONTRADICTS]->(c)
             WITH c,
@@ -317,7 +324,7 @@ class CausalClaimStore(BaseStore):
                 c.updated_at = $now
             RETURN count(c) AS revised
             """,
-            params={"group_id": gid, "now": now},
+            params=params,
         )
         revised = result.result_set[0][0] if result.result_set else 0
         if revised:
@@ -337,18 +344,26 @@ class CausalClaimStore(BaseStore):
         Returns number of CAUSES edges created.
         """
         gid = group_id or self._group_id
+        # Scope both endpoints to the group when provided — without this, two
+        # concurrent REM jobs would MERGE duplicate CAUSES edges on each other's
+        # claims (the param is bound below only when gid is set). Global when None.
+        gfilter = "AND a.group_id = $group_id AND b.group_id = $group_id" if gid else ""
+        params: Dict[str, Any] = {"now": time.time()}
+        if gid:
+            params["group_id"] = gid
         try:
             result = await self._graph.query(
-                """
+                f"""
                 MATCH (a:CausalClaim)-[:EFFECT_ENTITY]->(n:OntologyNode)<-[:CAUSE_ENTITY]-(b:CausalClaim)
                 WHERE a.uuid <> b.uuid
                   AND a.status <> 'refuted'
                   AND b.status <> 'refuted'
+                  {gfilter}
                 MERGE (a)-[r:CAUSES]->(b)
                 ON CREATE SET r.provenance = 'transitive', r.created_at = $now
                 RETURN count(*) AS created
                 """,
-                params={"now": time.time()},
+                params=params,
             )
             created = result.result_set[0][0] if result.result_set else 0
             if created:

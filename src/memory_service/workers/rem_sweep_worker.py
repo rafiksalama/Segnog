@@ -118,6 +118,7 @@ class REMSweepWorker:
     async def _run_sweep(self) -> None:
         """Full sweep: reuse existing REMWorker logic."""
         import time as _time
+        from ..config import get_background_max_concurrent, get_background_job_timeout
         from .rem_worker import REMWorker
 
         temp_worker = REMWorker(
@@ -128,6 +129,8 @@ class REMSweepWorker:
             min_episodes=self._min_episodes,
             ontology_store=self._ontology_store,
             causal_store=self._causal_store,
+            max_concurrent=get_background_max_concurrent(),
+            job_timeout_seconds=get_background_job_timeout(),
         )
         t0 = _time.perf_counter()
         await temp_worker._run_cycle()

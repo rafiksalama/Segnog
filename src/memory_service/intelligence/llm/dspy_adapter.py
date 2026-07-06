@@ -41,12 +41,24 @@ def configure_dspy_lm(
     temperature: float = 0.3,
     max_tokens: int = 196000,
     api_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = "low",
+    timeout: int = 30,
+    num_retries: int = 0,
 ) -> dspy.LM:
     """
-    Configure and return a DSPy LM pointing at OpenRouter.
+    Configure and return a DSPy LM pointing at the configured OpenAI-compatible
+    endpoint (MiniMax by default).
 
-    DSPy uses LiteLLM under the hood. OpenRouter models need
-    the openrouter/ prefix so LiteLLM routes correctly.
+    DSPy uses LiteLLM under the hood. OpenRouter models need the openrouter/
+    prefix so LiteLLM routes correctly; other OpenAI-compatible APIs use openai/.
+
+    ``reasoning_effort`` defaults to ``"low"`` because the flash model (MiniMax-M3)
+    is a reasoning model — it emits ``<think>`` blocks on every call, which dominate
+    extraction latency. Throttling to "low" roughly halves per-call wall time. The
+    value is forwarded via ``extra_body`` (the same mechanism ``llm_call`` uses).
+
+    ``timeout`` defaults to 30s with ``num_retries=0`` so one slow call fails fast
+    instead of blocking the (now concurrent) REM sweep for 120s via litellm's retry.
     """
     api_key = api_key or get_llm_api_key()
     model = model or get_flash_model()
@@ -66,13 +78,20 @@ def configure_dspy_lm(
         temperature = 1.0
         max_tokens = max(max_tokens, 16000)
 
-    lm = dspy.LM(
-        model=litellm_model,
-        api_key=api_key,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        api_base=base_url,
-        timeout=60,
-        num_retries=1,
-    )
-    return lm
+    lm_kwargs: dict = {
+        "model": litellm_model,
+        "api_key": api_key,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "api_base": base_url,
+        "timeout": timeout,
+        "num_retries": num_retries,
+    }
+    if reasoning_effort:
+        # LiteLLM forwards extra_body to the underlying request. Mirrors the
+        # reasoning_split + reasoning_effort pattern in llm_call (client.py).
+        lm_kwargs["extra_body"] = {
+            "reasoning_split": True,
+            "reasoning_effort": reasoning_effort,
+        }
+    return dspy.LM(**lm_kwargs)

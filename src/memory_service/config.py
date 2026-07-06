@@ -126,12 +126,24 @@ def get_background_interval() -> int:
 
 def get_background_batch_size() -> int:
     s = get_settings()
-    return int(s.get("background.batch_size", 5))
+    return int(s.get("background.batch_size", 20))
 
 
 def get_background_min_episodes() -> int:
     s = get_settings()
     return int(s.get("background.min_episodes_for_processing", 3))
+
+
+def get_background_max_concurrent() -> int:
+    """Max REM/curation jobs consolidated in parallel."""
+    s = get_settings()
+    return max(1, int(s.get("background.max_concurrent", 10)))
+
+
+def get_background_job_timeout() -> int:
+    """Hard per-job budget (seconds). Jobs that exceed it abort + retry next cycle."""
+    s = get_settings()
+    return max(10, int(s.get("background.job_timeout_seconds", 60)))
 
 
 def get_episode_half_life() -> float:
