@@ -62,6 +62,7 @@ Write the updated prose summary for {entity_name}:"""
             temperature=0.2,
             max_tokens=2000,
             system_prompt=_SYSTEM_PROMPT,
+            reasoning_effort="low",
         )
         updated = updated.strip()
         if not updated or len(updated) < 10:

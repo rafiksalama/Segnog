@@ -64,9 +64,14 @@ activation_cap = 1000
 [default.background]
 enabled = true
 interval_seconds = 120
-batch_size = 5
+batch_size = 20
 min_episodes_for_processing = 3
 dedup_threshold = 0.9
+# Max REM/curation jobs consolidated in parallel. MiniMax-M3 (reasoning throttled
+# to "low" on extraction) handles this; bounded by the REM/curation semaphores.
+max_concurrent = 10
+# Hard per-job budget. Jobs that exceed it abort; episodes stay 'pending' + retry.
+job_timeout_seconds = 60
 
 [default.retrieval]
 episode_top_k = 25
@@ -94,4 +99,4 @@ enabled = true
 url = "nats://localhost:4222"
 curation_min_episodes = 3
 curation_max_wait_seconds = 30.0
-curation_max_concurrent = 2
+curation_max_concurrent = 10

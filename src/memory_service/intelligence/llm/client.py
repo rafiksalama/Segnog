@@ -120,8 +120,17 @@ async def llm_call(
 
     import asyncio as _asyncio
 
-    # Timeout: 120s for high-reasoning calls, 60s for normal
-    _timeout = 120.0 if reasoning_effort else 60.0
+    # Effort-aware timeout. "low" reasoning is fast (MiniMax-M3 emits a short
+    # <think> block) so it gets a tight 30s budget; unset (full reasoning) gets
+    # 60s. The old 120s-for-any-reasoning mapping let low-effort extraction calls
+    # stall the REM sweep; the per-job 60s cap (rem_worker) needs every LLM call
+    # to fail fast.
+    if reasoning_effort == "low":
+        _timeout = 30.0
+    elif reasoning_effort:
+        _timeout = 60.0
+    else:
+        _timeout = 60.0
     response = await _asyncio.wait_for(
         client.chat.completions.create(**kwargs),
         timeout=_timeout,

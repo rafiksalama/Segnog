@@ -63,6 +63,7 @@ async def extract_causal_claims(
             temperature=0.1,
             max_tokens=4000,
             system_prompt=_SYSTEM_PROMPT,
+            reasoning_effort="low",
         )
 
         # Parse JSON from response (handle markdown code blocks, empty responses)

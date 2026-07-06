@@ -17,6 +17,8 @@ from .config import (
     get_background_enabled,
     get_background_interval,
     get_background_batch_size,
+    get_background_job_timeout,
+    get_background_max_concurrent,
     get_background_min_episodes,
     get_nats_enabled,
     get_nats_url,
@@ -232,6 +234,8 @@ async def main():
             ontology_store=backends.get("ontology_store"),
             causal_store=backends.get("causal_store"),
             dragonfly=backends["dragonfly"],
+            max_concurrent=get_background_max_concurrent(),
+            job_timeout_seconds=get_background_job_timeout(),
         )
         tasks.append(rem_worker.run())
         logger.info("REM background worker enabled (polling mode)")

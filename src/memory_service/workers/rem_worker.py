@@ -31,6 +31,8 @@ class REMWorker:
         ontology_store=None,
         causal_store=None,
         dragonfly=None,
+        max_concurrent: int = 10,
+        job_timeout_seconds: int = 60,
     ):
         self._handler = handler
         self._episode_store = episode_store
@@ -40,6 +42,11 @@ class REMWorker:
         self._ontology_store = ontology_store
         self._causal_store = causal_store
         self._dragonfly = dragonfly
+        self._max_concurrent = max_concurrent
+        self._job_timeout = job_timeout_seconds
+        # Bounds in-flight group consolidations (groups run concurrently up to
+        # this limit) and protects FalkorDB + MiniMax from a thundering herd.
+        self._sem = asyncio.Semaphore(max_concurrent)
         self._running = False
         self._last_sweep_ts: float = 0.0  # Unix timestamp of last completed sweep
 
@@ -48,7 +55,8 @@ class REMWorker:
         self._running = True
         logger.info(
             f"REM worker started (interval={self._interval}s, "
-            f"batch={self._batch_size}, min_episodes={self._min_episodes})"
+            f"batch={self._batch_size}, min_episodes={self._min_episodes}, "
+            f"max_concurrent={self._max_concurrent}, job_timeout={self._job_timeout}s)"
         )
 
         try:
@@ -62,32 +70,53 @@ class REMWorker:
             self._running = False
             logger.info("REM worker stopped")
 
+    async def _consolidate_one(self, group_info: dict) -> bool:
+        """Consolidate one group under the concurrency semaphore + a hard per-job
+        timeout. Returns True on success, False on failure/timeout.
+
+        On timeout the partial work is abandoned — episodes stay 'pending' and
+        retry next cycle (FalkorDB writes are idempotent MERGEs, and
+        mark_episodes_consolidated only runs on full success, so no corruption).
+        """
+        gid = group_info["group_id"]
+        async with self._sem:
+            try:
+                result = await asyncio.wait_for(
+                    self._consolidate_group(group_info), timeout=self._job_timeout
+                )
+                logger.info(
+                    f"REM consolidated '{gid}': "
+                    f"{result.get('duplicates', 0)} duplicates, "
+                    f"{result.get('episodes_consolidated', 0)} unique consolidated, "
+                    f"compressed={result.get('compressed_uuid', '')[:8] or 'none'}"
+                )
+                return True
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "REM job '%s' exceeded %ds budget — aborted, will retry next cycle",
+                    gid,
+                    self._job_timeout,
+                )
+                return False
+            except Exception as e:
+                logger.error(f"REM failed for '{gid}': {e}", exc_info=True)
+                return False
+
     async def _run_cycle(self) -> None:
-        """Find pending groups by priority, consolidate each, then run Hebbian decay."""
+        """Find pending groups by priority, consolidate them concurrently (up to
+        max_concurrent in flight), then run Hebbian decay."""
         t0 = time.perf_counter()
         cycle_start = time.time()
         groups = await self._find_pending_groups()
 
         if groups:
             logger.info(
-                f"REM cycle: {len(groups)} group(s) to consolidate (since_ts={self._last_sweep_ts:.0f})"
+                f"REM cycle: {len(groups)} group(s) to consolidate "
+                f"(concurrency={self._max_concurrent}, since_ts={self._last_sweep_ts:.0f})"
             )
-            had_failure = False
-            for group_info in groups:
-                gid = group_info["group_id"]
-                try:
-                    result = await self._consolidate_group(group_info)
-                    logger.info(
-                        f"REM consolidated '{gid}': "
-                        f"{result.get('duplicates', 0)} duplicates, "
-                        f"{result.get('episodes_consolidated', 0)} unique consolidated, "
-                        f"compressed={result.get('compressed_uuid', '')[:8] or 'none'}"
-                    )
-                except Exception as e:
-                    had_failure = True
-                    logger.error(f"REM failed for '{gid}': {e}", exc_info=True)
-                await asyncio.sleep(0.1)
-
+            # Run groups concurrently, bounded by self._sem. Each is 60s-capped.
+            results = await asyncio.gather(*[self._consolidate_one(g) for g in groups])
+            had_failure = not all(results)
             # Only advance sweep timestamp if all consolidations succeeded.
             # On failure, episodes stay 'pending' and will be retried next cycle.
             if not had_failure:
@@ -95,7 +124,8 @@ class REMWorker:
         else:
             self._last_sweep_ts = cycle_start
 
-        # Hebbian decay runs every cycle (even when no consolidation needed)
+        # Hebbian decay runs every cycle (even when no consolidation needed).
+        # Global query — must stay per-cycle, NOT inside per-group work.
         await self._decay_hebbian_weights()
 
         # Record total cycle latency (fire-and-forget, runs in parallel)
@@ -209,7 +239,6 @@ class REMWorker:
         5. Temporal compression of unique episodes
         """
         group_id = group_info["group_id"]
-        is_priority = group_info.get("is_priority", False)
 
         # Fetch pending raw episodes with embeddings, oldest first
         cypher = """
@@ -288,12 +317,11 @@ class REMWorker:
             }
         )
 
-        # Step 8: Ontology update (entity extraction + summary refresh + RELATES edges)
-        # CRITICAL: failure halts consolidation — episodes stay 'pending' for retry
-        if self._ontology_store is not None:
-            await self._update_ontology(
-                group_id, unique_episodes, combined_content, is_priority=is_priority
-            )
+        # Ontology (entity extraction + summary refresh + RELATES edges + ABOUT
+        # linking) is handled by the DAG's async `handle_ontology` stage fired
+        # inside run_curation above — it ran the same work a second time here
+        # (blocking, ~50+ LLM calls), which is what blew the per-job budget. The
+        # async stage still grows ontology; ABOUT-edge linking is unblocked (PR #5).
 
         consolidated_count = await self._episode_store.mark_episodes_consolidated(source_uuids)
 
