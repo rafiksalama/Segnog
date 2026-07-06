@@ -1,17 +1,28 @@
 services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    # FalkorDB runs on the upstream image in its own container. The bundled
+    # build segfaulted during multi-vector-index rebuilds on load; the standalone
+    # image builds them cleanly. memory-service connects via the URL below.
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+    restart: unless-stopped
+
   segnog:
     image: rafiksalama/segnog:latest
+    depends_on:
+      - falkordb
     ports:
       - "${GRPC_PORT:-50051}:50051"
       - "${PORT:-9000}:9000"
     environment:
       - MEMORY_SERVICE_REST__HOST=0.0.0.0
       - MEMORY_SERVICE_REST__PORT=9000
+      - MEMORY_SERVICE_FALKORDB__URL=redis://falkordb:6379
       - MEMORY_SERVICE_LLM__API_KEY=${LLM_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
     volumes:
       - dragonfly_data:/data/dragonfly
-      - falkordb_data:/data/falkordb
       - nats_data:/data/nats
       - pip_packages:/pip-install
       - hf_cache:/root/.cache/huggingface
@@ -19,8 +30,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  dragonfly_data:
   falkordb_data:
+  dragonfly_data:
   nats_data:
   pip_packages:
   hf_cache:

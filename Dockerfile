@@ -1,6 +1,7 @@
 ## ---------------------------------------------------------------------------
-##  Segnog — All-in-one container
-##  Bundles DragonflyDB + FalkorDB + Memory Service + UI in a single image.
+##  Segnog — Memory Service + UI container
+##  Bundles DragonflyDB + NATS + Memory Service. FalkorDB runs separately on
+##  the upstream falkordb/falkordb image (see docker-compose.yml).
 ## ---------------------------------------------------------------------------
 
 # ── Build Python deps ──────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# supervisord + runtime libs needed by FalkorDB (libgomp, libssl, libstdc++)
+# supervisord + runtime libs (libgomp/libssl/libstdc++ retained — general-purpose)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         supervisor libgomp1 libssl3 libstdc++6 && \
@@ -51,9 +52,11 @@ RUN apt-get update && \
 # ── Install DragonflyDB binary from official image ───────────────────────
 COPY --from=docker.dragonflydb.io/dragonflydb/dragonfly:latest /usr/local/bin/dragonfly /usr/local/bin/dragonfly
 
-# ── Install FalkorDB (Redis server + graph module) from official image ────
-COPY --from=falkordb/falkordb:latest /usr/local/bin/redis-server /usr/local/bin/falkordb-server
-COPY --from=falkordb/falkordb:latest /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
+# Note: FalkorDB is no longer bundled — it runs in its own container on the
+# upstream falkordb/falkordb image (see docker-compose.yml). The bundled build
+# segfaulted during multi-vector-index rebuilds on load; the standalone image on
+# identical data builds them cleanly. memory-service connects via
+# MEMORY_SERVICE_FALKORDB__URL.
 
 # ── Install NATS server (arch-aware: amd64 + arm64) ─────────────────────
 RUN apt-get update && \
@@ -84,7 +87,7 @@ COPY sync-data.sh /app/sync-data.sh
 RUN chmod +x /app/entrypoint.sh /app/sync-data.sh
 
 # ── Data directories + pip-install dir ─────────────────────────────────────
-RUN mkdir -p /data/dragonfly /data/falkordb /data/nats /var/log/supervisor /pip-install
+RUN mkdir -p /data/dragonfly /data/nats /var/log/supervisor /pip-install
 ENV PYTHONPATH="/pip-install"
 
 # Bake local-embedding deps (CPU torch + sentence-transformers) into /pip-install.
@@ -108,7 +111,7 @@ EXPOSE 50051 9000
 
 # Persist database state via Azure Files (mounted at /backup/*).
 # Note: /pip-install is NOT a volume — it holds baked local-embed deps (image content).
-VOLUME ["/backup/dragonfly", "/backup/falkordb", "/backup/nats"]
+VOLUME ["/backup/dragonfly", "/backup/nats"]
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')" || exit 1
