@@ -427,33 +427,53 @@ async def create_about_edges_by_similarity(
     ontology_store,
     min_score: float = 0.5,
 ) -> int:
-    """Create ABOUT edges by embedding cosine similarity.
+    """Create ABOUT edges by embedding cosine similarity (indexed ANN).
 
-    Pure FalkorDB operation — both Episodes and OntologyNodes already
-    have embeddings stored. Uses vec.cosineDistance for semantic matching.
+    For each episode in the group, query the OntologyNode vector index for its
+    nearest ontology nodes above min_score and MERGE ABOUT edges. Replaces a
+    brute-force Episode×OntologyNode cartesian product (≤20 just-consolidated
+    episodes × all OntologyNodes per REM cycle) with per-episode O(log n) ANN.
+
+    Embeddings round-trip through Python: fetched as decoded lists via the
+    falkordb client, passed back as ``vecf32($ep_emb)`` params (the same pattern
+    RemWorker._find_similar_consolidated already relies on).
     """
+    # K must be a literal (some FalkorDB builds reject a parameter here).
+    _K = 200  # over-fetch: capture every OntologyNode above min_score per episode
+    graph = ontology_store._graph
     try:
-        result = await ontology_store._graph.query(
-            """
-            MATCH (e:Episode {group_id: $group_id})
-            WHERE e.embedding IS NOT NULL
-            MATCH (n:OntologyNode)
-            WHERE n.embedding IS NOT NULL
-            WITH e, n, (2 - vec.cosineDistance(e.embedding, n.embedding)) / 2 AS score
-            WHERE score >= $min_score
-            MERGE (e)-[:ABOUT]->(n)
-            RETURN count(*) AS created
-            """,
-            params={"group_id": group_id, "min_score": min_score},
+        eps = await graph.ro_query(
+            "MATCH (e:Episode {group_id: $group_id}) WHERE e.embedding IS NOT NULL "
+            "RETURN e.uuid AS uuid, e.embedding AS embedding",
+            params={"group_id": group_id},
         )
-        created = result.result_set[0][0] if result.result_set else 0
-        if created:
-            logger.info(
-                "Post-hoc ABOUT edges: %d created for group '%s'",
-                created,
-                group_id,
-            )
-        return created
+        rows = eps.result_set if eps and eps.result_set else []
     except Exception as e:
-        logger.warning("Post-hoc ABOUT edges failed for '%s': %s", group_id, e)
+        logger.warning("Post-hoc ABOUT edges: episode fetch failed for '%s': %s", group_id, e)
         return 0
+
+    total = 0
+    for row in rows:
+        ep_uuid = row[0]
+        ep_emb = row[1]
+        if not ep_uuid or ep_emb is None:
+            continue
+        try:
+            res = await graph.query(
+                f"CALL db.idx.vector.queryNodes('OntologyNode', 'embedding', {_K}, "
+                "vecf32($ep_emb)) YIELD node AS n, score "
+                "WITH n, (2 - score)/2 AS sim, $ep_uuid AS ep_uuid "
+                "WHERE sim >= $min_score "
+                "MATCH (e:Episode {uuid: ep_uuid}) "
+                "MERGE (e)-[:ABOUT]->(n) "
+                "RETURN count(*) AS c",
+                params={"ep_emb": ep_emb, "ep_uuid": ep_uuid, "min_score": min_score},
+            )
+            if res.result_set:
+                total += res.result_set[0][0] or 0
+        except Exception as e:
+            logger.debug("ABOUT edges for episode %s failed: %s", str(ep_uuid)[:8], e)
+
+    if total:
+        logger.info("Post-hoc ABOUT edges: %d created for group '%s'", total, group_id)
+    return total

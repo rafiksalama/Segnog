@@ -23,7 +23,7 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 from ...ontology.schema_org import SchemaOrgOntology
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,17 @@ class OntologyStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass  # Index may already exist
+
+        # Vector (ANN) index — powers search_nodes (global path) and
+        # create_about_edges_by_similarity via db.idx.vector.queryNodes.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (n:OntologyNode) ON (n.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("OntologyStore vector index created on OntologyNode.embedding")
+        except Exception:
+            pass  # Index already exists
 
         logger.debug("OntologyStore indexes ensured")
 
@@ -198,50 +209,47 @@ class OntologyStore(BaseStore):
         Returns list of dicts sorted by score descending. Never traverses graph edges.
         """
         gid = group_id if group_id is not None else self._group_id
-        embedding_return = (
-            ",\n                n.embedding AS embedding" if include_embedding else ""
+        embedding_return = ", n.embedding AS embedding" if include_embedding else ""
+        return_cols = (
+            "n.uuid AS uuid, n.name AS name, n.schema_type AS schema_type, "
+            "n.display_name AS display_name, n.summary AS summary, "
+            "n.source_count AS source_count, n.created_at AS created_at, "
+            f"n.updated_at AS updated_at, score{embedding_return}"
         )
 
-        # Scope to entities linked to episodes in this group via ABOUT edges,
-        # or search globally if group_id was explicitly None.
-        if group_id is not None:
-            match_clause = """
-            MATCH (ep:Episode {group_id: $group_id})-[:ABOUT]->(n:OntologyNode)
-            WITH DISTINCT n"""
-            params = {
+        # Global search (group_id explicitly None) — indexed ANN path.
+        if group_id is None:
+            return await self._vector_search(
+                label="OntologyNode",
+                embedding=embedding,
+                top_k=top_k,
+                min_score=min_score,
+                min_score_op=">=",
+                return_cols=return_cols,
+                node_var="n",
+            )
+
+        # Group-scoped search — bounded by the Episode-ABOUT traversal, which the
+        # global ANN index can't express (the index ranks OntologyNodes globally,
+        # not via a group's episode edges), so keep the brute-force scan. Cheap
+        # because DISTINCT n is bounded to this group's ABOUT-linked nodes.
+        result = await self._graph.ro_query(
+            f"""
+            MATCH (ep:Episode {{group_id: $group_id}})-[:ABOUT]->(n:OntologyNode)
+            WITH DISTINCT n
+            WITH n,
+                 (2 - vec.cosineDistance(n.embedding, vecf32($query_vec))) / 2 AS score
+            WHERE score >= $min_score
+            RETURN {return_cols}
+            ORDER BY score DESC
+            LIMIT $top_k
+            """,
+            params={
                 "group_id": gid,
                 "query_vec": embedding,
                 "min_score": min_score,
                 "top_k": top_k,
-            }
-        else:
-            match_clause = "MATCH (n:OntologyNode)"
-            params = {
-                "query_vec": embedding,
-                "min_score": min_score,
-                "top_k": top_k,
-            }
-
-        result = await self._graph.ro_query(
-            f"""
-            {match_clause}
-            WITH n,
-                 (2 - vec.cosineDistance(n.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score >= $min_score
-            RETURN
-                n.uuid         AS uuid,
-                n.name         AS name,
-                n.schema_type  AS schema_type,
-                n.display_name AS display_name,
-                n.summary      AS summary,
-                n.source_count AS source_count,
-                n.created_at   AS created_at,
-                n.updated_at   AS updated_at,
-                score{embedding_return}
-            ORDER BY score DESC
-            LIMIT $top_k
-            """,
-            params=params,
+            },
         )
 
         return self._parse_results(result)

@@ -27,7 +27,7 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,18 @@ class CausalClaimStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass
+
+        # Vector (ANN) index — powers search_claims and auto_chain_embedding via
+        # db.idx.vector.queryNodes (replaces the O(n^2) cosine self-join).
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (c:CausalClaim) ON (c.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("CausalClaimStore vector index created on CausalClaim.embedding")
+        except Exception:
+            pass  # Index already exists
+
         logger.debug("CausalClaimStore indexes ensured")
 
     # ------------------------------------------------------------------
@@ -176,20 +188,19 @@ class CausalClaimStore(BaseStore):
         except Exception as e:
             logger.debug("_link_entity %s exact-match failed: %s", edge_type, e)
 
-        # 2. embedding resolution — nearest OntologyNode above threshold
+        # 2. embedding resolution — nearest OntologyNode above threshold (indexed ANN)
         try:
             emb = await self._embed(entity_name)
-            res = await self._graph.ro_query(
-                """
-                MATCH (n:OntologyNode)
-                WHERE n.embedding IS NOT NULL
-                WITH n, (2 - vec.cosineDistance(n.embedding, vecf32($qvec))) / 2 AS s
-                WHERE s >= $thr
-                RETURN n.name AS name ORDER BY s DESC LIMIT 1
-                """,
-                params={"qvec": emb, "thr": self._ENTITY_RESOLVE_THRESHOLD},
+            rows = await self._vector_search(
+                label="OntologyNode",
+                embedding=emb,
+                top_k=1,
+                min_score=self._ENTITY_RESOLVE_THRESHOLD,
+                min_score_op=">=",
+                return_cols="n.name AS name",
+                node_var="n",
+                fallback_on_underdeliver=False,
             )
-            rows = self._parse_results(res)
             if rows:
                 target = rows[0]["name"]
                 await self._graph.query(
@@ -354,8 +365,10 @@ class CausalClaimStore(BaseStore):
 
         Creates CAUSES_EMB edges when the composite embedding of one claim
         is semantically similar to another's, regardless of entity overlap.
-        Processes per-group to avoid O(n²) all-pairs blowup.
+        Processes per-group. For each claim, queries the CausalClaim vector index
+        for its nearest neighbours (indexed ANN) instead of an O(n²) self-join.
         """
+        _K = 100  # over-fetch: top similar claims per claim (literal — FalkorDB req.)
         total = 0
         gid = group_id or self._group_id
         if gid:
@@ -369,28 +382,52 @@ class CausalClaimStore(BaseStore):
             groups = [r[0] for r in (dist.result_set or []) if r[0]]
         for group in groups:
             try:
-                result = await self._graph.query(
-                    """
-                    MATCH (a:CausalClaim), (b:CausalClaim)
-                    WHERE a.group_id = $gid AND b.group_id = $gid
-                      AND a.uuid <> b.uuid
-                      AND a.status <> 'refuted'
-                      AND b.status <> 'refuted'
-                    WITH a, b,
-                         (2 - vec.cosineDistance(a.embedding, b.embedding)) / 2 AS score
-                    WHERE score >= $threshold
-                    MERGE (a)-[r:CAUSES_EMB]->(b)
-                    ON CREATE SET r.provenance = 'embedding', r.score = score, r.created_at = $now
-                    RETURN count(*) AS created
-                    """,
-                    params={"gid": group, "threshold": threshold, "now": time.time()},
+                claims = await self._graph.ro_query(
+                    "MATCH (c:CausalClaim) WHERE c.group_id = $gid AND c.status <> 'refuted' "
+                    "AND c.embedding IS NOT NULL "
+                    "RETURN c.uuid AS uuid, c.embedding AS embedding",
+                    params={"gid": group},
                 )
-                created = result.result_set[0][0] if result.result_set else 0
-                total += created
-                if created:
+                rows = claims.result_set if claims and claims.result_set else []
+                now = time.time()
+                group_created = 0
+                for row in rows:
+                    a_uuid, a_emb = row[0], row[1]
+                    if not a_uuid or a_emb is None:
+                        continue
+                    try:
+                        res = await self._graph.query(
+                            f"CALL db.idx.vector.queryNodes('CausalClaim', 'embedding', {_K}, "
+                            "vecf32($a_emb)) YIELD node AS b, score "
+                            "WITH b, (2 - score)/2 AS sim, $a_uuid AS a_uuid, $now AS now "
+                            "WHERE sim >= $threshold AND b.group_id = $gid "
+                            "AND b.status <> 'refuted' AND b.uuid <> a_uuid "
+                            "MATCH (a:CausalClaim {uuid: a_uuid}) "
+                            "MERGE (a)-[r:CAUSES_EMB]->(b) "
+                            "ON CREATE SET r.provenance = 'embedding', r.score = sim, "
+                            "r.created_at = now "
+                            "RETURN count(*) AS c",
+                            params={
+                                "a_emb": a_emb,
+                                "a_uuid": a_uuid,
+                                "gid": group,
+                                "threshold": threshold,
+                                "now": now,
+                            },
+                        )
+                        if res.result_set:
+                            group_created += res.result_set[0][0] or 0
+                    except Exception as e:
+                        logger.debug(
+                            "auto_chain_embedding ANN failed for %s: %s",
+                            str(a_uuid)[:8],
+                            e,
+                        )
+                total += group_created
+                if group_created:
                     logger.info(
                         "Auto-chained %d CAUSES_EMB edges for group %s (threshold=%.2f)",
-                        created,
+                        group_created,
                         group,
                         threshold,
                     )
@@ -435,30 +472,26 @@ class CausalClaimStore(BaseStore):
         group_id: Optional[str] = None,
         min_score: float = 0.4,
     ) -> List[Dict[str, Any]]:
-        gid = group_id or self._group_id
-        result = await self._graph.ro_query(
-            """
-            MATCH (c:CausalClaim)
-            WHERE c.status <> 'refuted'
-            WITH c,
-                 (2 - vec.cosineDistance(c.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score >= $min_score
-            RETURN c.uuid AS uuid, c.cause_summary AS cause_summary,
-                   c.effect_summary AS effect_summary, c.mechanism AS mechanism,
-                   c.confidence AS confidence, c.certainty AS certainty,
-                   c.evidence_count AS evidence_count,
-                   c.status AS status, c.created_at AS created_at, score
-            ORDER BY score DESC
-            LIMIT $top_k
-            """,
-            params={
-                "group_id": gid,
-                "query_vec": embedding,
-                "min_score": min_score,
-                "top_k": top_k,
-            },
+        # group_id is accepted for API compatibility but (as in the prior
+        # brute-force query) not applied — causal-claim search is intentionally
+        # global, filtered only to non-refuted claims.
+        del group_id
+        return await self._vector_search(
+            label="CausalClaim",
+            embedding=embedding,
+            top_k=top_k,
+            min_score=min_score,
+            min_score_op=">=",
+            where_predicates="c.status <> 'refuted'",
+            return_cols=(
+                "c.uuid AS uuid, c.cause_summary AS cause_summary, "
+                "c.effect_summary AS effect_summary, c.mechanism AS mechanism, "
+                "c.confidence AS confidence, c.certainty AS certainty, "
+                "c.evidence_count AS evidence_count, c.status AS status, "
+                "c.created_at AS created_at, score"
+            ),
+            node_var="c",
         )
-        return self._parse_results(result)
 
     # ------------------------------------------------------------------
     # Read: list claims

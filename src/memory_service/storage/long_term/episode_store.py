@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import (
+    BaseStore,
+    EMBEDDING_DIM,
+    _VECTOR_MIN_K,
+    _VECTOR_OVERFETCH,
+    normalize_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +115,20 @@ class EpisodeStore(BaseStore):
             """)
         except Exception:
             pass
+
+        # Vector (ANN) index — CREATED LAST so the backfill SET queries above finish
+        # before the index build starts (same segfault-race avoidance as KnowledgeStore:
+        # a large concurrent AttributeSet_Update racing the index build in FalkorDB's
+        # bio thread corrupts the heap). Powers _search_with_embedding /
+        # _find_similar_consolidated via db.idx.vector.queryNodes.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (e:Episode) ON (e.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("EpisodeStore vector index created on Episode.embedding")
+        except Exception:
+            pass  # Index already exists (or no embeddings yet → created later)
 
         # Session node index (for hierarchical sessions)
         try:
@@ -501,12 +521,7 @@ class EpisodeStore(BaseStore):
             AND NOT e.content STARTS WITH 'Mission completed with status='
             """
 
-        cypher = f"""
-            MATCH (e:Episode)
-            WHERE {group_filter} {type_filter} {time_filter} {garbage_filter}
-            WITH e, (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
-            WHERE score > $min_score
-            RETURN
+        return_cols = f"""
                 e.uuid AS uuid,
                 e.content AS content,
                 e.episode_type AS episode_type,
@@ -514,15 +529,13 @@ class EpisodeStore(BaseStore):
                 e.created_at AS created_at,
                 e.created_at_iso AS created_at_iso,
                 score,
-                COALESCE(e.activation_count, 0) AS activation_count{embedding_return}
-            ORDER BY score DESC
-            LIMIT $top_k
-        """
+                COALESCE(e.activation_count, 0) AS activation_count{embedding_return}"""
 
+        # Over-fetch for the downstream temporal/Hebbian re-ranking.
         params: Dict[str, Any] = {
             "query_vec": embedding,
             "min_score": min_score,
-            "top_k": top_k * 2,  # Over-fetch for temporal re-ranking
+            "top_k": top_k * 2,
         }
         if not global_search:
             use_scope = self._scope_group_ids and len(self._scope_group_ids) > 1
@@ -537,7 +550,43 @@ class EpisodeStore(BaseStore):
         if before_time is not None:
             params["before_time"] = before_time
 
-        result = await self._graph.ro_query(cypher, params=params)
+        # Primary path: ANN via the Episode vector index (O(log n)). queryNodes
+        # returns the globally nearest episodes; (2 - score)/2 maps the yielded
+        # cosine distance back to [0,1] similarity. Over-fetch knn_k so enough
+        # survive the group/type/time/garbage post-filter.
+        knn_k = max(params["top_k"] * _VECTOR_OVERFETCH, _VECTOR_MIN_K)
+        index_cypher = f"""
+            CALL db.idx.vector.queryNodes('Episode', 'embedding', {int(knn_k)}, vecf32($query_vec))
+            YIELD node AS e, score
+            WITH e, (2 - score) / 2 AS score
+            WHERE {group_filter} {type_filter} {time_filter} {garbage_filter}
+              AND score > $min_score
+            RETURN{return_cols}
+            ORDER BY score DESC
+            LIMIT $top_k
+        """
+
+        # Fallback: group-scoped brute-force cosine scan. The group_id range index
+        # bounds this to the group's episodes, so it stays cheap for small/sparse
+        # groups where the ANN under-delivers after filtering.
+        brute_cypher = f"""
+            MATCH (e:Episode)
+            WHERE {group_filter} {type_filter} {time_filter} {garbage_filter}
+            WITH e, (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
+            WHERE score > $min_score
+            RETURN{return_cols}
+            ORDER BY score DESC
+            LIMIT $top_k
+        """
+
+        try:
+            result = await self._graph.ro_query(index_cypher, params=params)
+            got = len(result.result_set) if result and result.result_set else 0
+            if got < min(top_k, params["top_k"]):
+                result = await self._graph.ro_query(brute_cypher, params=params)
+        except Exception as e:
+            logger.warning("Episode vector index search unavailable (%s); brute-force scan", e)
+            result = await self._graph.ro_query(brute_cypher, params=params)
         rows = self._parse_results(result, json_columns=("metadata",))
 
         # Multi-dimension scoring: semantic + temporal (+ Hebbian if enabled).

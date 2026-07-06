@@ -348,26 +348,30 @@ class REMWorker:
     async def _find_similar_consolidated(
         self, group_id: str, embedding: list, threshold: float
     ) -> dict | None:
-        """Find a consolidated raw episode with cosine similarity >= threshold."""
+        """Find a consolidated raw episode with cosine similarity >= threshold (indexed ANN).
+
+        Runs during REM consolidation, so fallback_on_underdeliver=False — a no-match
+        must not trigger a brute-force scan. The over-fetch window is large enough
+        that any near-duplicate consolidated episode ranks within it.
+        """
         try:
-            result = await self._episode_store._graph.ro_query(
-                """MATCH (e:Episode)
-                WHERE e.group_id = $group_id
-                  AND e.consolidation_status = 'consolidated'
-                  AND e.episode_type = 'raw'
-                WITH e, (2 - vec.cosineDistance(e.embedding, vecf32($query_vec))) / 2 AS score
-                WHERE score >= $threshold
-                RETURN e.uuid AS uuid, score
-                ORDER BY score DESC
-                LIMIT 1""",
-                params={
-                    "group_id": group_id,
-                    "query_vec": embedding,
-                    "threshold": threshold,
-                },
+            rows = await self._episode_store._vector_search(
+                label="Episode",
+                embedding=embedding,
+                top_k=1,
+                min_score=threshold,
+                min_score_op=">=",
+                where_predicates=(
+                    "e.group_id = $group_id AND e.consolidation_status = 'consolidated' "
+                    "AND e.episode_type = 'raw'"
+                ),
+                return_cols="e.uuid AS uuid, score",
+                params={"group_id": group_id},
+                node_var="e",
+                fallback_on_underdeliver=False,
             )
-            if result.result_set:
-                return {"uuid": result.result_set[0][0], "score": result.result_set[0][1]}
+            if rows:
+                return {"uuid": rows[0].get("uuid"), "score": rows[0].get("score")}
         except Exception as e:
             logger.warning("Similarity check failed (non-fatal): %s", e)
         return None
