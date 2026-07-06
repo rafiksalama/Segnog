@@ -12,7 +12,7 @@ port = 9000
 url = "redis://localhost:6381"
 
 [default.falkordb]
-url = "redis://localhost:6380"
+url = "redis://falkordb:6379"
 graph_name = "episode_store"
 
 [default.embeddings]
