@@ -425,21 +425,28 @@ async def fast_coverage_ontology(
 async def create_about_edges_by_similarity(
     group_id: str,
     ontology_store,
-    min_score: float = 0.5,
+    min_score: float = 0.7,
 ) -> int:
     """Create ABOUT edges by embedding cosine similarity (indexed ANN).
 
     For each episode in the group, query the OntologyNode vector index for its
-    nearest ontology nodes above min_score and MERGE ABOUT edges. Replaces a
-    brute-force Episode×OntologyNode cartesian product (≤20 just-consolidated
-    episodes × all OntologyNodes per REM cycle) with per-episode O(log n) ANN.
+    nearest ontology nodes above min_score and MERGE ABOUT edges (storing the
+    similarity score on the edge for later pruning). Replaces a brute-force
+    Episode×OntologyNode cartesian product with per-episode O(log n) ANN.
+
+    The default threshold is 0.7 (raised from 0.5). At 0.5 each episode matched
+    ~80 of ~850 ontology nodes → millions of ABOUT edges → every ABOUT-traversal
+    query (co-occurrence, _query_pending_groups, ontology-network UI) scanned
+    them and timed out at FalkorDB's 5s ceiling. 0.7 yields ~5-10 high-similarity
+    links per episode (~10x fewer edges) without losing the meaningful links.
 
     Embeddings round-trip through Python: fetched as decoded lists via the
     falkordb client, passed back as ``vecf32($ep_emb)`` params (the same pattern
     RemWorker._find_similar_consolidated already relies on).
     """
-    # K must be a literal (some FalkorDB builds reject a parameter here).
-    _K = 200  # over-fetch: capture every OntologyNode above min_score per episode
+    # K must be a literal (some FalkorDB builds reject a parameter here). At the
+    # 0.7 threshold few ontology nodes survive per episode, so 50 is ample.
+    _K = 50
     graph = ontology_store._graph
     try:
         eps = await graph.ro_query(
@@ -465,7 +472,9 @@ async def create_about_edges_by_similarity(
                 "WITH n, (2 - score)/2 AS sim, $ep_uuid AS ep_uuid "
                 "WHERE sim >= $min_score "
                 "MATCH (e:Episode {uuid: ep_uuid}) "
-                "MERGE (e)-[:ABOUT]->(n) "
+                "MERGE (e)-[r:ABOUT]->(n) "
+                "ON CREATE SET r.score = sim "
+                "ON MATCH SET r.score = sim "
                 "RETURN count(*) AS c",
                 params={"ep_emb": ep_emb, "ep_uuid": ep_uuid, "min_score": min_score},
             )
