@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import dspy
 
 from ..llm.dspy_adapter import configure_dspy_lm, adapter
+from ..llm.client import llm_slot
 from ..signatures.relationship_signature import RelationshipExtractionSignature
 
 logger = logging.getLogger(__name__)
@@ -61,11 +62,12 @@ async def extract_relationships(
         lm = configure_dspy_lm(model=model, temperature=0.1)
         predictor = dspy.Predict(RelationshipExtractionSignature)
 
-        with dspy.context(lm=lm, adapter=adapter):
-            result = await predictor.acall(
-                schema_reference=onto.prompt_reference,
-                source_text=content,
-            )
+        async with llm_slot():
+            with dspy.context(lm=lm, adapter=adapter):
+                result = await predictor.acall(
+                    schema_reference=onto.prompt_reference,
+                    source_text=content,
+                )
 
         extraction = result.result
         relationships = []

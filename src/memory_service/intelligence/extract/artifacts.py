@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import dspy
 
 from ..llm.dspy_adapter import configure_dspy_lm, adapter
+from ..llm.client import llm_slot
 from ..signatures.artifact_signature import ArtifactExtractionSignature
 
 logger = logging.getLogger(__name__)
@@ -99,14 +100,15 @@ async def extract_artifacts(
         lm = configure_dspy_lm(model=model, temperature=0.2)
         predictor = dspy.Predict(ArtifactExtractionSignature)
 
-        with dspy.context(lm=lm, adapter=adapter):
-            result = await predictor.acall(
-                mission_task=task,
-                mission_outcome=mission_outcome,
-                execution_trace=execution_trace,
-                plan_execution=plan_execution,
-                full_report=full_report,
-            )
+        async with llm_slot():
+            with dspy.context(lm=lm, adapter=adapter):
+                result = await predictor.acall(
+                    mission_task=task,
+                    mission_outcome=mission_outcome,
+                    execution_trace=execution_trace,
+                    plan_execution=plan_execution,
+                    full_report=full_report,
+                )
 
         extraction = result.extraction
         valid = []

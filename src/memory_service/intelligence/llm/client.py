@@ -8,7 +8,9 @@ Captures LLM reasoning traces (e.g. MiniMax <think> blocks) into a
 per-group buffer for downstream metacognition.
 """
 
+import asyncio
 import logging
+import os
 import re
 from collections import defaultdict
 from typing import Any, List, Dict, Optional
@@ -67,6 +69,33 @@ def get_llm_client() -> AsyncOpenAI:
     return _client
 
 
+# Global semaphore bounding concurrent MiniMax calls across ALL workers (REM
+# sweep, CurationWorker, async ontology stages). Without it, 10× job concurrency
+# saturates MiniMax-M3 → every call slows to ~40s → jobs blow the 60s budget.
+# Bounded concurrency keeps each call fast (~3-5s) so jobs finish <60s.
+_LLM_SEM: Optional[asyncio.Semaphore] = None
+
+
+def _llm_sem() -> asyncio.Semaphore:
+    global _LLM_SEM
+    if _LLM_SEM is None:
+        _LLM_SEM = asyncio.Semaphore(int(os.getenv("LLM_MAX_CONCURRENT", "20")))
+    return _LLM_SEM
+
+
+class llm_slot:
+    """Async context manager acquiring one in-flight LLM slot. Use around any
+    MiniMax call (llm_call uses it internally; DSPy extraction sites wrap their
+    ``predictor.acall`` with ``async with llm_slot():``)."""
+
+    async def __aenter__(self):
+        await _llm_sem().acquire()
+        return None
+
+    async def __aexit__(self, *exc):
+        _llm_sem().release()
+
+
 async def llm_call(
     prompt: str,
     model: Optional[str] = None,
@@ -118,8 +147,6 @@ async def llm_call(
             "reasoning_effort": reasoning_effort,
         }
 
-    import asyncio as _asyncio
-
     # Effort-aware timeout. "low" reasoning is fast (MiniMax-M3 emits a short
     # <think> block) so it gets a tight 30s budget; unset (full reasoning) gets
     # 60s. The old 120s-for-any-reasoning mapping let low-effort extraction calls
@@ -131,10 +158,11 @@ async def llm_call(
         _timeout = 60.0
     else:
         _timeout = 60.0
-    response = await _asyncio.wait_for(
-        client.chat.completions.create(**kwargs),
-        timeout=_timeout,
-    )
+    async with llm_slot():
+        response = await asyncio.wait_for(
+            client.chat.completions.create(**kwargs),
+            timeout=_timeout,
+        )
 
     raw = response.choices[0].message.content or ""
 
