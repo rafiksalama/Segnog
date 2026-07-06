@@ -365,8 +365,10 @@ class CausalClaimStore(BaseStore):
 
         Creates CAUSES_EMB edges when the composite embedding of one claim
         is semantically similar to another's, regardless of entity overlap.
-        Processes per-group to avoid O(n²) all-pairs blowup.
+        Processes per-group. For each claim, queries the CausalClaim vector index
+        for its nearest neighbours (indexed ANN) instead of an O(n²) self-join.
         """
+        _K = 100  # over-fetch: top similar claims per claim (literal — FalkorDB req.)
         total = 0
         gid = group_id or self._group_id
         if gid:
@@ -380,28 +382,52 @@ class CausalClaimStore(BaseStore):
             groups = [r[0] for r in (dist.result_set or []) if r[0]]
         for group in groups:
             try:
-                result = await self._graph.query(
-                    """
-                    MATCH (a:CausalClaim), (b:CausalClaim)
-                    WHERE a.group_id = $gid AND b.group_id = $gid
-                      AND a.uuid <> b.uuid
-                      AND a.status <> 'refuted'
-                      AND b.status <> 'refuted'
-                    WITH a, b,
-                         (2 - vec.cosineDistance(a.embedding, b.embedding)) / 2 AS score
-                    WHERE score >= $threshold
-                    MERGE (a)-[r:CAUSES_EMB]->(b)
-                    ON CREATE SET r.provenance = 'embedding', r.score = score, r.created_at = $now
-                    RETURN count(*) AS created
-                    """,
-                    params={"gid": group, "threshold": threshold, "now": time.time()},
+                claims = await self._graph.ro_query(
+                    "MATCH (c:CausalClaim) WHERE c.group_id = $gid AND c.status <> 'refuted' "
+                    "AND c.embedding IS NOT NULL "
+                    "RETURN c.uuid AS uuid, c.embedding AS embedding",
+                    params={"gid": group},
                 )
-                created = result.result_set[0][0] if result.result_set else 0
-                total += created
-                if created:
+                rows = claims.result_set if claims and claims.result_set else []
+                now = time.time()
+                group_created = 0
+                for row in rows:
+                    a_uuid, a_emb = row[0], row[1]
+                    if not a_uuid or a_emb is None:
+                        continue
+                    try:
+                        res = await self._graph.query(
+                            f"CALL db.idx.vector.queryNodes('CausalClaim', 'embedding', {_K}, "
+                            "vecf32($a_emb)) YIELD node AS b, score "
+                            "WITH b, (2 - score)/2 AS sim, $a_uuid AS a_uuid, $now AS now "
+                            "WHERE sim >= $threshold AND b.group_id = $gid "
+                            "AND b.status <> 'refuted' AND b.uuid <> a_uuid "
+                            "MATCH (a:CausalClaim {uuid: a_uuid}) "
+                            "MERGE (a)-[r:CAUSES_EMB]->(b) "
+                            "ON CREATE SET r.provenance = 'embedding', r.score = sim, "
+                            "r.created_at = now "
+                            "RETURN count(*) AS c",
+                            params={
+                                "a_emb": a_emb,
+                                "a_uuid": a_uuid,
+                                "gid": group,
+                                "threshold": threshold,
+                                "now": now,
+                            },
+                        )
+                        if res.result_set:
+                            group_created += res.result_set[0][0] or 0
+                    except Exception as e:
+                        logger.debug(
+                            "auto_chain_embedding ANN failed for %s: %s",
+                            str(a_uuid)[:8],
+                            e,
+                        )
+                total += group_created
+                if group_created:
                     logger.info(
                         "Auto-chained %d CAUSES_EMB edges for group %s (threshold=%.2f)",
-                        created,
+                        group_created,
                         group,
                         threshold,
                     )
