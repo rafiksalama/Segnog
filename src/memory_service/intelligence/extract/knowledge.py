@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import dspy
 
 from ..llm.dspy_adapter import configure_dspy_lm, adapter
+from ..llm.client import llm_slot
 from ..signatures.knowledge_signature import KnowledgeExtractionSignature
 
 logger = logging.getLogger(__name__)
@@ -157,16 +158,17 @@ async def extract_knowledge(
         predictor = dspy.Predict(KnowledgeExtractionSignature)
 
         try:
-            with dspy.context(lm=lm, adapter=adapter):
-                result = await predictor.acall(
-                    data_source_type=data_source_type,
-                    mission_task=task,
-                    mission_outcome=mission_outcome,
-                    full_report=full_report,
-                    execution_trace=execution_trace,
-                    plan_execution=plan_execution,
-                    reflection=reflection_text,
-                )
+            async with llm_slot():
+                with dspy.context(lm=lm, adapter=adapter):
+                    result = await predictor.acall(
+                        data_source_type=data_source_type,
+                        mission_task=task,
+                        mission_outcome=mission_outcome,
+                        full_report=full_report,
+                        execution_trace=execution_trace,
+                        plan_execution=plan_execution,
+                        reflection=reflection_text,
+                    )
             raw_entries = result.extraction.entries
         except Exception as parse_err:
             # DSPy's JSONAdapter may fail when the LM returns {"entries": [...]}

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import dspy
 
 from ..llm.dspy_adapter import configure_dspy_lm, adapter
+from ..llm.client import llm_slot
 from ..signatures.entity_signature import EntityExtractionSignature
 from ..graph.class_retriever import retrieve_relevant_classes
 
@@ -56,12 +57,13 @@ async def extract_entities(
         lm = configure_dspy_lm(model=model, temperature=0.1)
         predictor = dspy.Predict(EntityExtractionSignature)
 
-        with dspy.context(lm=lm, adapter=adapter):
-            result = await predictor.acall(
-                relevant_classes=relevant_classes,
-                schema_reference=onto.prompt_reference,
-                source_text=content,
-            )
+        async with llm_slot():
+            with dspy.context(lm=lm, adapter=adapter):
+                result = await predictor.acall(
+                    relevant_classes=relevant_classes,
+                    schema_reference=onto.prompt_reference,
+                    source_text=content,
+                )
 
         extraction = result.extraction
         if extraction is None:
