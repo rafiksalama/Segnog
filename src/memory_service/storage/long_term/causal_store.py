@@ -27,7 +27,7 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,18 @@ class CausalClaimStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass
+
+        # Vector (ANN) index — powers search_claims and auto_chain_embedding via
+        # db.idx.vector.queryNodes (replaces the O(n^2) cosine self-join).
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (c:CausalClaim) ON (c.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("CausalClaimStore vector index created on CausalClaim.embedding")
+        except Exception:
+            pass  # Index already exists
+
         logger.debug("CausalClaimStore indexes ensured")
 
     # ------------------------------------------------------------------

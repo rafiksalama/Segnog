@@ -23,7 +23,7 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 from ...ontology.schema_org import SchemaOrgOntology
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,17 @@ class OntologyStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass  # Index may already exist
+
+        # Vector (ANN) index — powers search_nodes (global path) and
+        # create_about_edges_by_similarity via db.idx.vector.queryNodes.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (n:OntologyNode) ON (n.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("OntologyStore vector index created on OntologyNode.embedding")
+        except Exception:
+            pass  # Index already exists
 
         logger.debug("OntologyStore indexes ensured")
 

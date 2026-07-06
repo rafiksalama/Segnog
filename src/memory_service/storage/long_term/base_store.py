@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 
 _EMBED_MAX_RETRIES = 3
 
+# Embedding dimension for the configured model (google/embeddinggemma-300m = 768).
+# Must match the model in settings.toml [embeddings].model. Every vector index is
+# created with this dimension; if the model changes, all vector indexes must be rebuilt.
+EMBEDDING_DIM = 768
+
+# Filtered-ANN over-fetch factors shared by every store's vector search. queryNodes
+# returns the globally nearest nodes; we over-fetch so enough survive the per-query
+# post-filter (group_id / type / status / min_score). See knowledge_store.search_by_vector
+# for the canonical pattern.
+_VECTOR_OVERFETCH = 20
+_VECTOR_MIN_K = 200
+
 
 def normalize_name(name: str) -> str:
     """Normalize a label/name to lowercase, hyphenated form for consistent graph storage."""

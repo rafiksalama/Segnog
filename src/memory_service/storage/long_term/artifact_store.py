@@ -17,7 +17,7 @@ import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,17 @@ class ArtifactStore(BaseStore):
                 await self._graph.query(q)
             except Exception:
                 pass  # Index may already exist
+
+        # Vector (ANN) index — powers search_by_vector via db.idx.vector.queryNodes.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (a:Artifact) ON (a.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("ArtifactStore vector index created on Artifact.embedding")
+        except Exception:
+            pass  # Index already exists
+
         logger.debug("ArtifactStore indexes ensured")
 
     async def store_artifacts(

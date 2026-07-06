@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from .base_store import BaseStore, normalize_name
+from .base_store import BaseStore, EMBEDDING_DIM, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,20 @@ class EpisodeStore(BaseStore):
             """)
         except Exception:
             pass
+
+        # Vector (ANN) index — CREATED LAST so the backfill SET queries above finish
+        # before the index build starts (same segfault-race avoidance as KnowledgeStore:
+        # a large concurrent AttributeSet_Update racing the index build in FalkorDB's
+        # bio thread corrupts the heap). Powers _search_with_embedding /
+        # _find_similar_consolidated via db.idx.vector.queryNodes.
+        try:
+            await self._graph.query(
+                f"CREATE VECTOR INDEX FOR (e:Episode) ON (e.embedding) "
+                f"OPTIONS {{dimension:{EMBEDDING_DIM}, similarityFunction:'cosine'}}"
+            )
+            logger.info("EpisodeStore vector index created on Episode.embedding")
+        except Exception:
+            pass  # Index already exists (or no embeddings yet → created later)
 
         # Session node index (for hierarchical sessions)
         try:
